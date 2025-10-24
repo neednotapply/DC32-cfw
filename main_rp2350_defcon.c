@@ -32,6 +32,47 @@ static uint16_t mIrRxBuf[64];
 static uint8_t mIrRxWritePos, mIrRxBytesUsed, mIrRxHadOverrun;
 static bool mPrevIrdaModeWasTx;
 
+static uint8_t prvScaleLedComponent(uint8_t component, uint8_t brightness)
+{
+	return (uint16_t)component * brightness / 255u;
+}
+
+static void prvApplyLedSettings(const struct Settings *settings)
+{
+	uint_fast8_t ledIdx, colorIdx;
+	bool ledsOff;
+
+	if (!settings)
+		return;
+
+	ledsOff = (settings->ledMode == LedModeAllOff) || !settings->ledGlobalBrightness;
+
+	for (ledIdx = 0; ledIdx < NUM_WS2812s; ledIdx++) {
+		const struct SettingsLedColor *led = &settings->ledColors[ledIdx];
+		const uint8_t components[3] = {led->red, led->green, led->blue};
+
+		for (colorIdx = 0; colorIdx < 3; colorIdx++) {
+			uint8_t value = ledsOff ? 0 : prvScaleLedComponent(components[colorIdx], settings->ledGlobalBrightness);
+			ws2812Set(ledIdx, colorIdx, value);
+		}
+	}
+
+	ws2812refresh();
+}
+
+void defconApplyLedSettings(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+	prvApplyLedSettings(&settings);
+}
+
+void defconApplyLedSettingsFromStruct(const struct Settings *settings)
+{
+	prvApplyLedSettings(settings);
+}
+
 #define ACCEL_I2C_ADDR			0x18
 #define TOUCH_I2C_ADDR			0x48
 #define RTC_I2C_ADDR			0x51
@@ -1725,6 +1766,7 @@ void __attribute__((noreturn, used)) micromain(void)
 
 	pr("ws2812...");
 	ws2812init();
+	defconApplyLedSettings();
 
 	pr("disp...\n");
 	dispInit(desiredFramerate());

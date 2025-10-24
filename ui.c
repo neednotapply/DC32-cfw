@@ -15,6 +15,8 @@
 #include "sd.h"
 #include "gb.h"
 
+extern void defconApplyLedSettingsFromStruct(const struct Settings *settings);
+
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 
@@ -939,6 +941,186 @@ static void uiPrvDrawTruncText(struct Canvas *cnv, int32_t r, int32_t c, uint32_
 	}
 }
 
+static const char *uiPrvLedModeName(uint8_t mode)
+{
+	switch (mode) {
+		case LedModeAllOff:
+			return "OFF";
+		case LedModeManual:
+		default:
+			return "MANUAL";
+	}
+}
+
+static void uiPrvLedColorAdjust(struct Canvas *cnv, struct Settings *settings, uint_fast8_t ledIdx)
+{
+	int_fast8_t selOption = 0;
+	uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1;
+
+	uiPrvReset(cnv, false);
+
+	while (1) {
+		int_fast8_t numOptions = 0;
+		int_fast8_t doneOption, redOption, greenOption, blueOption;
+		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		cnv->foreColor = 11;
+		uiPrintf(cnv, itemHeight, 10, "LED %u COLORS", (unsigned)(ledIdx + 1));
+
+		doneOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BACK", -1);
+
+		redOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "RED:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%3u       ", settings->ledColors[ledIdx].red);
+
+		greenOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "GREEN:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%3u       ", settings->ledColors[ledIdx].green);
+
+		blueOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BLUE:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%3u       ", settings->ledColors[ledIdx].blue);
+
+		selOption = numOptions - 1 - uiPrvMenu(cnv, numOptions - 1 - selOption, numOptions, &button);
+
+		if (button == KEY_BIT_B || selOption == doneOption)
+			return;
+
+		if (selOption == redOption || selOption == greenOption || selOption == blueOption) {
+			uint8_t *component;
+
+			if (selOption == redOption)
+				component = &settings->ledColors[ledIdx].red;
+			else if (selOption == greenOption)
+				component = &settings->ledColors[ledIdx].green;
+			else
+				component = &settings->ledColors[ledIdx].blue;
+
+			if (button == KEY_BIT_LEFT) {
+				if (!*component)
+					continue;
+				(*component)--;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (*component == 0xff)
+					continue;
+				(*component)++;
+			}
+			else {
+				continue;
+			}
+
+			(void)settingsSet(settings);
+			defconApplyLedSettingsFromStruct(settings);
+		}
+	}
+}
+
+static void uiPrvLedColorsMenu(struct Canvas *cnv, struct Settings *settings)
+{
+	int_fast8_t selOption = 0;
+	uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1;
+
+	uiPrvReset(cnv, false);
+
+	while (1) {
+		int_fast8_t numOptions = 0;
+		int_fast8_t doneOption, modeOption, brightnessOption;
+		int_fast8_t firstLedOption;
+		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		uint_fast8_t i;
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, itemHeight, 10, "LED SETTINGS", -1);
+
+		doneOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BACK", -1);
+
+		modeOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "MODE:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%-8s", uiPrvLedModeName(settings->ledMode));
+
+		brightnessOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BRIGHTNESS:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%3u       ", settings->ledGlobalBrightness);
+
+		firstLedOption = numOptions;
+		for (i = 0; i < NUM_WS2812s; i++) {
+			const struct SettingsLedColor *led = &settings->ledColors[i];
+
+			numOptions++;
+			cnv->foreColor = 11;
+			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 10, "LED %u:", (unsigned)(i + 1));
+			cnv->foreColor = 15;
+			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "R:%3u G:%3u B:%3u   ", led->red, led->green, led->blue);
+		}
+
+		selOption = numOptions - 1 - uiPrvMenu(cnv, numOptions - 1 - selOption, numOptions, &button);
+
+		if (button == KEY_BIT_B || selOption == doneOption)
+			return;
+
+		if (selOption == modeOption) {
+			uint8_t previous = settings->ledMode;
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings->ledMode == 0)
+					settings->ledMode = LedModeCount - 1;
+				else
+					settings->ledMode--;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				settings->ledMode = (settings->ledMode + 1) % LedModeCount;
+			}
+			else {
+				continue;
+			}
+
+			if (settings->ledMode == previous)
+				continue;
+
+			(void)settingsSet(settings);
+			defconApplyLedSettingsFromStruct(settings);
+		}
+		else if (selOption == brightnessOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (!settings->ledGlobalBrightness)
+					continue;
+				settings->ledGlobalBrightness--;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (settings->ledGlobalBrightness == 0xff)
+					continue;
+				settings->ledGlobalBrightness++;
+			}
+			else {
+				continue;
+			}
+
+			(void)settingsSet(settings);
+			defconApplyLedSettingsFromStruct(settings);
+		}
+		else if (selOption >= firstLedOption) {
+			uiPrvLedColorAdjust(cnv, settings, selOption - firstLedOption);
+			uiPrvReset(cnv, false);
+		}
+	}
+}
+
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
@@ -953,7 +1135,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	
 	while (1) {
 		
-		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption;
+		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, ledOption = -1;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speeds[][8] = DISP_SPEED_NAMES;
 		
@@ -994,6 +1176,12 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 		cnv->foreColor = 15;
 		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.brightness);
 	#endif
+
+		ledOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED COLORS:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%-6s B:%3u   ", uiPrvLedModeName(settings.ledMode), settings.ledGlobalBrightness);
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
 		if (button == KEY_BIT_B || selOption == doneOption){
@@ -1052,6 +1240,12 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			}
 				
 			dispSetContrast(settings.contrast);
+		}
+
+		if (selOption == ledOption) {
+			uiPrvLedColorsMenu(cnv, &settings);
+			uiPrvReset(cnv, false);
+			continue;
 		}
 
 		if (selOption == brightnessOption) {

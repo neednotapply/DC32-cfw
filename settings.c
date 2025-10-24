@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			5
+#define SETTINGS_CUR_VER			6
 
 
 union SettingsPage {
@@ -39,7 +39,7 @@ static bool settingsPrvIsFirstPageInBlock(const union SettingsPage* sp)
 static const union SettingsPage* settingsLocate(void)
 {
 	const union SettingsPage *sp, *best = NULL;
-	
+
 	if (sizeof(union SettingsPage) != QSPI_WRITE_GRANULARITY)
 		return NULL;
 	
@@ -59,6 +59,10 @@ void settingsGet(struct Settings *settings)
 {
 	const union SettingsPage* sp = settingsLocate();
 	uint32_t curVer;
+	uint_fast8_t i;
+
+	memset(settings, 0, sizeof(*settings));
+
 	
 	if (sp) {
 		
@@ -92,8 +96,21 @@ void settingsGet(struct Settings *settings)
 			settings->speed = 1;	//yes, reset user preference
 			//fallthrough
 
+		case 5:				//upgrade from v5
+			settings->ledMode = LedModeManual;
+			settings->ledGlobalBrightness = 255;
+			for (i = 0; i < NUM_WS2812s; i++) {
+				settings->ledColors[i].red = 0;
+				settings->ledColors[i].green = 0;
+				settings->ledColors[i].blue = 0;
+			}
+			//fallthrough
+
 		//other cases here, in increasing order
 	}
+
+	if (settings->ledMode >= LedModeCount)
+		settings->ledMode = LedModeManual;
 }
 
 bool settingsSet(const struct Settings *settings)

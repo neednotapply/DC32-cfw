@@ -4,6 +4,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+enum orientation {
+	OrientationUpright = 0,
+	OrientationInverted,
+	OrientationCount,
+};
+
 //these dimensions are unrotateable - they are hardware dimensions
 
 #define HARDWARE_WIDTH		240	//hardware
@@ -34,6 +40,7 @@ void dispPrvFrameCtrWait(void);
 
 void dispSetBrightness(uint_fast8_t val);
 void dispSetContrast(uint_fast8_t val);
+void dispSetOrientation(enum orientation orientation);
 
 //frame
 extern const uint8_t lcdFrame[];

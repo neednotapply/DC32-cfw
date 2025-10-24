@@ -29,6 +29,7 @@ static uint32_t mFbStartAddr = (uintptr_t)mFb;
 static uint64_t mPerFrameSpace, mNextFrame;
 static uint8_t mSm0start, mBri = 15;
 static bool mDispOn;
+static enum orientation mCurOrientation = OrientationCount;
 
 
 
@@ -68,6 +69,21 @@ static void lcdSetRegion(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_
 {
 	lcdCmd(0x2a, true, (x + xo) >> 8, (x + xo) & 0xff, (x + xo + w - 1) >> 8, (x + xo + w - 1) & 0xff, -1);
 	lcdCmd(0x2b, true, (y + yo) >> 8, (y + yo) & 0xff, (y + yo + h - 1) >> 8, (y + yo + h - 1) & 0xff, -1);
+}
+
+void dispSetOrientation(enum orientation orientation)
+{
+	static const uint8_t madctlVals[OrientationCount] = {0x00, 0xc0};
+
+	if ((unsigned)orientation >= OrientationCount)
+		orientation = OrientationUpright;
+
+	if ((unsigned)mCurOrientation >= OrientationCount || mCurOrientation != orientation) {
+		lcdCmd(0x36, true, madctlVals[orientation], -1);
+		mCurOrientation = orientation;
+}
+
+	lcdSetRegion((HARDWARE_WIDTH - DISP_WIDTH) / 2, (HARDWARE_HEIGHT - DISP_HEIGHT) / 2, DISP_WIDTH, DISP_HEIGHT, 0, 0);
 }
 
 static void lcdDelayMs(uint32_t msec)
@@ -195,7 +211,7 @@ bool dispInit(uint32_t desiredFramerate)
 	lcdDelayMs(10);
 	
 	
-	lcdCmd(0x36, true, 0x00, -1);
+	dispSetOrientation(OrientationUpright);
 	lcdSetRegion(0, 0, HARDWARE_WIDTH, HARDWARE_HEIGHT, 0, 0);
 
 	lcdCmd(0x20, true, -1);
@@ -228,7 +244,7 @@ bool dispInit(uint32_t desiredFramerate)
 
 	pr("inited display at %u fps\n", desiredFramerate);
 
-	lcdSetRegion((HARDWARE_WIDTH - DISP_WIDTH) / 2, (HARDWARE_HEIGHT - DISP_HEIGHT) / 2, DISP_WIDTH, DISP_HEIGHT, 0, 0);
+	dispSetOrientation(OrientationUpright);
 
 	return dispPrvTurnOn(true);
 }

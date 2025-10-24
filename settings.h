@@ -18,6 +18,13 @@ enum LedMode {
 	LedModeCount,
 };
 
+enum RotationMode {
+	RotationModeUpright = 0,
+	RotationModeInverted = 1,
+	RotationModeAuto = 2,
+	RotationModeCount,
+};
+
 struct Settings {
 	uint8_t actLikeGBC	:	1;
 	uint8_t speed		:	2;
@@ -27,6 +34,7 @@ struct Settings {
 	uint8_t brightness	:	5;
 	uint8_t ledMode	:	2;
 
+	uint8_t rotationMode;
 	uint8_t ledGlobalBrightness;
 	struct SettingsLedColor ledColors[NUM_WS2812s];
 };

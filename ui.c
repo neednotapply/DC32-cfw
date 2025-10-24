@@ -16,6 +16,7 @@
 #include "gb.h"
 
 extern void defconApplyLedSettingsFromStruct(const struct Settings *settings);
+extern void defconOrientationApplySettings(const struct Settings *settings);
 
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
@@ -1126,16 +1127,24 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	bool restartCurGame = false;
 	int_fast8_t selOption = 0;
 	struct Settings settings;
+	static const char rotationNames[][10] = {
+		"UPRIGHT ",
+		"INVERTED",
+		"AUTO    ",
+	};
 	uint_fast8_t itemHeight;
 	
 	settingsGet(&settings);
+	
+	if (settings.rotationMode >= RotationModeCount)
+		settings.rotationMode = RotationModeAuto;
 	
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 	
 	while (1) {
 		
-		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, ledOption = -1;
+		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, rotationOption, upscaleOption, ledOption = -1;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speeds[][8] = DISP_SPEED_NAMES;
 		
@@ -1176,6 +1185,12 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 		cnv->foreColor = 15;
 		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.brightness);
 	#endif
+
+		rotationOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "ROTATION:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, rotationNames[settings.rotationMode], sizeof(rotationNames[0]));
 
 		ledOption = numOptions++;
 		cnv->foreColor = 11;
@@ -1240,6 +1255,25 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			}
 				
 			dispSetContrast(settings.contrast);
+		}
+
+		if (selOption == rotationOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings.rotationMode)
+					settings.rotationMode--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (settings.rotationMode + 1 < RotationModeCount)
+					settings.rotationMode++;
+				else
+					continue;
+			}
+
+			defconOrientationApplySettings(&settings);
+			continue;
 		}
 
 		if (selOption == ledOption) {

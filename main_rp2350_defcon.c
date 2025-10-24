@@ -77,6 +77,128 @@ void defconApplyLedSettingsFromStruct(const struct Settings *settings)
 #define TOUCH_I2C_ADDR			0x48
 #define RTC_I2C_ADDR			0x51
 
+#define ORIENTATION_SAMPLE_INTERVAL_TICKS	(TICKS_PER_SECOND / 10)
+#define ORIENTATION_REQUIRED_SAMPLES		3
+#define ORIENTATION_GRAVITY_THRESHOLD		2048
+
+struct OrientationManager {
+	enum RotationMode mode;
+	enum orientation currentOrientation;
+	enum orientation pendingOrientation;
+	uint8_t stableCount;
+	uint64_t nextSample;
+};
+
+static struct OrientationManager mOrientation = {
+	.mode = RotationModeAuto,
+	.currentOrientation = OrientationCount,
+	.pendingOrientation = OrientationCount,
+	.stableCount = 0,
+	.nextSample = 0,
+};
+
+static void defconOrientationSet(enum orientation orientation)
+{
+	if ((unsigned)orientation >= OrientationCount)
+		return;
+
+	dispSetOrientation(orientation);
+	mOrientation.currentOrientation = orientation;
+}
+
+static bool defconOrientationSample(enum orientation *orientationP)
+{
+	uint8_t raw[6];
+
+	if (!orientationP)
+		return false;
+
+	if (!i2cRegRead(ACCEL_I2C_ADDR, 0xa8, raw, 6))
+		return false;
+
+	int16_t accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
+
+	if (accelY < -ORIENTATION_GRAVITY_THRESHOLD) {
+		*orientationP = OrientationUpright;
+		return true;
+	}
+
+	if (accelY > ORIENTATION_GRAVITY_THRESHOLD) {
+		*orientationP = OrientationInverted;
+		return true;
+	}
+
+	return false;
+}
+
+void defconOrientationApplySettings(const struct Settings *settings)
+{
+	enum RotationMode mode = settings ? settings->rotationMode : RotationModeAuto;
+
+	if (mode >= RotationModeCount)
+		mode = RotationModeAuto;
+
+	mOrientation.mode = mode;
+	mOrientation.pendingOrientation = OrientationCount;
+	mOrientation.stableCount = 0;
+
+	if (mode == RotationModeUpright) {
+		defconOrientationSet(OrientationUpright);
+	}
+	else if (mode == RotationModeInverted) {
+		defconOrientationSet(OrientationInverted);
+	}
+}
+
+void defconOrientationTick(void)
+{
+	enum orientation orientation;
+	uint64_t now;
+
+	if (mOrientation.mode != RotationModeAuto)
+		return;
+
+	now = getTime();
+	if (now < mOrientation.nextSample)
+		return;
+
+	mOrientation.nextSample = now + ORIENTATION_SAMPLE_INTERVAL_TICKS;
+
+	if (!defconOrientationSample(&orientation))
+		return;
+
+	if (orientation != mOrientation.pendingOrientation) {
+		mOrientation.pendingOrientation = orientation;
+		mOrientation.stableCount = 1;
+	}
+	else if (mOrientation.stableCount < ORIENTATION_REQUIRED_SAMPLES) {
+		mOrientation.stableCount++;
+	}
+
+	if (mOrientation.pendingOrientation != OrientationCount &&
+	    mOrientation.pendingOrientation != mOrientation.currentOrientation &&
+	    mOrientation.stableCount >= ORIENTATION_REQUIRED_SAMPLES) {
+		defconOrientationSet(mOrientation.pendingOrientation);
+	}
+}
+
+void defconOrientationInit(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+	defconOrientationApplySettings(&settings);
+
+	mOrientation.nextSample = getTime();
+
+	if (mOrientation.mode == RotationModeAuto) {
+		mOrientation.currentOrientation = OrientationCount;
+		mOrientation.pendingOrientation = OrientationCount;
+		mOrientation.stableCount = 0;
+		defconOrientationTick();
+	}
+}
+
 
 
 
@@ -224,8 +346,11 @@ uint_fast8_t uiGetKeys(void)
 	uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
 	while(1) {
+		defconOrientationTick();
 		val = sio_hw->gpio_in & ourKeysMask;
-		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++);
+		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+			defconOrientationTick();
+		}
 		if (count == countUntil)
 			return prvKeysMap(val);
 	}
@@ -244,6 +369,7 @@ static void exitGame(void)
 
 uint8_t gbExtGetKeys(void)	//arrow keys, f1=a, f2=b, f3=start, f4=select
 {
+	defconOrientationTick();
 	uint32_t sta = sio_hw->gpio_in;
 	
 	if (!(sta & (1 << PIN_BTN_CENTER))) {
@@ -1778,6 +1904,7 @@ void __attribute__((noreturn, used)) micromain(void)
 	pr("i2c...\n");
 	i2cInit();
 	i2cAccelConfigure();
+	defconOrientationInit();
 
 	pr("RTC...\n");
 	rtcInit();

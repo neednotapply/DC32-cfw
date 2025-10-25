@@ -944,13 +944,14 @@ static void uiPrvDrawTruncText(struct Canvas *cnv, int32_t r, int32_t c, uint32_
 
 static const char *uiPrvLedModeName(uint8_t mode)
 {
-	switch (mode) {
-		case LedModeAllOff:
-			return "OFF";
-		case LedModeManual:
-		default:
-			return "MANUAL";
-	}
+        switch (mode) {
+                case LedModeManual:
+                        return "ON";
+                case LedModeAllOff:
+                        return "OFF";
+                default:
+                        return "ON";
+        }
 }
 
 static void uiPrvLedColorAdjust(struct Canvas *cnv, struct Settings *settings, uint_fast8_t ledIdx)
@@ -1049,8 +1050,22 @@ static void uiPrvLedColorsMenu(struct Canvas *cnv, struct Settings *settings)
 		modeOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "MODE:", -1);
-		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%-8s", uiPrvLedModeName(settings->ledMode));
+                cnv->foreColor = 15;
+                {
+                        const char *modeName = uiPrvLedModeName(settings->ledMode);
+                        char modeBuf[9];
+                        size_t len = strlen(modeName);
+
+                        if (len > sizeof(modeBuf) - 1)
+                                len = sizeof(modeBuf) - 1;
+
+                        memcpy(modeBuf, modeName, len);
+                        while (len < sizeof(modeBuf) - 1)
+                                modeBuf[len++] = ' ';
+                        modeBuf[len] = '\0';
+
+                        uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, modeBuf, -1);
+                }
 
 		brightnessOption = numOptions++;
 		cnv->foreColor = 11;

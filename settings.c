@@ -117,7 +117,8 @@ void settingsGet(struct Settings *settings)
 	if (settings->ledMode >= LedModeCount)
 		settings->ledMode = LedModeManual;
 
-	if (settings->rotationMode < RotationModeGame || settings->rotationMode > RotationModeBadge)
+	if (settings->rotationMode != RotationModeGame &&
+	    settings->rotationMode != RotationModeBadge)
 		settings->rotationMode = RotationModeGame;
 }
 

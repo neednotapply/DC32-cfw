@@ -151,7 +151,7 @@ void defconOrientationApplySettings(const struct Settings *settings)
 {
 	enum RotationMode mode = settings ? settings->rotationMode : RotationModeGame;
 
-	if (mode < RotationModeGame || mode > RotationModeBadge)
+	if (mode != RotationModeGame && mode != RotationModeBadge)
 		mode = RotationModeGame;
 
 	mOrientation.mode = mode;

@@ -16,29 +16,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            cargo \
-            cmake \
             gcc-arm-none-eabi \
-            libnewlib-arm-none-eabi \
-            libudev-dev \
-            pkg-config
-
-      - name: Install elf2uf2 converter
-        run: |
-          cargo install --locked elf2uf2-rs
-          ln -sf "$HOME/.cargo/bin/elf2uf2-rs" "$HOME/.cargo/bin/elf2uf2"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            libnewlib-arm-none-eabi
 
       - name: Build firmware
         run: make app
-
-      - name: Convert ELF to UF2
-        run: elf2uf2 uGB uGB.uf2
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: |
-            uGB.bin
-            uGB.uf2
+          path: uGB.bin

@@ -11,18 +11,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install ARM GCC toolchain
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi
+
+      - name: Build elf2uf2 converter
+        run: |
+          git clone --depth 1 https://github.com/raspberrypi/pico-sdk.git "$HOME/pico-sdk"
+          cmake -S "$HOME/pico-sdk/tools/elf2uf2" -B "$HOME/elf2uf2-build"
+          cmake --build "$HOME/elf2uf2-build"
+          echo "$HOME/elf2uf2-build" >> "$GITHUB_PATH"
 
       - name: Build firmware
         run: make app
 
       - name: Convert ELF to UF2
-        run: |
-          sudo apt-get install -y elf2uf2
-          elf2uf2 uGB uGB.uf2
+        run: elf2uf2 uGB uGB.uf2
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4

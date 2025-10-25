@@ -19,10 +19,10 @@ enum LedMode {
 };
 
 enum RotationMode {
-	RotationModeUpright = 0,
-	RotationModeInverted = 1,
-	RotationModeAuto = 2,
-	RotationModeCount,
+        RotationModeGame = 0,          // manual upright orientation for gameplay
+        RotationModeBadge = 1,         // manual inverted orientation for badge wear
+        RotationModeAuto = 2,
+        RotationModeCount,
 };
 
 struct Settings {

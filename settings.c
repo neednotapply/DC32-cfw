@@ -107,7 +107,8 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 6:				//upgrade from v6
-			settings->rotationMode = RotationModeGame;
+			if (curVer < 6)
+				settings->rotationMode = RotationModeGame;
 			//fallthrough
 
 		//other cases here, in increasing order

@@ -19,7 +19,9 @@ jobs:
             cargo \
             cmake \
             gcc-arm-none-eabi \
-            libnewlib-arm-none-eabi
+            libnewlib-arm-none-eabi \
+            libudev-dev \
+            pkg-config
 
       - name: Install elf2uf2 converter
         run: |

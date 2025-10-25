@@ -49,7 +49,7 @@ static void prvApplyLedSettings(const struct Settings *settings)
 
 	for (ledIdx = 0; ledIdx < NUM_WS2812s; ledIdx++) {
 		const struct SettingsLedColor *led = &settings->ledColors[ledIdx];
-		const uint8_t components[3] = {led->red, led->green, led->blue};
+const uint8_t components[3] = {led->green, led->red, led->blue};
 
 		for (colorIdx = 0; colorIdx < 3; colorIdx++) {
 			uint8_t value = ledsOff ? 0 : prvScaleLedComponent(components[colorIdx], settings->ledGlobalBrightness);

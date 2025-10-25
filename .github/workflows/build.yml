@@ -16,16 +16,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            cargo \
             cmake \
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi
 
-      - name: Build elf2uf2 converter
+      - name: Install elf2uf2 converter
         run: |
-          git clone --depth 1 https://github.com/raspberrypi/pico-sdk-tools.git "$HOME/pico-sdk-tools"
-          cmake -S "$HOME/pico-sdk-tools/elf2uf2" -B "$HOME/elf2uf2-build"
-          cmake --build "$HOME/elf2uf2-build"
-          echo "$HOME/elf2uf2-build" >> "$GITHUB_PATH"
+          cargo install --locked elf2uf2-rs
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build firmware
         run: make app

@@ -109,8 +109,8 @@ static void defconOrientationSet(enum orientation orientation)
 static bool defconOrientationSample(enum orientation *orientationP)
 {
         uint8_t raw[6];
-        int16_t accelX, accelY, dominantAccel;
-        int32_t absX, absY, dominantAbs;
+    int16_t accelY;
+    int32_t absY;
 
         if (!orientationP)
                 return false;
@@ -118,25 +118,21 @@ static bool defconOrientationSample(enum orientation *orientationP)
         if (!i2cRegRead(ACCEL_I2C_ADDR, 0xa8, raw, 6))
                 return false;
 
-        accelX = (int16_t)__builtin_bswap16(*(uint16_t*)raw);
-        accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
+    accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
 
-        absX = (accelX < 0) ? -(int32_t)accelX : (int32_t)accelX;
-        absY = (accelY < 0) ? -(int32_t)accelY : (int32_t)accelY;
+    absY = (accelY < 0) ? -(int32_t)accelY : (int32_t)accelY;
 
-        if (absY >= absX) {
-                dominantAccel = accelY;
-                dominantAbs = absY;
-        }
-        else {
-                dominantAccel = accelX;
-                dominantAbs = absX;
-        }
+    /*
+     * Only treat the Y axis as authoritative so the badge never attempts a
+     * 90-degree rotation when worn sideways.  Negative gravity corresponds to
+     * the screen-up "game" orientation while positive gravity maps to the
+     * inverted "badge" orientation.
+     */
 
-        if (dominantAbs >= ORIENTATION_GRAVITY_THRESHOLD) {
-                *orientationP = (dominantAccel < 0) ? OrientationUpright : OrientationInverted;
-                return true;
-        }
+    if (absY >= ORIENTATION_GRAVITY_THRESHOLD) {
+            *orientationP = (accelY < 0) ? OrientationUpright : OrientationInverted;
+            return true;
+    }
 
         if (mOrientation.currentOrientation < OrientationCount) {
                 *orientationP = mOrientation.currentOrientation;

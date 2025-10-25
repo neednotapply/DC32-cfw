@@ -3,6 +3,7 @@
 #include "pioI2C.h"
 #include "printf.h"
 #include "2350.h"
+#include "timebase.h"
 
 
 #define PIO_Nth2(x)							pio ## x ## _hw
@@ -41,6 +42,36 @@ static I2CtransactionOverCbkF mTransactOverCbkF;
 static const struct I2Creq *mCurI2cReq;
 static volatile bool mExtI2cBusy;
 static void *mTransactOverCbkD;
+static void i2cSmInit(void);
+
+#define I2C_TRANSACTION_TIMEOUT_TICKS            (TICKS_PER_SECOND / 5)
+
+static void i2cPrvAbortTransaction(void)
+{
+        pr("i2c: transaction timeout, resetting bus\n");
+
+        mCurI2cReq = NULL;
+        mTransactOverCbkF = NULL;
+        mExtI2cBusy = false;
+
+        i2cSmInit();
+}
+
+static bool i2cPrvWaitForCompletion(volatile bool results[2])
+{
+        uint64_t timeout = getTime() + I2C_TRANSACTION_TIMEOUT_TICKS;
+
+        while (!results[0]) {
+                if (getTime() >= timeout) {
+                        i2cPrvAbortTransaction();
+                        return false;
+                }
+
+                asm volatile("":::"memory");
+        }
+
+        return results[1];
+}
 
 
 #define VERBOSE									0
@@ -402,10 +433,7 @@ bool i2cSimpleWrite(uint_fast8_t sevenBitAddr, const uint8_t *vals, uint32_t num
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
-		asm volatile("":::"memory");		//data changed
-	
-	return results[1];
+	return i2cPrvWaitForCompletion(results);
 }
 
 bool i2cSimpleRead(uint_fast8_t sevenBitAddr, uint8_t *vals, uint32_t numBytes)
@@ -426,10 +454,7 @@ bool i2cSimpleRead(uint_fast8_t sevenBitAddr, uint8_t *vals, uint32_t numBytes)
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
-		asm volatile("":::"memory");		//data changed
-	
-	return results[1];
+	return i2cPrvWaitForCompletion(results);
 }
 
 bool i2cRegRead(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t *vals, uint32_t numBytes)
@@ -445,15 +470,12 @@ bool i2cRegRead(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t *vals, uint32_t 
 		.rxAcks = NULL,
 		.rxLen = numBytes,
 	};
-	bool results[2] = {false};	//{done, success}
+	volatile bool results[2] = {false};	//{done, success}
 	
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
-		asm volatile("":::"memory");		//data changed
-	
-	return results[1];
+	return i2cPrvWaitForCompletion(results);
 }
 
 bool i2cOneByteRegWrite(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t val)

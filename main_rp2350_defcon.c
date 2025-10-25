@@ -90,7 +90,7 @@ struct OrientationManager {
 };
 
 static struct OrientationManager mOrientation = {
-	.mode = RotationModeAuto,
+	.mode = RotationModeGame,
 	.currentOrientation = OrientationCount,
 	.pendingOrientation = OrientationCount,
 	.stableCount = 0,
@@ -149,10 +149,10 @@ static bool defconOrientationSample(enum orientation *orientationP)
 
 void defconOrientationApplySettings(const struct Settings *settings)
 {
-	enum RotationMode mode = settings ? settings->rotationMode : RotationModeAuto;
+	enum RotationMode mode = settings ? settings->rotationMode : RotationModeGame;
 
-	if (mode >= RotationModeCount)
-		mode = RotationModeAuto;
+	if (mode != RotationModeGame && mode != RotationModeBadge)
+		mode = RotationModeGame;
 
 	mOrientation.mode = mode;
 	mOrientation.pendingOrientation = OrientationCount;
@@ -206,13 +206,6 @@ void defconOrientationInit(void)
 	defconOrientationApplySettings(&settings);
 
 	mOrientation.nextSample = getTime();
-
-	if (mOrientation.mode == RotationModeAuto) {
-		mOrientation.currentOrientation = OrientationCount;
-		mOrientation.pendingOrientation = OrientationCount;
-		mOrientation.stableCount = 0;
-		defconOrientationTick();
-	}
 }
 
 

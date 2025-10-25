@@ -108,27 +108,47 @@ static void defconOrientationSet(enum orientation orientation)
 
 static bool defconOrientationSample(enum orientation *orientationP)
 {
-	uint8_t raw[6];
+        uint8_t raw[6];
+        int16_t accelX, accelY, dominantAccel;
+        int32_t absX, absY, dominantAbs;
 
-	if (!orientationP)
-		return false;
+        if (!orientationP)
+                return false;
 
-	if (!i2cRegRead(ACCEL_I2C_ADDR, 0xa8, raw, 6))
-		return false;
+        if (!i2cRegRead(ACCEL_I2C_ADDR, 0xa8, raw, 6))
+                return false;
 
-	int16_t accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
+        accelX = (int16_t)__builtin_bswap16(*(uint16_t*)raw);
+        accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
 
-	if (accelY < -ORIENTATION_GRAVITY_THRESHOLD) {
-		*orientationP = OrientationUpright;
-		return true;
-	}
+        absX = (accelX < 0) ? -(int32_t)accelX : (int32_t)accelX;
+        absY = (accelY < 0) ? -(int32_t)accelY : (int32_t)accelY;
 
-	if (accelY > ORIENTATION_GRAVITY_THRESHOLD) {
-		*orientationP = OrientationInverted;
-		return true;
-	}
+        if (absY >= absX) {
+                dominantAccel = accelY;
+                dominantAbs = absY;
+        }
+        else {
+                dominantAccel = accelX;
+                dominantAbs = absX;
+        }
 
-	return false;
+        if (dominantAbs >= ORIENTATION_GRAVITY_THRESHOLD) {
+                *orientationP = (dominantAccel < 0) ? OrientationUpright : OrientationInverted;
+                return true;
+        }
+
+        if (mOrientation.currentOrientation < OrientationCount) {
+                *orientationP = mOrientation.currentOrientation;
+                return true;
+        }
+
+        if (mOrientation.pendingOrientation < OrientationCount) {
+                *orientationP = mOrientation.pendingOrientation;
+                return true;
+        }
+
+        return false;
 }
 
 void defconOrientationApplySettings(const struct Settings *settings)

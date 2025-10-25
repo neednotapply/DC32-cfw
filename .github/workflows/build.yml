@@ -17,4 +17,17 @@ jobs:
           sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Build firmware
-        run: make
+        run: make app
+
+      - name: Convert ELF to UF2
+        run: |
+          sudo apt-get install -y elf2uf2
+          elf2uf2 uGB uGB.uf2
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            uGB.bin
+            uGB.uf2

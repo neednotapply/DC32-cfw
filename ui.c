@@ -1127,10 +1127,10 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	bool restartCurGame = false;
 	int_fast8_t selOption = 0;
 	struct Settings settings;
-	static const char rotationNames[][10] = {
-		"UPRIGHT ",
-		"INVERTED",
-		"AUTO    ",
+        static const char rotationNames[][10] = {
+                "GAME    ",
+                "BADGE   ",
+                "AUTO    ",
 	};
 	uint_fast8_t itemHeight;
 	
@@ -1257,24 +1257,18 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			dispSetContrast(settings.contrast);
 		}
 
-		if (selOption == rotationOption) {
+                if (selOption == rotationOption) {
 
-			if (button == KEY_BIT_LEFT) {
-				if (settings.rotationMode)
-					settings.rotationMode--;
-				else
-					continue;
-			}
-			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings.rotationMode + 1 < RotationModeCount)
-					settings.rotationMode++;
-				else
-					continue;
-			}
+                        if (button == KEY_BIT_LEFT) {
+                                settings.rotationMode = (settings.rotationMode + RotationModeCount - 1) % RotationModeCount;
+                        }
+                        else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+                                settings.rotationMode = (settings.rotationMode + 1) % RotationModeCount;
+                        }
 
-			defconOrientationApplySettings(&settings);
-			continue;
-		}
+                        defconOrientationApplySettings(&settings);
+                        continue;
+                }
 
 		if (selOption == ledOption) {
 			uiPrvLedColorsMenu(cnv, &settings);

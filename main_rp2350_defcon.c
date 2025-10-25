@@ -142,12 +142,12 @@ void defconOrientationApplySettings(const struct Settings *settings)
 	mOrientation.pendingOrientation = OrientationCount;
 	mOrientation.stableCount = 0;
 
-	if (mode == RotationModeUpright) {
-		defconOrientationSet(OrientationUpright);
-	}
-	else if (mode == RotationModeInverted) {
-		defconOrientationSet(OrientationInverted);
-	}
+        if (mode == RotationModeGame) {
+                defconOrientationSet(OrientationUpright);
+        }
+        else if (mode == RotationModeBadge) {
+                defconOrientationSet(OrientationInverted);
+        }
 }
 
 void defconOrientationTick(void)

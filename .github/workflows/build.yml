@@ -26,6 +26,7 @@ jobs:
       - name: Install elf2uf2 converter
         run: |
           cargo install --locked elf2uf2-rs
+          ln -sf "$HOME/.cargo/bin/elf2uf2-rs" "$HOME/.cargo/bin/elf2uf2"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build firmware

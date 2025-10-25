@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include <string.h>
+#include <stdint.h>
 #include "gbCartHeader.h"
 #include "settings.h"
 #include "memMap.h"
@@ -1026,115 +1027,217 @@ static void uiPrvLedColorAdjust(struct Canvas *cnv, struct Settings *settings, u
 	}
 }
 
+static bool uiPrvLedMenuOptionRow(int_fast8_t option, int_fast8_t firstLedOption, uint_fast8_t itemHeight,
+        uint_fast16_t listTop, uint_fast16_t bottomStart, uint_fast8_t topLedIndex, uint_fast8_t ledItemsOnscreen, int32_t *rowOut)
+{
+        if (option < firstLedOption) {
+                *rowOut = bottomStart + (firstLedOption - 1 - option) * itemHeight;
+                return true;
+        }
+
+        uint_fast8_t ledIndex = option - firstLedOption;
+
+        if (ledIndex < topLedIndex || ledIndex >= topLedIndex + ledItemsOnscreen)
+                return false;
+
+        *rowOut = listTop + (ledIndex - topLedIndex) * itemHeight;
+        return true;
+}
+
 static void uiPrvLedColorsMenu(struct Canvas *cnv, struct Settings *settings)
 {
-	int_fast8_t selOption = 0;
-	uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1;
+        const int_fast8_t doneOption = 0;
+        const int_fast8_t modeOption = 1;
+        const int_fast8_t brightnessOption = 2;
+        const int_fast8_t firstLedOption = 3;
+        const int_fast8_t totalOptions = firstLedOption + NUM_WS2812s;
+        int_fast8_t selOption = doneOption;
+        uint_fast8_t itemHeight;
+        uint_fast16_t listTop, bottomStart, listHeight;
+        uint_fast8_t ledItemsOnscreen, topLedIndex = 0, prevTopLedIndex = UINT8_MAX;
+        int_fast8_t prevSelOption = -1;
+        bool redraw = true;
 
-	uiPrvReset(cnv, false);
+        cnv->font = FontLarge;
+        itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-	while (1) {
-		int_fast8_t numOptions = 0;
-		int_fast8_t doneOption, modeOption, brightnessOption;
-		int_fast8_t firstLedOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
-		uint_fast8_t i;
+        listTop = itemHeight * 2;
+        bottomStart = cnv->h - firstLedOption * itemHeight;
+        if (bottomStart <= listTop)
+                bottomStart = listTop + itemHeight;
 
-		cnv->foreColor = 11;
-		uiPuts(cnv, itemHeight, 10, "LED SETTINGS", -1);
+        listHeight = (bottomStart > listTop) ? (bottomStart - listTop) : itemHeight;
+        ledItemsOnscreen = listHeight / itemHeight;
+        if (!ledItemsOnscreen)
+                ledItemsOnscreen = 1;
+        if (ledItemsOnscreen > NUM_WS2812s)
+                ledItemsOnscreen = NUM_WS2812s;
 
-		doneOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BACK", -1);
+        while (1) {
+                if (redraw || prevTopLedIndex != topLedIndex) {
+                        uint_fast8_t i;
+                        uint_fast8_t scrollWidth;
 
-		modeOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "MODE:", -1);
-                cnv->foreColor = 15;
-                {
-                        const char *modeName = uiPrvLedModeName(settings->ledMode);
-                        char modeBuf[9];
-                        size_t len = strlen(modeName);
+                        uiPrvReset(cnv, false);
+                        cnv->font = FontLarge;
 
-                        if (len > sizeof(modeBuf) - 1)
-                                len = sizeof(modeBuf) - 1;
+                        cnv->foreColor = 11;
+                        uiPuts(cnv, itemHeight, 10, "LED SETTINGS", -1);
 
-                        memcpy(modeBuf, modeName, len);
-                        while (len < sizeof(modeBuf) - 1)
-                                modeBuf[len++] = ' ';
-                        modeBuf[len] = '\0';
+                        cnv->foreColor = 11;
+                        uiPuts(cnv, bottomStart + 2 * itemHeight, 10, "BACK", -1);
 
-                        uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, modeBuf, -1);
+                        cnv->foreColor = 11;
+                        uiPuts(cnv, bottomStart + itemHeight, 10, "MODE:", -1);
+                        cnv->foreColor = 15;
+                        {
+                                const char *modeName = uiPrvLedModeName(settings->ledMode);
+                                char modeBuf[9];
+                                size_t len = strlen(modeName);
+
+                                if (len > sizeof(modeBuf) - 1)
+                                        len = sizeof(modeBuf) - 1;
+
+                                memcpy(modeBuf, modeName, len);
+                                while (len < sizeof(modeBuf) - 1)
+                                        modeBuf[len++] = ' ';
+                                modeBuf[len] = '\0';
+
+                                uiPuts(cnv, bottomStart + itemHeight, 111, modeBuf, -1);
+                        }
+
+                        cnv->foreColor = 11;
+                        uiPuts(cnv, bottomStart, 10, "BRIGHTNESS:", -1);
+                        cnv->foreColor = 15;
+                        uiPrintf(cnv, bottomStart, 111, "%3u       ", settings->ledGlobalBrightness);
+
+                        scrollWidth = uiPrvDrawScrollbar(cnv, listTop, NUM_WS2812s, topLedIndex, ledItemsOnscreen);
+                        (void)scrollWidth;
+
+                        for (i = 0; i < ledItemsOnscreen; i++) {
+                                uint_fast8_t ledIndex = topLedIndex + i;
+                                const struct SettingsLedColor *led = &settings->ledColors[ledIndex];
+
+                                cnv->foreColor = 11;
+                                uiPrintf(cnv, listTop + i * itemHeight, 10, "LED %u:", (unsigned)(ledIndex + 1));
+                                cnv->foreColor = 15;
+                                uiPrintf(cnv, listTop + i * itemHeight, 111, "R:%3u G:%3u B:%3u   ", led->red, led->green, led->blue);
+                        }
+
+                        prevTopLedIndex = topLedIndex;
+                        redraw = false;
+                        prevSelOption = -1;
                 }
 
-		brightnessOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BRIGHTNESS:", -1);
-		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%3u       ", settings->ledGlobalBrightness);
+                if (prevSelOption != selOption) {
+                        int32_t row;
 
-		firstLedOption = numOptions;
-		for (i = 0; i < NUM_WS2812s; i++) {
-			const struct SettingsLedColor *led = &settings->ledColors[i];
+                        if (prevSelOption >= 0 && uiPrvLedMenuOptionRow(prevSelOption, firstLedOption, itemHeight, listTop,
+                                        bottomStart, topLedIndex, ledItemsOnscreen, &row)) {
+                                cnv->foreColor = 0;
+                                uiPrvDrawOneChar(cnv, row, 1, MENU_SELECTION_CHAR);
+                        }
 
-			numOptions++;
-			cnv->foreColor = 11;
-			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 10, "LED %u:", (unsigned)(i + 1));
-			cnv->foreColor = 15;
-			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "R:%3u G:%3u B:%3u   ", led->red, led->green, led->blue);
-		}
+                        if (uiPrvLedMenuOptionRow(selOption, firstLedOption, itemHeight, listTop, bottomStart, topLedIndex,
+                                        ledItemsOnscreen, &row)) {
+                                cnv->foreColor = 15;
+                                uiPrvDrawOneChar(cnv, row, 1, MENU_SELECTION_CHAR);
+                        }
 
-		selOption = numOptions - 1 - uiPrvMenu(cnv, numOptions - 1 - selOption, numOptions, &button);
+                        prevSelOption = selOption;
+                }
 
-		if (button == KEY_BIT_B || selOption == doneOption)
-			return;
+                switch (uiPrvRecvKeypress()) {
+                        case KEY_BIT_DOWN:
+                                if (selOption < totalOptions - 1) {
+                                        selOption++;
+                                        if (selOption >= firstLedOption) {
+                                                uint_fast8_t ledIndex = selOption - firstLedOption;
 
-		if (selOption == modeOption) {
-			uint8_t previous = settings->ledMode;
+                                                if (ledIndex >= topLedIndex + ledItemsOnscreen) {
+                                                        topLedIndex = ledIndex - ledItemsOnscreen + 1;
+                                                        if (topLedIndex > NUM_WS2812s - ledItemsOnscreen)
+                                                                topLedIndex = NUM_WS2812s - ledItemsOnscreen;
+                                                }
+                                        }
+                                }
+                                break;
 
-			if (button == KEY_BIT_LEFT) {
-				if (settings->ledMode == 0)
-					settings->ledMode = LedModeCount - 1;
-				else
-					settings->ledMode--;
-			}
-			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				settings->ledMode = (settings->ledMode + 1) % LedModeCount;
-			}
-			else {
-				continue;
-			}
+                        case KEY_BIT_UP:
+                                if (selOption > 0) {
+                                        selOption--;
+                                        if (selOption >= firstLedOption) {
+                                                uint_fast8_t ledIndex = selOption - firstLedOption;
 
-			if (settings->ledMode == previous)
-				continue;
+                                                if (ledIndex < topLedIndex)
+                                                        topLedIndex = ledIndex;
+                                        }
+                                }
+                                break;
 
-			(void)settingsSet(settings);
-			defconApplyLedSettingsFromStruct(settings);
-		}
-		else if (selOption == brightnessOption) {
+                        case KEY_BIT_B:
+                                return;
 
-			if (button == KEY_BIT_LEFT) {
-				if (!settings->ledGlobalBrightness)
-					continue;
-				settings->ledGlobalBrightness--;
-			}
-			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings->ledGlobalBrightness == 0xff)
-					continue;
-				settings->ledGlobalBrightness++;
-			}
-			else {
-				continue;
-			}
+                        case KEY_BIT_LEFT:
+                                if (selOption == doneOption) {
+                                        return;
+                                }
+                                else if (selOption == modeOption) {
+                                        uint8_t previous = settings->ledMode;
 
-			(void)settingsSet(settings);
-			defconApplyLedSettingsFromStruct(settings);
-		}
-		else if (selOption >= firstLedOption) {
-			uiPrvLedColorAdjust(cnv, settings, selOption - firstLedOption);
-			uiPrvReset(cnv, false);
-		}
-	}
+                                        if (settings->ledMode == 0)
+                                                settings->ledMode = LedModeCount - 1;
+                                        else
+                                                settings->ledMode--;
+
+                                        if (settings->ledMode != previous) {
+                                                (void)settingsSet(settings);
+                                                defconApplyLedSettingsFromStruct(settings);
+                                                redraw = true;
+                                        }
+                                }
+                                else if (selOption == brightnessOption) {
+                                        if (settings->ledGlobalBrightness) {
+                                                settings->ledGlobalBrightness--;
+                                                (void)settingsSet(settings);
+                                                defconApplyLedSettingsFromStruct(settings);
+                                                redraw = true;
+                                        }
+                                }
+                                else if (selOption >= firstLedOption) {
+                                        uiPrvLedColorAdjust(cnv, settings, selOption - firstLedOption);
+                                        redraw = true;
+                                        prevTopLedIndex = UINT8_MAX;
+                                }
+                                break;
+
+                        case KEY_BIT_RIGHT:
+                        case KEY_BIT_A:
+                                if (selOption == doneOption) {
+                                        return;
+                                }
+                                else if (selOption == modeOption) {
+                                        settings->ledMode = (settings->ledMode + 1) % LedModeCount;
+                                        (void)settingsSet(settings);
+                                        defconApplyLedSettingsFromStruct(settings);
+                                        redraw = true;
+                                }
+                                else if (selOption == brightnessOption) {
+                                        if (settings->ledGlobalBrightness != 0xff) {
+                                                settings->ledGlobalBrightness++;
+                                                (void)settingsSet(settings);
+                                                defconApplyLedSettingsFromStruct(settings);
+                                                redraw = true;
+                                        }
+                                }
+                                else if (selOption >= firstLedOption) {
+                                        uiPrvLedColorAdjust(cnv, settings, selOption - firstLedOption);
+                                        redraw = true;
+                                        prevTopLedIndex = UINT8_MAX;
+                                }
+                                break;
+                }
+        }
 }
 
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//return true if anything for the current game may have changes

@@ -107,7 +107,7 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 6:				//upgrade from v6
-			settings->rotationMode = RotationModeAuto;
+			settings->rotationMode = RotationModeGame;
 			//fallthrough
 
 		//other cases here, in increasing order
@@ -116,8 +116,8 @@ void settingsGet(struct Settings *settings)
 	if (settings->ledMode >= LedModeCount)
 		settings->ledMode = LedModeManual;
 
-	if (settings->rotationMode >= RotationModeCount)
-		settings->rotationMode = RotationModeAuto;
+	if (settings->rotationMode < RotationModeGame || settings->rotationMode > RotationModeBadge)
+		settings->rotationMode = RotationModeGame;
 }
 
 bool settingsSet(const struct Settings *settings)

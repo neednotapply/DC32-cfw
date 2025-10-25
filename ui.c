@@ -1250,14 +1250,13 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
         static const char rotationNames[][10] = {
                 "GAME    ",
                 "BADGE   ",
-                "AUTO    ",
 	};
 	uint_fast8_t itemHeight;
 	
 	settingsGet(&settings);
 	
-	if (settings.rotationMode >= RotationModeCount)
-		settings.rotationMode = RotationModeAuto;
+	if (settings.rotationMode < RotationModeGame || settings.rotationMode > RotationModeBadge)
+		settings.rotationMode = RotationModeGame;
 	
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
@@ -1380,10 +1379,10 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
                 if (selOption == rotationOption) {
 
                         if (button == KEY_BIT_LEFT) {
-                                settings.rotationMode = (settings.rotationMode + RotationModeCount - 1) % RotationModeCount;
+                                settings.rotationMode = (settings.rotationMode == RotationModeGame) ? RotationModeBadge : RotationModeGame;
                         }
                         else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-                                settings.rotationMode = (settings.rotationMode + 1) % RotationModeCount;
+                                settings.rotationMode = (settings.rotationMode == RotationModeBadge) ? RotationModeGame : RotationModeBadge;
                         }
 
                         defconOrientationApplySettings(&settings);

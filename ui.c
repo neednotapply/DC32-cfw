@@ -1255,7 +1255,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	
 	settingsGet(&settings);
 	
-	if (settings.rotationMode < RotationModeGame || settings.rotationMode > RotationModeBadge)
+	if (settings.rotationMode != RotationModeGame &&
+	    settings.rotationMode != RotationModeBadge)
 		settings.rotationMode = RotationModeGame;
 	
 	uiPrvReset(cnv, false);

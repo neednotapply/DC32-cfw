@@ -22,9 +22,8 @@ jobs:
 
       - name: Build elf2uf2 converter
         run: |
-          git clone --depth 1 https://github.com/raspberrypi/pico-sdk.git "$HOME/pico-sdk"
-          git -C "$HOME/pico-sdk" submodule update --init --depth 1 tools/elf2uf2
-          cmake -S "$HOME/pico-sdk/tools/elf2uf2" -B "$HOME/elf2uf2-build"
+          git clone --depth 1 https://github.com/raspberrypi/pico-sdk-tools.git "$HOME/pico-sdk-tools"
+          cmake -S "$HOME/pico-sdk-tools/elf2uf2" -B "$HOME/elf2uf2-build"
           cmake --build "$HOME/elf2uf2-build"
           echo "$HOME/elf2uf2-build" >> "$GITHUB_PATH"
 

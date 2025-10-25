@@ -957,10 +957,12 @@ static const char *uiPrvLedModeName(uint8_t mode)
 
 static void uiPrvLedColorAdjust(struct Canvas *cnv, struct Settings *settings, uint_fast8_t ledIdx)
 {
-	int_fast8_t selOption = 0;
-	uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1;
+        int_fast8_t selOption = 0;
+        uint_fast8_t itemHeight;
 
-	uiPrvReset(cnv, false);
+        uiPrvReset(cnv, false);
+        cnv->font = FontLarge;
+        itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 	while (1) {
 		int_fast8_t numOptions = 0;
@@ -1031,7 +1033,7 @@ static bool uiPrvLedMenuOptionRow(int_fast8_t option, int_fast8_t firstLedOption
         uint_fast16_t listTop, uint_fast16_t bottomStart, uint_fast8_t topLedIndex, uint_fast8_t ledItemsOnscreen, int32_t *rowOut)
 {
         if (option < firstLedOption) {
-                *rowOut = bottomStart + (firstLedOption - 1 - option) * itemHeight;
+                *rowOut = bottomStart + option * itemHeight;
                 return true;
         }
 
@@ -1046,12 +1048,12 @@ static bool uiPrvLedMenuOptionRow(int_fast8_t option, int_fast8_t firstLedOption
 
 static void uiPrvLedColorsMenu(struct Canvas *cnv, struct Settings *settings)
 {
-        const int_fast8_t doneOption = 0;
+        const int_fast8_t brightnessOption = 0;
         const int_fast8_t modeOption = 1;
-        const int_fast8_t brightnessOption = 2;
+        const int_fast8_t doneOption = 2;
         const int_fast8_t firstLedOption = 3;
         const int_fast8_t totalOptions = firstLedOption + NUM_WS2812s;
-        int_fast8_t selOption = doneOption;
+        int_fast8_t selOption = brightnessOption;
         uint_fast8_t itemHeight;
         uint_fast16_t listTop, bottomStart, listHeight;
         uint_fast8_t ledItemsOnscreen, topLedIndex = 0, prevTopLedIndex = UINT8_MAX;

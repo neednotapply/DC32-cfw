@@ -77,125 +77,28 @@ void defconApplyLedSettingsFromStruct(const struct Settings *settings)
 #define TOUCH_I2C_ADDR			0x48
 #define RTC_I2C_ADDR			0x51
 
-#define ORIENTATION_SAMPLE_INTERVAL_TICKS	(TICKS_PER_SECOND / 10)
-#define ORIENTATION_REQUIRED_SAMPLES		3
-#define ORIENTATION_GRAVITY_THRESHOLD		2048
-
-struct OrientationManager {
-	enum RotationMode mode;
-	enum orientation currentOrientation;
-	enum orientation pendingOrientation;
-	uint8_t stableCount;
-	uint64_t nextSample;
-};
-
-static struct OrientationManager mOrientation = {
-	.mode = RotationModeGame,
-	.currentOrientation = OrientationCount,
-	.pendingOrientation = OrientationCount,
-	.stableCount = 0,
-	.nextSample = 0,
-};
-
+static enum orientation mOrientation = OrientationCount;
 static void defconOrientationSet(enum orientation orientation)
 {
 	if ((unsigned)orientation >= OrientationCount)
 		return;
 
 	dispSetOrientation(orientation);
-	mOrientation.currentOrientation = orientation;
-}
-
-static bool defconOrientationSample(enum orientation *orientationP)
-{
-        uint8_t raw[6];
-    int16_t accelY;
-    int32_t absY;
-
-        if (!orientationP)
-                return false;
-
-        if (!i2cRegRead(ACCEL_I2C_ADDR, 0xa8, raw, 6))
-                return false;
-
-    accelY = (int16_t)__builtin_bswap16(*(uint16_t*)(raw + 2));
-
-    absY = (accelY < 0) ? -(int32_t)accelY : (int32_t)accelY;
-
-    /*
-     * Only treat the Y axis as authoritative so the badge never attempts a
-     * 90-degree rotation when worn sideways.  Negative gravity corresponds to
-     * the screen-up "game" orientation while positive gravity maps to the
-     * inverted "badge" orientation.
-     */
-
-    if (absY >= ORIENTATION_GRAVITY_THRESHOLD) {
-            *orientationP = (accelY < 0) ? OrientationUpright : OrientationInverted;
-            return true;
-    }
-
-        if (mOrientation.currentOrientation < OrientationCount) {
-                *orientationP = mOrientation.currentOrientation;
-                return true;
-        }
-
-        if (mOrientation.pendingOrientation < OrientationCount) {
-                *orientationP = mOrientation.pendingOrientation;
-                return true;
-        }
-
-        return false;
+	mOrientation = orientation;
 }
 
 void defconOrientationApplySettings(const struct Settings *settings)
 {
 	enum RotationMode mode = settings ? settings->rotationMode : RotationModeGame;
 
-	if (mode != RotationModeGame && mode != RotationModeBadge)
-		mode = RotationModeGame;
-
-	mOrientation.mode = mode;
-	mOrientation.pendingOrientation = OrientationCount;
-	mOrientation.stableCount = 0;
-
-        if (mode == RotationModeGame) {
-                defconOrientationSet(OrientationUpright);
-        }
-        else if (mode == RotationModeBadge) {
-                defconOrientationSet(OrientationInverted);
-        }
+	if (mode == RotationModeBadge)
+		defconOrientationSet(OrientationInverted);
+	else
+		defconOrientationSet(OrientationUpright);
 }
 
 void defconOrientationTick(void)
 {
-	enum orientation orientation;
-	uint64_t now;
-
-	if (mOrientation.mode != RotationModeAuto)
-		return;
-
-	now = getTime();
-	if (now < mOrientation.nextSample)
-		return;
-
-	mOrientation.nextSample = now + ORIENTATION_SAMPLE_INTERVAL_TICKS;
-
-	if (!defconOrientationSample(&orientation))
-		return;
-
-	if (orientation != mOrientation.pendingOrientation) {
-		mOrientation.pendingOrientation = orientation;
-		mOrientation.stableCount = 1;
-	}
-	else if (mOrientation.stableCount < ORIENTATION_REQUIRED_SAMPLES) {
-		mOrientation.stableCount++;
-	}
-
-	if (mOrientation.pendingOrientation != OrientationCount &&
-	    mOrientation.pendingOrientation != mOrientation.currentOrientation &&
-	    mOrientation.stableCount >= ORIENTATION_REQUIRED_SAMPLES) {
-		defconOrientationSet(mOrientation.pendingOrientation);
-	}
 }
 
 void defconOrientationInit(void)
@@ -204,8 +107,6 @@ void defconOrientationInit(void)
 
 	settingsGet(&settings);
 	defconOrientationApplySettings(&settings);
-
-	mOrientation.nextSample = getTime();
 }
 
 
@@ -354,15 +255,20 @@ uint_fast8_t uiGetKeys(void)
 {
 	uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
-	while(1) {
-		defconOrientationTick();
-		val = sio_hw->gpio_in & ourKeysMask;
-		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
-			defconOrientationTick();
-		}
-		if (count == countUntil)
-			return prvKeysMap(val);
-	}
+        while(1) {
+                val = sio_hw->gpio_in & ourKeysMask;
+                for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+                        /*
+                         * Orientation sampling used to provide a bit of delay while
+                         * the accelerometer transaction completed.  Without auto
+                         * rotation support the tick returns immediately, so add a
+                         * small pause here to keep the debounce timing similar.
+                         */
+                        delayUsec(5);
+                }
+                if (count == countUntil)
+                        return prvKeysMap(val);
+        }
 }
 
 static void exitGame(void)
@@ -378,7 +284,6 @@ static void exitGame(void)
 
 uint8_t gbExtGetKeys(void)	//arrow keys, f1=a, f2=b, f3=start, f4=select
 {
-	defconOrientationTick();
 	uint32_t sta = sio_hw->gpio_in;
 	
 	if (!(sta & (1 << PIN_BTN_CENTER))) {

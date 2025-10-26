@@ -110,9 +110,21 @@ static bool dispPrvTurnOn(bool firstTime)
 	dispPrvSetPioWidth(8);
 	lcdCmd(0x2c, false, -1);	//write data command
 
-	dispPrvSetPioWidth(16);
-	dma_hw->ch[DISP_DMA_START_CH].ctrl_trig |= 0;
-	pr("dma is on\n");
+        dispPrvSetPioWidth(16);
+
+        /*
+         * Re-arm both DMA channels before kicking off a transfer.  The start
+         * channel needs its transfer count restored to 1 so it can continually
+         * poke the xfer channel, and the xfer channel must have its transfer
+         * count reset to cover the whole frame.  Finally, trigger the xfer
+         * channel once so the chain gets rolling, then immediately trigger the
+         * start channel so future frames loop automatically.
+         */
+        dma_hw->ch[DISP_DMA_START_CH].transfer_count = 1;
+        dma_hw->ch[DISP_DMA_XFER_CH].transfer_count = DISP_WIDTH * DISP_HEIGHT;
+        dma_hw->ch[DISP_DMA_XFER_CH].al3_read_addr_trig = mFbStartAddr;
+        dma_hw->ch[DISP_DMA_START_CH].al3_read_addr_trig = (uintptr_t)&mFbStartAddr;
+        pr("dma is on\n");
 
 	pwm_hw->slice[BACKLITE_PWM_INDEX].csr &=~ PWM_CH0_CSR_EN_BITS;
 	while (pwm_hw->slice[BACKLITE_PWM_INDEX].csr & PWM_CH0_CSR_EN_BITS);

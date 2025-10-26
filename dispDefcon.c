@@ -29,6 +29,7 @@ static uint32_t mFbStartAddr = (uintptr_t)mFb;
 static uint64_t mPerFrameSpace, mNextFrame;
 static uint8_t mSm0start, mBri = 15;
 static bool mDispOn;
+static uint32_t mDmaStartCtrl, mDmaXferCtrl;
 static enum orientation mCurOrientation = OrientationCount;
 
 
@@ -110,9 +111,23 @@ static bool dispPrvTurnOn(bool firstTime)
 	dispPrvSetPioWidth(8);
 	lcdCmd(0x2c, false, -1);	//write data command
 
-	dispPrvSetPioWidth(16);
-	dma_hw->ch[DISP_DMA_START_CH].ctrl_trig |= 0;
-	pr("dma is on\n");
+        dispPrvSetPioWidth(16);
+
+        /*
+         * Re-arm both DMA channels before kicking off a transfer.  The start
+         * channel needs its transfer count restored to 1 so it can continually
+         * poke the xfer channel, and the xfer channel must have its transfer
+         * count reset to cover the whole frame.  Finally, trigger the xfer
+         * channel once so the chain gets rolling, then immediately trigger the
+         * start channel so future frames loop automatically.
+         */
+        dma_hw->ch[DISP_DMA_START_CH].transfer_count = 1;
+        dma_hw->ch[DISP_DMA_XFER_CH].transfer_count = DISP_WIDTH * DISP_HEIGHT;
+        dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = mDmaStartCtrl;
+        dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = mDmaXferCtrl;
+        dma_hw->ch[DISP_DMA_XFER_CH].al3_read_addr_trig = mFbStartAddr;
+        dma_hw->ch[DISP_DMA_START_CH].al3_read_addr_trig = (uintptr_t)&mFbStartAddr;
+        pr("dma is on\n");
 
 	pwm_hw->slice[BACKLITE_PWM_INDEX].csr &=~ PWM_CH0_CSR_EN_BITS;
 	while (pwm_hw->slice[BACKLITE_PWM_INDEX].csr & PWM_CH0_CSR_EN_BITS);
@@ -194,11 +209,13 @@ bool dispInit(uint32_t desiredFramerate)
 	dma_hw->ch[DISP_DMA_START_CH].read_addr = (uintptr_t)&mFbStartAddr;
 	dma_hw->ch[DISP_DMA_START_CH].write_addr = (uintptr_t)&dma_hw->ch[DISP_DMA_XFER_CH].al3_read_addr_trig;
 	dma_hw->ch[DISP_DMA_START_CH].transfer_count = 1;
-	dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = (DMA_CH0_CTRL_TRIG_TREQ_SEL_VALUE_PERMANENT << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_WORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_EN_BITS;
+        mDmaStartCtrl = (DMA_CH0_CTRL_TRIG_TREQ_SEL_VALUE_PERMANENT << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_WORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_EN_BITS;
+        dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = mDmaStartCtrl;
 	
 	dma_hw->ch[DISP_DMA_XFER_CH].write_addr = (uintptr_t)&MY_PIO->txf[DISP_PIO_SM];
 	dma_hw->ch[DISP_DMA_XFER_CH].transfer_count = DISP_WIDTH * DISP_HEIGHT;
-	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = (DREQ_PIO_TYPE_IDX(DISP_PIO_IDX, TX, DISP_PIO_SM) << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_INCR_READ_BITS | DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS | DMA_CH0_CTRL_TRIG_EN_BITS;
+        mDmaXferCtrl = (DREQ_PIO_TYPE_IDX(DISP_PIO_IDX, TX, DISP_PIO_SM) << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_INCR_READ_BITS | DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS | DMA_CH0_CTRL_TRIG_EN_BITS;
+        dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = mDmaXferCtrl;
 	
 
 	lcdCmd(0x01, true, -1);

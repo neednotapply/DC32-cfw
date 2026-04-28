@@ -68,6 +68,8 @@ $(APP): $(OBJS)
 	$(EXTRA)
 
 
+.PHONY: app AVR clean flash trace
+
 app: $(TARGET)
 
 %.bin: %
@@ -83,7 +85,7 @@ AVR:	$(APP)
 	$(CC) $(CCFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(APP) *.o
+	rm -f $(APP) $(APP).bin *.o
 
 
 flash: $(APP).bin

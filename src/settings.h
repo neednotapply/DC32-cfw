@@ -2,6 +2,7 @@
 #define _SETTINGS_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 struct Settings {

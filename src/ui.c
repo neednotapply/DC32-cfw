@@ -1535,7 +1535,7 @@ bool uiSaveSavestate(void)
 
 #endif //NO_SD_CARD
 
-static bool uiPrvHaveValidRom(char romNameOutP[static ROM_NAME_LEN + 1], enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)
+static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)
 {
 	const struct CartHeader *hdr = (const struct CartHeader*)QSPI_ROM_START;
 	uint32_t romSzExpected, ramSzExpected;

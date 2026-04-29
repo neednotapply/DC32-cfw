@@ -5,7 +5,7 @@ on:
     branches:
       - "**"
     tags:
-      - "v*"
+      - "*"
   pull_request:
   release:
     types:
@@ -68,3 +68,4 @@ jobs:
           files: |
             ${{ runner.temp }}/firmware/uGB.bin
             ${{ runner.temp }}/firmware/uGB.uf2
+          overwrite_files: true

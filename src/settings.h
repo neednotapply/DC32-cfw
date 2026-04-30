@@ -20,6 +20,7 @@ struct Settings {
 	uint8_t contrast	:	5;
 
 	uint8_t upscale		:	1;
+	uint8_t rotation	:	1;
 	uint8_t brightness	:	5;
 	uint8_t ledsEnabled	:	1;	//legacy v6 migration field
 

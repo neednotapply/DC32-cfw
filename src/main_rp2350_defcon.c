@@ -4,6 +4,7 @@
 #include "gbCartHeader.h"
 #include "pioIrdaSIR.h"
 #include "dispDefcon.h"
+#include "badgeLeds.h"
 #include "pioWS2812.h"
 #include "frontend.h"
 #include "timebase.h"
@@ -183,8 +184,10 @@ uint_fast8_t uiGetKeys(void)
 	uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
 	while(1) {
+		badgeLedsTick();
 		val = sio_hw->gpio_in & ourKeysMask;
-		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++);
+		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++)
+			badgeLedsTick();
 		if (count == countUntil)
 			return prvKeysMap(val);
 	}
@@ -204,6 +207,8 @@ static void exitGame(void)
 uint8_t gbExtGetKeys(void)	//arrow keys, f1=a, f2=b, f3=start, f4=select
 {
 	uint32_t sta = sio_hw->gpio_in;
+
+	badgeLedsTick();
 	
 	if (!(sta & (1 << PIN_BTN_CENTER))) {
 		
@@ -611,6 +616,14 @@ static bool __attribute__((noinline)) shouldUpscale(void)
 	return settings.upscale;
 }
 
+static void applySavedLeds(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+	badgeLedsApplySettings(&settings, true);
+}
+
 static void gb(void)
 {
 	uint32_t romSzExpected, ramSzExpected;
@@ -863,12 +876,14 @@ static void defconIoCmd(uint_fast8_t byte)
 			if (subCmd < 3) {
 
 				pr("defcon led set 0x%02x -> (%u, %u)\n", mDefconExtraIoData[0], cmd, subCmd);
+				badgeLedsGameWrite();
 				ws2812Set(cmd, subCmd, mDefconExtraIoData[0]);
 			}
 			break;
 
 		case 9:					//LEDSYNC
 			pr("leds refresh\n");
+			badgeLedsGameWrite();
 			ws2812refresh();
 			break;
 
@@ -1725,6 +1740,7 @@ void __attribute__((noreturn, used)) micromain(void)
 
 	pr("ws2812...");
 	ws2812init();
+	applySavedLeds();
 
 	pr("disp...\n");
 	dispInit(desiredFramerate());

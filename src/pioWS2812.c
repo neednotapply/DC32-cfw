@@ -48,6 +48,21 @@ void ws2812Set(uint32_t ledIdx, uint_fast8_t colorIdx, uint_fast8_t val)
 	*dst = ((*dst) & 0xb6db6d00) | spread;
 }
 
+void ws2812SetRgb(uint32_t ledIdx, uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
+{
+	ws2812Set(ledIdx, 0, green);
+	ws2812Set(ledIdx, 1, red);
+	ws2812Set(ledIdx, 2, blue);
+}
+
+void ws2812SetAllRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
+{
+	uint32_t i;
+
+	for (i = 0; i < NUM_WS2812s; i++)
+		ws2812SetRgb(i, red, green, blue);
+}
+
 
 void ws2812init(void)	//PIO0.SM1, last instr in instr memory
 {
@@ -91,4 +106,3 @@ void ws2812init(void)	//PIO0.SM1, last instr in instr memory
 	ws2812refresh();
 	ws2812refresh();
 }
-

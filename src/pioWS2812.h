@@ -13,6 +13,10 @@ void ws2812init(void);
 
 void ws2812Set(uint32_t ledIdx, uint_fast8_t colorIdx, uint_fast8_t val);
 
+void ws2812SetRgb(uint32_t ledIdx, uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue);
+
+void ws2812SetAllRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue);
+
 void ws2812refresh(void);	//will block if called too soon after last time
 
 

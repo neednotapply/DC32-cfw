@@ -2,6 +2,7 @@
 #include <string.h>
 #include "gbCartHeader.h"
 #include "settings.h"
+#include "badgeLeds.h"
 #include "memMap.h"
 #include "printf.h"
 #include "sleep.h"
@@ -947,13 +948,17 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	uint_fast8_t itemHeight;
 	
 	settingsGet(&settings);
+	if (settings.ledMode >= LedModeNumModes)
+		settings.ledMode = LedModeOff;
+	if (settings.ledSpeed > 4)
+		settings.ledSpeed = 2;
 	
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 	
 	while (1) {
 		
-		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption;
+		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, ledsOption, ledRedOption, ledGreenOption, ledBlueOption, ledSpeedOption;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speeds[][8] = DISP_SPEED_NAMES;
 		
@@ -994,6 +999,36 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 		cnv->foreColor = 15;
 		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.brightness);
 	#endif
+
+		ledsOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LEDS:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, badgeLedsModeName(settings.ledMode), -1);
+
+		ledRedOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED RED:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.ledRed);
+
+		ledGreenOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED GREEN:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.ledGreen);
+
+		ledBlueOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BLUE:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.ledBlue);
+
+		ledSpeedOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED SPEED:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.ledSpeed);
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
 		if (button == KEY_BIT_B || selOption == doneOption){
@@ -1070,6 +1105,60 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			}
 				
 			dispSetBrightness(settings.brightness);
+		}
+
+		if (selOption == ledsOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings.ledMode)
+					settings.ledMode--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (settings.ledMode < LedModeNumModes - 1)
+					settings.ledMode++;
+				else
+					settings.ledMode = LedModeOff;
+			}
+			badgeLedsApplySettings(&settings, true);
+		}
+
+		if (selOption == ledRedOption || selOption == ledGreenOption || selOption == ledBlueOption) {
+			uint8_t *valP = (selOption == ledRedOption) ? &settings.ledRed : ((selOption == ledGreenOption) ? &settings.ledGreen : &settings.ledBlue);
+
+			if (button == KEY_BIT_LEFT) {
+				if (*valP)
+					(*valP)--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (*valP != 0xff)
+					(*valP)++;
+				else
+					continue;
+			}
+
+			badgeLedsApplySettings(&settings, true);
+		}
+
+		if (selOption == ledSpeedOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings.ledSpeed)
+					settings.ledSpeed--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (settings.ledSpeed < 4)
+					settings.ledSpeed++;
+				else
+					continue;
+			}
+
+			badgeLedsApplySettings(&settings, true);
 		}
 	}
 }

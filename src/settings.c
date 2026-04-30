@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			5
+#define SETTINGS_CUR_VER			7
 
 
 union SettingsPage {
@@ -90,6 +90,18 @@ void settingsGet(struct Settings *settings)
 		case 4:				//upgrade from v4
 			settings->brightness = 15;
 			settings->speed = 1;	//yes, reset user preference
+			//fallthrough
+
+		case 5:				//upgrade from v5
+			settings->ledsEnabled = false;
+			settings->ledRed = 56;
+			settings->ledGreen = 56;
+			settings->ledBlue = 56;
+			//fallthrough
+
+		case 6:				//upgrade from v6
+			settings->ledMode = settings->ledsEnabled ? LedModeSolid : LedModeOff;
+			settings->ledSpeed = 2;
 			//fallthrough
 
 		//other cases here, in increasing order

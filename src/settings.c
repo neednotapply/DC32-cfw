@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			8
+#define SETTINGS_CUR_VER			9
 
 
 union SettingsPage {
@@ -108,6 +108,10 @@ void settingsGet(struct Settings *settings)
 			settings->ledBrightness = 255;
 			//fallthrough
 
+		case 8:				//upgrade from v8
+			settings->screenFlipped = false;
+			//fallthrough
+
 		//other cases here, in increasing order
 	}
 }
@@ -154,4 +158,3 @@ bool settingsSet(const struct Settings *settings)
 		return true;
 	}
 }
-

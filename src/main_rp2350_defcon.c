@@ -24,6 +24,7 @@ static void uiPrvUpscalerInit(void);
 static void uiPrvUpscalerDeinit(void);
 static bool shouldUpscale(void);
 static bool mUpscaling;
+static volatile bool mScreenFlipped;
 
 static uint64_t mRtcTickOffset;		//ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
@@ -372,15 +373,30 @@ static uint16_t* uiPrvOuputStretchedOnly(uint16_t *fb, const uint32_t *data)
 		*fb = ret;
 
 		#ifdef UPSCALER_ROTATES
-			fb += DISP_WIDTH;
+			fb += mScreenFlipped ? -DISP_WIDTH : DISP_WIDTH;
 		#else
-			fb++;
+			fb += mScreenFlipped ? -1 : 1;
 		#endif
 	}
 
 	#ifdef UPSCALER_ROTATES
-		fb -= DISP_WIDTH * 240;
-		fb--;
+		if (mScreenFlipped) {
+			fb += DISP_WIDTH * 240;
+			fb++;
+		}
+		else {
+			fb -= DISP_WIDTH * 240;
+			fb--;
+		}
+	#else
+		if (mScreenFlipped) {
+			fb += 240;
+			fb += DISP_WIDTH;
+		}
+		else {
+			fb -= 240;
+			fb += DISP_WIDTH;
+		}
 	#endif
 
 	return fb;
@@ -410,31 +426,46 @@ static uint16_t* uiPrvOuputStretchedWithSource(uint16_t *fb, const uint32_t *dat
 		*fb = src[0] &~ BG_FLAG_UNDER_OBJS;
 
 		#ifdef UPSCALER_ROTATES
-			fb += DISP_WIDTH;
+			fb += mScreenFlipped ? -DISP_WIDTH : DISP_WIDTH;
 		#else
-			fb++;
+			fb += mScreenFlipped ? -1 : 1;
 		#endif
 
 		*fb = ret;
 
 		#ifdef UPSCALER_ROTATES
-			fb += DISP_WIDTH;
+			fb += mScreenFlipped ? -DISP_WIDTH : DISP_WIDTH;
 		#else
-			fb++;
+			fb += mScreenFlipped ? -1 : 1;
 		#endif
 
 		*fb = src[1] &~ BG_FLAG_UNDER_OBJS;
 
 		#ifdef UPSCALER_ROTATES
-			fb += DISP_WIDTH;
+			fb += mScreenFlipped ? -DISP_WIDTH : DISP_WIDTH;
 		#else
-			fb++;
+			fb += mScreenFlipped ? -1 : 1;
 		#endif
 	}
 
 	#ifdef UPSCALER_ROTATES
-		fb -= DISP_WIDTH * 240;
-		fb--;
+		if (mScreenFlipped) {
+			fb += DISP_WIDTH * 240;
+			fb++;
+		}
+		else {
+			fb -= DISP_WIDTH * 240;
+			fb--;
+		}
+	#else
+		if (mScreenFlipped) {
+			fb += 240;
+			fb += DISP_WIDTH;
+		}
+		else {
+			fb -= 240;
+			fb += DISP_WIDTH;
+		}
 	#endif
 
 	return fb;
@@ -462,9 +493,15 @@ static void uiPrvUpscalerMain(void)
 		uiPrvFifoTx(0);
 
 	#ifdef UPSCALER_ROTATES
-		fb += DISP_WIDTH - 1 - (lineNum * 3 / 2);
+		if (mScreenFlipped)
+			fb += DISP_WIDTH * (DISP_HEIGHT - 1) + (lineNum * 3 / 2);
+		else
+			fb += DISP_WIDTH - 1 - (lineNum * 3 / 2);
 	#else
-		fb += DISP_WIDTH * (lineNum * 3 / 2);
+		if (mScreenFlipped)
+			fb += DISP_WIDTH * (DISP_HEIGHT - 1 - (lineNum * 3 / 2)) + DISP_WIDTH - 1;
+		else
+			fb += DISP_WIDTH * (lineNum * 3 / 2);
 	#endif
 
 		if (lineNum & 1) {		//mix and output mix
@@ -537,18 +574,29 @@ void gbDrawLine(uint8_t lineNum, PIXFMT* pixels)
 			
 			fb += (DISP_WIDTH - 144) / 2;
 			fb += DISP_WIDTH * (DISP_HEIGHT - 160) / 2;
-			fb += 144 - lineNum - 1;
+			if (mScreenFlipped)
+				fb += lineNum + DISP_WIDTH * (160 - 1);
+			else
+				fb += 144 - lineNum - 1;
 
 			
-			for (i = 0; i < 160; i++, fb += DISP_WIDTH)
+			for (i = 0; i < 160; i++, fb += mScreenFlipped ? -DISP_WIDTH : DISP_WIDTH)
 				*fb = *pixels++ &~ BG_FLAG_UNDER_OBJS;
 
 		#else
 
-			fb += DISP_WIDTH * (lineNum + (DISP_HEIGHT - 144) / 2) + (DISP_WIDTH - 160) / 2;
-			
-			for (i = 0; i < 160; i++)
-				fb[i] = pixels[i] &~ BG_FLAG_UNDER_OBJS;
+			if (mScreenFlipped) {
+				fb += DISP_WIDTH * (DISP_HEIGHT - 1 - lineNum - (DISP_HEIGHT - 144) / 2) + (DISP_WIDTH - 160) / 2 + 160 - 1;
+
+				for (i = 0; i < 160; i++)
+					fb[-(int_fast16_t)i] = pixels[i] &~ BG_FLAG_UNDER_OBJS;
+			}
+			else {
+				fb += DISP_WIDTH * (lineNum + (DISP_HEIGHT - 144) / 2) + (DISP_WIDTH - 160) / 2;
+
+				for (i = 0; i < 160; i++)
+					fb[i] = pixels[i] &~ BG_FLAG_UNDER_OBJS;
+			}
 		#endif
 	}
 	
@@ -616,6 +664,20 @@ static bool __attribute__((noinline)) shouldUpscale(void)
 	return settings.upscale;
 }
 
+static bool __attribute__((noinline)) shouldFlipScreen(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+
+	return settings.screenFlipped;
+}
+
+void gbRefreshScreenSettings(void)
+{
+	mScreenFlipped = shouldFlipScreen();
+}
+
 static void applySavedLeds(void)
 {
 	struct Settings settings;
@@ -638,6 +700,7 @@ static void gb(void)
 			
 			dispPrvFrameCtrReset();
 			mUpscaling = shouldUpscale();
+			gbRefreshScreenSettings();
 			if (mUpscaling) 
 				uiPrvUpscalerInit();
 			memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);	
@@ -1820,5 +1883,3 @@ void __attribute__((naked, used)) HardFault_Handler(void)
 			"bl   report_hard_fault		\n\t"
 			:::"memory");
 }
-
-

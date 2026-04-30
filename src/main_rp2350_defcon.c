@@ -866,7 +866,7 @@ static void myIrdaSIRuartRxF(void *userData, uint16_t *rawBuf, uint32_t nItems)
 	}
 }
 
-static void irdaInit(bool txMode)
+void badgeIrdaInit(bool txMode)
 {
 	union UartCfg cfg = {
 		.baudrate = 9600,
@@ -879,6 +879,11 @@ static void irdaInit(bool txMode)
 
 	mPrevIrdaModeWasTx = txMode;
 	pr("irda config: rx=%d tx=%d\n", cfg.rxEn, cfg.txEn);
+
+	iobank0_hw->io[PIN_IRDA_IN].ctrl = (iobank0_hw->io[PIN_IRDA_IN].ctrl &~ IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) | (IO_BANK0_GPIO0_CTRL_FUNCSEL_VALUE_PIO1_0 << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
+	iobank0_hw->io[PIN_IRDA_OUT].ctrl = (iobank0_hw->io[PIN_IRDA_OUT].ctrl &~ IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) | (IO_BANK0_GPIO0_CTRL_FUNCSEL_VALUE_PIO1_0 << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
+	iobank0_hw->io[PIN_IRDA_SD].ctrl = (iobank0_hw->io[PIN_IRDA_SD].ctrl &~ IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) | (IO_BANK0_GPIO0_CTRL_FUNCSEL_VALUE_SIO_0 << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
+
 	if (!irdaSIRuartConfig(&cfg, myIrdaSIRuartRxF, NULL)) {
 
 		pr("IrDA RX cfg fail\n");
@@ -894,13 +899,13 @@ void irdaRoll(void)
 	uint8_t i;
 
 
-	irdaInit(true);
+	badgeIrdaInit(true);
 	for (i = 0; i < 8; i++) {
 		
 		irdaSIRuartTx(buf, sizeof(buf), true);
 		while(!(irdaSIRuartGetSta() & UART_STA_BIT_TX_FIFO_EMPTY));
 	}
-	irdaInit(prevMode);
+	badgeIrdaInit(prevMode);
 }
 
 static void defconIoCmd(uint_fast8_t byte)
@@ -969,7 +974,7 @@ static void defconIoCmd(uint_fast8_t byte)
 		case 12:				//IRCOMD
 			switch (subCmd) {
 				case 0:			//power/mode control
-					irdaInit(!!mDefconExtraIoData[0]);
+					badgeIrdaInit(!!mDefconExtraIoData[0]);
 					if (mDefconExtraIoData[0])
 						mIrRxBytesUsed = 0;	//reset RX buffer if going to TX mode
 					break;
@@ -1794,11 +1799,11 @@ void __attribute__((noreturn, used)) micromain(void)
 	rtcInit();
 
 	pr("IrDA...\n");
-	irdaInit(true);
+	badgeIrdaInit(true);
 	static const uint8_t tx[] = "hello";
 	irdaSIRuartTx(tx, sizeof(tx), true);
 	while (!(irdaSIRuartGetSta() & UART_STA_BIT_TX_FIFO_EMPTY));
-	irdaInit(false);
+	badgeIrdaInit(false);
 
 
 	uiPrvSelfTestsIfNeeded();

@@ -11,6 +11,7 @@
 #include "qspi.h"
 #include "cpu.h"
 #include "mbc.h"
+#include "irRemote.h"
 #include "utf.h"
 #include "ui.h"
 #include "sd.h"
@@ -1297,6 +1298,44 @@ bool uiSaveSavestate(void)
 }
 
 #ifndef NO_SD_CARD
+	#define IR_POWER_FILE			"/IR/POWER.IR"
+	#define IR_FLIPPER_TV_FILE		"/IR/tv.ir"
+	#define IR_FILE_MAGIC			"DC32IR1"
+	#define IR_DEFAULT_CARRIER		38000
+	#define IR_DEFAULT_REPEAT		1
+	#define IR_LINE_BUF_SZ			32768
+	#define IR_NAME_BUF_SZ			64
+	#define IR_PROTOCOL_BUF_SZ		12
+
+	struct IrBlastStats {
+		uint32_t sent;
+		uint32_t skipped;
+		uint32_t malformed;
+		uint32_t lineNo;
+		bool cancelled;
+		bool lineTooLong;
+	};
+
+	enum FlipperIrType {
+		FlipperIrTypeNone,
+		FlipperIrTypeRaw,
+		FlipperIrTypeParsed,
+	};
+
+	struct FlipperIrRecord {
+		char name[IR_NAME_BUF_SZ];
+		char protocol[IR_PROTOCOL_BUF_SZ];
+		enum FlipperIrType type;
+		uint32_t frequency;
+		uint32_t address;
+		uint32_t command;
+		bool hasName;
+		bool hasFrequency;
+		bool hasAddress;
+		bool hasCommand;
+		bool sentRaw;
+	};
+
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
 	{
 		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, NULL, 0);
@@ -1641,6 +1680,770 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 
+	static char* uiPrvTrim(char *str)
+	{
+		char *end;
+
+		while (*str == ' ' || *str == '\t')
+			str++;
+
+		end = str + strlen(str);
+		while (end != str && (end[-1] == ' ' || end[-1] == '\t')) {
+			end--;
+			*end = 0;
+		}
+
+		return str;
+	}
+
+	static bool uiPrvStartsWith(const char *str, const char *prefix)
+	{
+		while (*prefix) {
+			if (*str++ != *prefix++)
+				return false;
+		}
+
+		return true;
+	}
+
+	static void uiPrvCopyStr(char *dst, uint32_t dstLen, const char *src)
+	{
+		if (!dstLen)
+			return;
+
+		while (--dstLen && *src)
+			*dst++ = *src++;
+		*dst = 0;
+	}
+
+	static bool uiPrvParseU32(const char **strP, uint32_t *valP)
+	{
+		const char *str = *strP;
+		uint32_t val = 0;
+
+		while (*str == ' ' || *str == '\t')
+			str++;
+
+		if (*str < '0' || *str > '9')
+			return false;
+
+		do {
+			uint32_t digit = *str++ - '0';
+
+			if (val > (0xfffffffful - digit) / 10)
+				return false;
+			val = val * 10 + digit;
+		} while (*str >= '0' && *str <= '9');
+
+		while (*str == ' ' || *str == '\t')
+			str++;
+
+		*strP = str;
+		*valP = val;
+
+		return true;
+	}
+
+	static bool uiPrvParseHexByte(const char **strP, uint8_t *valP)
+	{
+		const char *str = *strP;
+		uint_fast8_t i;
+		uint8_t val = 0;
+
+		while (*str == ' ' || *str == '\t')
+			str++;
+
+		for (i = 0; i < 2; i++) {
+			uint8_t nibble;
+
+			if (*str >= '0' && *str <= '9')
+				nibble = *str - '0';
+			else if (*str >= 'a' && *str <= 'f')
+				nibble = *str - 'a' + 10;
+			else if (*str >= 'A' && *str <= 'F')
+				nibble = *str - 'A' + 10;
+			else
+				return false;
+
+			val = (val << 4) | nibble;
+			str++;
+		}
+
+		while (*str == ' ' || *str == '\t')
+			str++;
+
+		*strP = str;
+		*valP = val;
+
+		return true;
+	}
+
+	static bool uiPrvParseFlipperU32Bytes(const char *str, uint32_t *valP)
+	{
+		uint32_t val = 0;
+		uint_fast8_t i;
+
+		for (i = 0; i < 4; i++) {
+			uint8_t byte;
+
+			if (!uiPrvParseHexByte(&str, &byte))
+				return false;
+
+			val |= ((uint32_t)byte) << (8 * i);
+		}
+
+		*valP = val;
+
+		return !*str;
+	}
+
+	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, bool *truncatedP)
+	{
+		uint32_t pos = 0;
+
+		*truncatedP = false;
+		if (!bufSz)
+			return false;
+
+		while (1) {
+			char ch;
+			uint32_t numRead;
+
+			if (!fatfsFileRead(fil, &ch, 1, &numRead))
+				return false;
+
+			if (!numRead) {
+				buf[pos] = 0;
+				return pos != 0 || *truncatedP;
+			}
+
+			if (ch == '\n') {
+				buf[pos] = 0;
+				return true;
+			}
+
+			if (ch == '\r')
+				continue;
+
+			if (pos + 1 < bufSz)
+				buf[pos++] = ch;
+			else
+				*truncatedP = true;
+		}
+	}
+
+	static void uiPrvIrDrawProgress(struct Canvas *cnv, const char *name, uint32_t codeIdx, uint32_t repeatIdx, uint32_t numRepeats)
+	{
+		uint32_t row;
+
+		uiPrvReset(cnv, false);
+		cnv->font = FontLarge;
+		row = uiPrvGlyphHeight(cnv) + 1;
+		uiPuts(cnv, row, 10, "IR Power Blast", -1);
+		row += uiPrvGlyphHeight(cnv) + 2;
+
+		cnv->font = FontMedium;
+		cnv->foreColor = 11;
+		uiPrintf(cnv, row, 10, "Code %u", codeIdx);
+		row += uiPrvGlyphHeight(cnv) + 1;
+		cnv->foreColor = 15;
+		uiPrvDrawWrappedString(cnv, name, row, 10);
+		uiPrintf(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "Repeat %u/%u", repeatIdx, numRepeats);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
+	}
+
+	static void uiPrvIrSendBitPulseDistance(uint32_t carrier, bool bit, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace)
+	{
+		irRemoteMarkUsec(carrier, mark);
+		irRemoteSpaceUsec(bit ? oneSpace : zeroSpace);
+	}
+
+	static void uiPrvIrSendBitsPulseDistance(uint32_t carrier, uint32_t data, uint_fast8_t nBits, bool msbFirst, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace)
+	{
+		uint_fast8_t i;
+
+		for (i = 0; i < nBits; i++) {
+			bool bit;
+
+			if (msbFirst)
+				bit = !!(data & (1ul << (nBits - 1 - i)));
+			else
+				bit = !!(data & (1ul << i));
+
+			uiPrvIrSendBitPulseDistance(carrier, bit, mark, zeroSpace, oneSpace);
+		}
+	}
+
+	static void uiPrvIrSendBitMarkEncoded(uint32_t carrier, bool bit, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space)
+	{
+		irRemoteMarkUsec(carrier, bit ? oneMark : zeroMark);
+		irRemoteSpaceUsec(space);
+	}
+
+	static void uiPrvIrSendBitsMarkEncoded(uint32_t carrier, uint32_t data, uint_fast8_t nBits, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space)
+	{
+		uint_fast8_t i;
+
+		for (i = 0; i < nBits; i++)
+			uiPrvIrSendBitMarkEncoded(carrier, !!(data & (1ul << i)), bitMark, zeroMark, oneMark, space);
+	}
+
+	static void uiPrvIrManchesterHalf(uint32_t carrier, bool mark, uint32_t usec)
+	{
+		if (mark)
+			irRemoteMarkUsec(carrier, usec);
+		else
+			irRemoteSpaceUsec(usec);
+	}
+
+	static void uiPrvIrSendManchesterBit(uint32_t carrier, bool bit, uint32_t halfUsec)
+	{
+		uiPrvIrManchesterHalf(carrier, !bit, halfUsec);
+		uiPrvIrManchesterHalf(carrier, bit, halfUsec);
+	}
+
+	static void uiPrvIrSendNecLike(uint32_t carrier, uint32_t address, uint32_t command, uint_fast8_t addrBits, uint_fast8_t cmdBits, bool useComplements)
+	{
+		irRemoteMarkUsec(carrier, 9000);
+		irRemoteSpaceUsec(4500);
+		uiPrvIrSendBitsPulseDistance(carrier, address, addrBits, false, 560, 560, 1690);
+		if (useComplements)
+			uiPrvIrSendBitsPulseDistance(carrier, ~address, addrBits, false, 560, 560, 1690);
+		uiPrvIrSendBitsPulseDistance(carrier, command, cmdBits, false, 560, 560, 1690);
+		if (useComplements)
+			uiPrvIrSendBitsPulseDistance(carrier, ~command, cmdBits, false, 560, 560, 1690);
+		irRemoteMarkUsec(carrier, 560);
+	}
+
+	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command)
+	{
+		uint32_t carrier = IR_DEFAULT_CARRIER;
+
+		if (!strcmp(protocol, "NEC")) {
+			uiPrvIrSendNecLike(carrier, address, command, 8, 8, true);
+		}
+		else if (!strcmp(protocol, "NECext")) {
+			uiPrvIrSendNecLike(carrier, address, command, 16, 16, false);
+		}
+		else if (!strcmp(protocol, "NEC42")) {
+			uiPrvIrSendNecLike(carrier, address, command, 13, 8, true);
+		}
+		else if (!strcmp(protocol, "NEC42ext")) {
+			uiPrvIrSendNecLike(carrier, address, command, 26, 16, false);
+		}
+		else if (!strcmp(protocol, "Samsung32")) {
+			irRemoteMarkUsec(carrier, 4500);
+			irRemoteSpaceUsec(4500);
+			uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690);
+			uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 560, 560, 1690);
+			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690);
+			irRemoteMarkUsec(carrier, 560);
+		}
+		else if (!strcmp(protocol, "SIRC") || !strcmp(protocol, "SIRC15") || !strcmp(protocol, "SIRC20")) {
+			uint_fast8_t addrBits = !strcmp(protocol, "SIRC") ? 5 : (!strcmp(protocol, "SIRC15") ? 8 : 13), rep;
+
+			carrier = 40000;
+			for (rep = 0; rep < 3; rep++) {
+				irRemoteMarkUsec(carrier, 2400);
+				irRemoteSpaceUsec(600);
+				uiPrvIrSendBitsMarkEncoded(carrier, command, 7, 600, 600, 1200, 600);
+				uiPrvIrSendBitsMarkEncoded(carrier, address, addrBits, 600, 600, 1200, 600);
+				irRemoteSpaceUsec(25000);
+			}
+		}
+		else if (!strcmp(protocol, "RCA")) {
+			irRemoteMarkUsec(carrier, 4000);
+			irRemoteSpaceUsec(4000);
+			uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000);
+			uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 500, 1000, 2000);
+			uiPrvIrSendBitsPulseDistance(carrier, ~address, 4, false, 500, 1000, 2000);
+			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000);
+			irRemoteMarkUsec(carrier, 500);
+		}
+		else if (!strcmp(protocol, "RC5") || !strcmp(protocol, "RC5X")) {
+			uint32_t cmd = command & (!strcmp(protocol, "RC5X") ? 0x7f : 0x3f);
+			uint_fast8_t i;
+
+			carrier = 36000;
+			uiPrvIrSendManchesterBit(carrier, true, 889);
+			uiPrvIrSendManchesterBit(carrier, !(cmd & 0x40), 889);
+			uiPrvIrSendManchesterBit(carrier, false, 889);
+			for (i = 0; i < 5; i++)
+				uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (4 - i))), 889);
+			for (i = 0; i < 6; i++)
+				uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889);
+		}
+		else if (!strcmp(protocol, "RC6")) {
+			uint_fast8_t i;
+
+			carrier = 36000;
+			irRemoteMarkUsec(carrier, 2666);
+			irRemoteSpaceUsec(889);
+			uiPrvIrSendManchesterBit(carrier, true, 444);
+			uiPrvIrSendManchesterBit(carrier, false, 444);
+			uiPrvIrSendManchesterBit(carrier, false, 444);
+			uiPrvIrSendManchesterBit(carrier, false, 444);
+			uiPrvIrSendManchesterBit(carrier, false, 889);
+			for (i = 0; i < 8; i++)
+				uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (7 - i))), 444);
+			for (i = 0; i < 8; i++)
+				uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444);
+		}
+		else if (!strcmp(protocol, "Kaseikyo")) {
+			uint32_t vendor = address & 0xffff;
+			uint32_t payload = ((address >> 16) & 0x03ff) | ((command & 0x03ff) << 10);
+			uint8_t parity = (vendor ^ (vendor >> 8)) & 0x0f;
+
+			irRemoteMarkUsec(carrier, 3360);
+			irRemoteSpaceUsec(1650);
+			uiPrvIrSendBitsPulseDistance(carrier, vendor, 16, false, 432, 432, 1296);
+			uiPrvIrSendBitsPulseDistance(carrier, parity, 4, false, 432, 432, 1296);
+			uiPrvIrSendBitsPulseDistance(carrier, payload, 20, false, 432, 432, 1296);
+			uiPrvIrSendBitsPulseDistance(carrier, (payload ^ (payload >> 8) ^ (payload >> 16)) & 0xff, 8, false, 432, 432, 1296);
+			irRemoteMarkUsec(carrier, 432);
+		}
+		else {
+			return false;
+		}
+
+		irRemoteSpaceUsec(45000);
+		return true;
+	}
+
+	static bool uiPrvIrSendCodeLine(struct Canvas *cnv, const char *codeStr, const char *name, uint32_t carrier, uint32_t repeat, uint32_t codeIdx, bool *malformedP, bool *cancelledP)
+	{
+		uint32_t rep;
+
+		*malformedP = false;
+		*cancelledP = false;
+
+		if (!repeat)
+			repeat = 1;
+		if (!carrier)
+			carrier = IR_DEFAULT_CARRIER;
+
+		for (rep = 0; rep < repeat; rep++) {
+			const char *str = codeStr;
+			bool mark = true;
+			uint32_t numDurations = 0;
+
+			uiPrvIrDrawProgress(cnv, name, codeIdx, rep + 1, repeat);
+
+			while (1) {
+				uint32_t duration;
+
+				if (!uiPrvParseU32(&str, &duration)) {
+					*malformedP = true;
+					return false;
+				}
+
+				if (mark)
+					irRemoteMarkUsec(carrier, duration);
+				else
+					irRemoteSpaceUsec(duration);
+
+				numDurations++;
+				mark = !mark;
+
+				while (*str == ',' || *str == ' ' || *str == '\t')
+					str++;
+
+				if (!*str)
+					break;
+
+				*malformedP = true;
+				return false;
+			}
+
+			if (!numDurations) {
+				*malformedP = true;
+				return false;
+			}
+
+			irRemoteSpaceUsec(45000);
+
+			if (uiGetKeys() & KEY_BIT_B) {
+				*cancelledP = true;
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	static bool uiPrvIrIsPowerName(const char *name)
+	{
+		return !strcmp(name, "Power") || !strcmp(name, "POWER") || !strcmp(name, "Pwr") || !strcmp(name, "POWER_OFF") || !strcmp(name, "Power_off");
+	}
+
+	static void uiPrvFlipperRecordInit(struct FlipperIrRecord *rec)
+	{
+		memset(rec, 0, sizeof(*rec));
+		rec->frequency = IR_DEFAULT_CARRIER;
+	}
+
+	static void uiPrvFlipperRecordFinish(struct Canvas *cnv, struct FlipperIrRecord *rec, struct IrBlastStats *stats)
+	{
+		if (stats->cancelled)
+			return;
+
+		if (!rec->hasName)
+			return;
+
+		if (!uiPrvIrIsPowerName(rec->name))
+			return;
+
+		if (rec->type == FlipperIrTypeRaw) {
+			if (!rec->sentRaw)
+				stats->skipped++;
+			return;
+		}
+
+		if (rec->type != FlipperIrTypeParsed || !rec->hasAddress || !rec->hasCommand) {
+			stats->malformed++;
+			return;
+		}
+
+		uiPrvIrDrawProgress(cnv, rec->name, stats->sent + 1, 1, 1);
+		if (uiPrvIrSendParsed(rec->protocol, rec->address, rec->command))
+			stats->sent++;
+		else
+			stats->skipped++;
+
+		if (uiGetKeys() & KEY_BIT_B)
+			stats->cancelled = true;
+	}
+
+	static bool uiPrvIrReadLineStat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats)
+	{
+		bool truncated;
+
+		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &truncated)) {
+			if (truncated)
+				stats->lineTooLong = true;
+			return false;
+		}
+
+		stats->lineNo++;
+		if (truncated)
+			stats->lineTooLong = true;
+
+		return !stats->lineTooLong;
+	}
+
+	static bool uiPrvIrOpenPowerFile(struct FatfsVol *vol, const char **pathP, struct FatfsFil **filP)
+	{
+		struct FatfsFil *fil = fatfsFileOpen(vol, IR_FLIPPER_TV_FILE, OPEN_MODE_READ);
+
+		if (fil) {
+			*pathP = IR_FLIPPER_TV_FILE;
+			*filP = fil;
+			return true;
+		}
+
+		fil = fatfsFileOpen(vol, IR_POWER_FILE, OPEN_MODE_READ);
+		if (fil) {
+			*pathP = IR_POWER_FILE;
+			*filP = fil;
+			return true;
+		}
+
+		return false;
+	}
+
+	static bool uiPrvIrFileIsFlipper(const char *trimmed)
+	{
+		return !strcmp(trimmed, "Filetype: IR signals file") || !strcmp(trimmed, "Filetype: IR library file");
+	}
+
+	static bool uiPrvIrDetectFormat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats, bool *isFlipperP)
+	{
+		while (uiPrvIrReadLineStat(fil, line, stats)) {
+			char *trimmed = uiPrvTrim(line);
+
+			if (!*trimmed || *trimmed == '#')
+				continue;
+
+			if (!strcmp(trimmed, IR_FILE_MAGIC)) {
+				*isFlipperP = false;
+				return fatfsFileSeek(fil, 0);
+			}
+
+			if (uiPrvIrFileIsFlipper(trimmed)) {
+				*isFlipperP = true;
+				return fatfsFileSeek(fil, 0);
+			}
+
+			stats->malformed++;
+			return false;
+		}
+
+		return false;
+	}
+
+	static bool uiPrvIrPowerBlastDc32(struct Canvas *cnv, struct FatfsFil *fil, char *line, struct IrBlastStats *stats)
+	{
+		char name[IR_NAME_BUF_SZ];
+		uint32_t carrier = IR_DEFAULT_CARRIER, repeat = IR_DEFAULT_REPEAT, codeIdx = 0;
+		bool haveMagic = false;
+
+		uiPrvCopyStr(name, sizeof(name), "IR code");
+
+		while (uiPrvIrReadLineStat(fil, line, stats)) {
+			char *trimmed;
+
+			trimmed = uiPrvTrim(line);
+			if (!*trimmed || *trimmed == '#')
+				continue;
+
+			if (strcmp(trimmed, IR_FILE_MAGIC)) {
+				stats->malformed++;
+				return false;
+			}
+
+			haveMagic = true;
+			break;
+		}
+
+		if (!haveMagic)
+			return false;
+
+		while (uiPrvIrReadLineStat(fil, line, stats)) {
+			char *trimmed;
+
+			trimmed = uiPrvTrim(line);
+			if (!*trimmed || *trimmed == '#')
+				continue;
+
+			if (uiPrvStartsWith(trimmed, "name=")) {
+				uiPrvCopyStr(name, sizeof(name), uiPrvTrim(trimmed + 5));
+			}
+			else if (uiPrvStartsWith(trimmed, "carrier=")) {
+				const char *str = trimmed + 8;
+
+				if (!uiPrvParseU32(&str, &carrier) || *str)
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "repeat=")) {
+				const char *str = trimmed + 7;
+
+				if (!uiPrvParseU32(&str, &repeat) || *str)
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "code=")) {
+				bool malformed = false, cancelled = false;
+
+				codeIdx++;
+				if (uiPrvIrSendCodeLine(cnv, uiPrvTrim(trimmed + 5), name, carrier, repeat, codeIdx, &malformed, &cancelled))
+					stats->sent++;
+				if (malformed)
+					stats->malformed++;
+				if (cancelled)
+					stats->cancelled = true;
+				if (malformed || cancelled)
+					return false;
+
+				uiPrvCopyStr(name, sizeof(name), "IR code");
+				carrier = IR_DEFAULT_CARRIER;
+				repeat = IR_DEFAULT_REPEAT;
+			}
+			else {
+				stats->malformed++;
+				return false;
+			}
+		}
+
+		return stats->sent != 0;
+	}
+
+	static bool uiPrvIrPowerBlastFlipper(struct Canvas *cnv, struct FatfsFil *fil, char *line, struct IrBlastStats *stats)
+	{
+		struct FlipperIrRecord rec;
+		bool haveHeader = false, haveVersion = false;
+
+		uiPrvFlipperRecordInit(&rec);
+
+		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled) {
+			char *trimmed = uiPrvTrim(line);
+
+			if (!*trimmed)
+				continue;
+
+			if (*trimmed == '#') {
+				uiPrvFlipperRecordFinish(cnv, &rec, stats);
+				uiPrvFlipperRecordInit(&rec);
+				continue;
+			}
+
+			if (uiPrvStartsWith(trimmed, "Filetype:")) {
+				if (!uiPrvIrFileIsFlipper(trimmed))
+					stats->malformed++;
+				else
+					haveHeader = true;
+				continue;
+			}
+
+			if (uiPrvStartsWith(trimmed, "Version:")) {
+				const char *str = uiPrvTrim(trimmed + 8);
+				uint32_t version;
+
+				if (!uiPrvParseU32(&str, &version) || version != 1)
+					stats->malformed++;
+				else
+					haveVersion = true;
+				continue;
+			}
+
+			if (uiPrvStartsWith(trimmed, "name:")) {
+				uiPrvCopyStr(rec.name, sizeof(rec.name), uiPrvTrim(trimmed + 5));
+				rec.hasName = true;
+			}
+			else if (uiPrvStartsWith(trimmed, "type:")) {
+				char *type = uiPrvTrim(trimmed + 5);
+
+				if (!strcmp(type, "raw"))
+					rec.type = FlipperIrTypeRaw;
+				else if (!strcmp(type, "parsed"))
+					rec.type = FlipperIrTypeParsed;
+				else
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "protocol:")) {
+				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), uiPrvTrim(trimmed + 9));
+			}
+			else if (uiPrvStartsWith(trimmed, "address:")) {
+				rec.hasAddress = uiPrvParseFlipperU32Bytes(uiPrvTrim(trimmed + 8), &rec.address);
+				if (!rec.hasAddress)
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "command:")) {
+				rec.hasCommand = uiPrvParseFlipperU32Bytes(uiPrvTrim(trimmed + 8), &rec.command);
+				if (!rec.hasCommand)
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "frequency:")) {
+				const char *str = uiPrvTrim(trimmed + 10);
+
+				rec.hasFrequency = uiPrvParseU32(&str, &rec.frequency) && !*str;
+				if (!rec.hasFrequency)
+					stats->malformed++;
+			}
+			else if (uiPrvStartsWith(trimmed, "duty_cycle:")) {
+				//ignored for now
+			}
+			else if (uiPrvStartsWith(trimmed, "data:")) {
+				if (rec.hasName && uiPrvIrIsPowerName(rec.name) && rec.type == FlipperIrTypeRaw) {
+					bool malformed = false, cancelled = false;
+
+					if (uiPrvIrSendCodeLine(cnv, uiPrvTrim(trimmed + 5), rec.name, rec.frequency, 1, stats->sent + 1, &malformed, &cancelled)) {
+						rec.sentRaw = true;
+						stats->sent++;
+					}
+					if (malformed)
+						stats->malformed++;
+					if (cancelled)
+						stats->cancelled = true;
+				}
+			}
+			else {
+				stats->malformed++;
+			}
+		}
+
+		uiPrvFlipperRecordFinish(cnv, &rec, stats);
+
+		if (!haveHeader || !haveVersion)
+			stats->malformed++;
+
+		return stats->sent != 0;
+	}
+
+	static bool uiPrvIrPowerBlast(struct Canvas *cnv)
+	{
+		struct FatfsVol *vol = NULL;
+		struct FatfsFil *fil = NULL;
+		const char *path = NULL;
+		char *line = (char*)mbcPrvGetWramBuf();
+		struct IrBlastStats stats;
+		bool ret = false, isFlipper = false, irStarted = false;
+
+		memset(&stats, 0, sizeof(stats));
+
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+
+		if (!uiPrvIrOpenPowerFile(vol, &path, &fil)) {
+			uiAlert(cnv, "Cannot find /IR/tv.ir or /IR/POWER.IR on the SD card", DialogTypeOk);
+			goto out;
+		}
+
+		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper))
+			goto out;
+
+		memset(&stats, 0, sizeof(stats));
+		irRemoteBegin();
+		irStarted = true;
+		ret = isFlipper ? uiPrvIrPowerBlastFlipper(cnv, fil, line, &stats) : uiPrvIrPowerBlastDc32(cnv, fil, line, &stats);
+
+	out:
+		if (irStarted)
+			irRemoteEnd();
+		if (fil)
+			fatfsFileClose(fil);
+		(void)uiPrvCardPreUnmount();
+		fatfsUnmount(vol);
+
+		if (stats.lineTooLong) {
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.malformed && !stats.sent) {
+			char msg[80];
+
+			(void)sprintf(msg, "Malformed IR file near line %u", (unsigned)stats.lineNo);
+			uiAlert(cnv, msg, DialogTypeOk);
+		}
+		else if (stats.cancelled) {
+			uiAlert(cnv, "IR blast cancelled", DialogTypeOk);
+		}
+		else if (ret) {
+			char msg[96];
+
+			(void)sprintf(msg, "IR blast complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			uiAlert(cnv, msg, DialogTypeOk);
+		}
+		else if (path) {
+			uiAlert(cnv, "No power codes found in the IR file", DialogTypeOk);
+		}
+
+		return ret;
+	}
+
+	static bool uiPrvIrTools(struct Canvas *cnv)
+	{
+		bool borrowedGameRam = false;
+
+		while (1) {
+			uint_fast8_t itemHeight, selOption;
+			uint_fast8_t powerOption = 0, backOption = 1;
+			uint8_t button = KEY_BIT_A | KEY_BIT_B;
+
+			uiPrvReset(cnv, false);
+			itemHeight = uiPrvGlyphHeight(cnv) + 1;
+
+			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Power Blast", -1);
+			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
+
+			selOption = uiPrvMenu(cnv, 0, 2, &button);
+			if (button == KEY_BIT_B || selOption == backOption)
+				return borrowedGameRam;
+			if (selOption == powerOption) {
+				(void)uiPrvIrPowerBlast(cnv);
+				borrowedGameRam = true;
+			}
+		}
+	}
+
 	static void uiPrvFwUpdate(struct Canvas *cnv, bool tryZDU)
 	{
 		int_fast8_t updateOption, cancelOption = -1, numOptions = 0, selOption, itemHeight;
@@ -1768,7 +2571,7 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 
 	while (1) {
 		
-		int_fast8_t playOption = -1, selectGameOption = -1, aboutOption, settingsOption, fwUpdateOption, rollOption, powerOffOption, numOptions = 0, selOption, itemHeight;
+		int_fast8_t playOption = -1, selectGameOption = -1, aboutOption, settingsOption, fwUpdateOption, irToolsOption, powerOffOption, numOptions = 0, selOption, itemHeight;
 		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
 		uint32_t ramSz = 0;
@@ -1786,7 +2589,7 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 		#ifdef NO_SD_CARD
 				height = 4;
 		#else
-				height = 6;
+				height = 7;
 		#endif
 			
 			static const char colorTypes[][5] = {
@@ -1800,9 +2603,11 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 		}
 		#ifndef NO_SD_CARD
 			selectGameOption = numOptions++;
-			uiPuts(cnv, cnv->h - 5 * itemHeight, 10, validRom ? "Select Another Game" : "Select a Game", -1);
+			uiPuts(cnv, cnv->h - 6 * itemHeight, 10, validRom ? "Select Another Game" : "Select a Game", -1);
 			fwUpdateOption = numOptions++;
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Firmware Update", -1);
+			uiPuts(cnv, cnv->h - 5 * itemHeight, 10, "Firmware Update", -1);
+			irToolsOption = numOptions++;
+			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR Tools", -1);
 		#endif
 		settingsOption = numOptions++;
 		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Settings", -1);
@@ -1828,6 +2633,15 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 			
 			uiPrvReset(cnv, false);
 			uiPrvFwUpdate(cnv, false);
+		}
+		else if (selOption == irToolsOption) {
+
+			if (!validRom || uiSaveSavestate()) {
+				if (uiPrvIrTools(cnv) && validRom)
+					ret = true;
+			}
+			else
+				uiAlert(cnv, "Failed to save state to flash. IR Tools will not borrow game RAM.", DialogTypeOk);
 		}
 	#endif
 		else if (selOption == aboutOption) {

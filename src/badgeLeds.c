@@ -6,6 +6,7 @@
 
 #define LED_GAME_WRITE_PAUSE_TICKS		(TICKS_PER_SECOND * 2)
 #define LED_DEFAULT_TINT				56
+#define LED_MIN_BRIGHTNESS				15
 #define LED_MIN_SPEED					1
 #define LED_MAX_SPEED					4
 
@@ -29,6 +30,11 @@ static uint_fast8_t badgeLedsPrvSanitizeSpeed(uint_fast8_t speed)
 static uint_fast8_t badgeLedsPrvBrightness(void)
 {
 	return mLedSettings.ledBrightness;
+}
+
+static uint_fast8_t badgeLedsPrvSanitizeBrightness(uint_fast8_t brightness)
+{
+	return brightness >= LED_MIN_BRIGHTNESS ? brightness : LED_MIN_BRIGHTNESS;
 }
 
 const char* badgeLedsModeName(uint_fast8_t mode)
@@ -101,7 +107,7 @@ static void badgeLedsPrvRenderRainbow(void)
 	for (i = 0; i < NUM_WS2812s; i++) {
 		uint8_t r, g, b;
 
-		badgeLedsPrvWheel(mLedFrame * 5 + i * 28, &r, &g, &b);
+		badgeLedsPrvWheel((uint8_t)(mLedFrame * 5 + i * 28), &r, &g, &b);
 		badgeLedsPrvSetRgb(i, r / 2, g / 2, b / 2);
 	}
 	ws2812refresh();
@@ -170,11 +176,15 @@ static void badgeLedsPrvRenderCurrent(void)
 
 void badgeLedsApplySettings(const struct Settings *settings, bool force)
 {
-	bool changed = !mHaveLedSettings || memcmp(&mLedSettings, settings, sizeof(mLedSettings));
+	struct Settings newSettings = *settings;
+	bool changed;
 
-	mLedSettings = *settings;
-	mLedSettings.ledMode = badgeLedsPrvSanitizeMode(mLedSettings.ledMode);
-	mLedSettings.ledSpeed = badgeLedsPrvSanitizeSpeed(mLedSettings.ledSpeed);
+	newSettings.ledMode = badgeLedsPrvSanitizeMode(newSettings.ledMode);
+	newSettings.ledSpeed = badgeLedsPrvSanitizeSpeed(newSettings.ledSpeed);
+	newSettings.ledBrightness = badgeLedsPrvSanitizeBrightness(newSettings.ledBrightness);
+	changed = !mHaveLedSettings || memcmp(&mLedSettings, &newSettings, sizeof(mLedSettings));
+
+	mLedSettings = newSettings;
 	mHaveLedSettings = true;
 
 	if (changed || force) {

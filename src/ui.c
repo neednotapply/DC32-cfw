@@ -940,6 +940,31 @@ static void uiPrvDrawTruncText(struct Canvas *cnv, int32_t r, int32_t c, uint32_
 	}
 }
 
+#define LED_BRIGHTNESS_RAW_MIN			15
+#define LED_BRIGHTNESS_RAW_MAX			255
+#define LED_BRIGHTNESS_MENU_MIN			1
+#define LED_BRIGHTNESS_MENU_MAX			10
+
+static uint_fast8_t uiPrvLedBrightnessToMenu(uint_fast8_t brightness)
+{
+	if (brightness <= LED_BRIGHTNESS_RAW_MIN)
+		return LED_BRIGHTNESS_MENU_MIN;
+	if (brightness >= LED_BRIGHTNESS_RAW_MAX)
+		return LED_BRIGHTNESS_MENU_MAX;
+
+	return LED_BRIGHTNESS_MENU_MIN + (((uint32_t)brightness - LED_BRIGHTNESS_RAW_MIN) * (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) + (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) / 2) / (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN);
+}
+
+static uint8_t uiPrvLedBrightnessFromMenu(uint_fast8_t brightness)
+{
+	if (brightness <= LED_BRIGHTNESS_MENU_MIN)
+		return LED_BRIGHTNESS_RAW_MIN;
+	if (brightness >= LED_BRIGHTNESS_MENU_MAX)
+		return LED_BRIGHTNESS_RAW_MAX;
+
+	return LED_BRIGHTNESS_RAW_MIN + (((uint32_t)brightness - LED_BRIGHTNESS_MENU_MIN) * (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) + (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) / 2) / (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN);
+}
+
 static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
@@ -949,6 +974,7 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		settings->ledMode = LedModeOff;
 	if (settings->ledSpeed < 1 || settings->ledSpeed > 4)
 		settings->ledSpeed = 2;
+	settings->ledBrightness = uiPrvLedBrightnessFromMenu(uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
@@ -998,7 +1024,7 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BRIGHT:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->ledBrightness);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
 		if (button == KEY_BIT_B || selOption == doneOption)
@@ -1021,8 +1047,8 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 			badgeLedsApplySettings(settings, true);
 		}
 
-		if (selOption == ledRedOption || selOption == ledGreenOption || selOption == ledBlueOption || selOption == ledBrightnessOption) {
-			uint8_t *valP = (selOption == ledRedOption) ? &settings->ledRed : ((selOption == ledGreenOption) ? &settings->ledGreen : ((selOption == ledBlueOption) ? &settings->ledBlue : &settings->ledBrightness));
+		if (selOption == ledRedOption || selOption == ledGreenOption || selOption == ledBlueOption) {
+			uint8_t *valP = (selOption == ledRedOption) ? &settings->ledRed : ((selOption == ledGreenOption) ? &settings->ledGreen : &settings->ledBlue);
 
 			if (button == KEY_BIT_LEFT) {
 				if (*valP)
@@ -1037,6 +1063,26 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 					continue;
 			}
 
+			badgeLedsApplySettings(settings, true);
+		}
+
+		if (selOption == ledBrightnessOption) {
+			uint_fast8_t brightness = uiPrvLedBrightnessToMenu(settings->ledBrightness);
+
+			if (button == KEY_BIT_LEFT) {
+				if (brightness > LED_BRIGHTNESS_MENU_MIN)
+					brightness--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (brightness < LED_BRIGHTNESS_MENU_MAX)
+					brightness++;
+				else
+					continue;
+			}
+
+			settings->ledBrightness = uiPrvLedBrightnessFromMenu(brightness);
 			badgeLedsApplySettings(settings, true);
 		}
 

@@ -6,6 +6,7 @@
 
 #define LED_GAME_WRITE_PAUSE_TICKS		(TICKS_PER_SECOND * 2)
 #define LED_DEFAULT_TINT				56
+#define LED_MIN_SPEED					1
 #define LED_MAX_SPEED					4
 
 
@@ -22,7 +23,12 @@ static uint_fast8_t badgeLedsPrvSanitizeMode(uint_fast8_t mode)
 
 static uint_fast8_t badgeLedsPrvSanitizeSpeed(uint_fast8_t speed)
 {
-	return speed <= LED_MAX_SPEED ? speed : 2;
+	return speed >= LED_MIN_SPEED && speed <= LED_MAX_SPEED ? speed : 2;
+}
+
+static uint_fast8_t badgeLedsPrvBrightness(void)
+{
+	return mLedSettings.ledBrightness;
 }
 
 const char* badgeLedsModeName(uint_fast8_t mode)
@@ -42,6 +48,13 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 static uint_fast8_t badgeLedsPrvScale(uint_fast8_t val, uint_fast8_t scale)
 {
 	return ((uint32_t)val * scale) / 255;
+}
+
+static void badgeLedsPrvSetRgb(uint32_t ledIdx, uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
+{
+	uint_fast8_t brightness = badgeLedsPrvBrightness();
+
+	ws2812SetRgb(ledIdx, badgeLedsPrvScale(red, brightness), badgeLedsPrvScale(green, brightness), badgeLedsPrvScale(blue, brightness));
 }
 
 static void badgeLedsPrvWheel(uint_fast8_t pos, uint8_t *rP, uint8_t *gP, uint8_t *bP)
@@ -67,7 +80,7 @@ static void badgeLedsPrvWheel(uint_fast8_t pos, uint8_t *rP, uint8_t *gP, uint8_
 
 static uint_fast8_t badgeLedsPrvFrameIntervalIdx(uint_fast8_t speed)
 {
-	static const uint8_t intervals[] = {24, 16, 10, 6, 3};
+	static const uint8_t intervals[] = {0, 3, 6, 12, 24};
 
 	speed = badgeLedsPrvSanitizeSpeed(speed);
 	return intervals[speed];
@@ -75,7 +88,9 @@ static uint_fast8_t badgeLedsPrvFrameIntervalIdx(uint_fast8_t speed)
 
 static void badgeLedsPrvRenderSolid(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
 {
-	ws2812SetAllRgb(red, green, blue);
+	uint_fast8_t brightness = badgeLedsPrvBrightness();
+
+	ws2812SetAllRgb(badgeLedsPrvScale(red, brightness), badgeLedsPrvScale(green, brightness), badgeLedsPrvScale(blue, brightness));
 	ws2812refresh();
 }
 
@@ -87,7 +102,7 @@ static void badgeLedsPrvRenderRainbow(void)
 		uint8_t r, g, b;
 
 		badgeLedsPrvWheel(mLedFrame * 5 + i * 28, &r, &g, &b);
-		ws2812SetRgb(i, r / 2, g / 2, b / 2);
+		badgeLedsPrvSetRgb(i, r / 2, g / 2, b / 2);
 	}
 	ws2812refresh();
 }
@@ -101,7 +116,7 @@ static void badgeLedsPrvRenderFlame(void)
 		uint_fast8_t flicker = (mLedFrame * 17 + i * 47 + (i * i * 13)) & 0x3f;
 		uint_fast8_t heat = 48 + pulse * 4 + flicker / 2;
 
-		ws2812SetRgb(i, heat, heat / 3 + flicker / 4, flicker / 16);
+		badgeLedsPrvSetRgb(i, heat, heat / 3 + flicker / 4, flicker / 16);
 	}
 	ws2812refresh();
 }
@@ -122,7 +137,7 @@ static void badgeLedsPrvRenderTravelingDot(void)
 			dist = NUM_WS2812s - dist;
 
 		scale = dist == 0 ? 255 : (dist == 1 ? 96 : (dist == 2 ? 32 : 0));
-		ws2812SetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
+		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
 	}
 	ws2812refresh();
 }

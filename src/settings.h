@@ -28,6 +28,7 @@ struct Settings {
 	uint8_t ledBlue;
 	uint8_t ledMode;
 	uint8_t ledSpeed;
+	uint8_t ledBrightness;
 };
 
 

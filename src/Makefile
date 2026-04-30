@@ -50,6 +50,7 @@ EXTRA_OBJS	+= mappersC.o
 #EXTRA_OBJS	+= mappersAsmM3.o
 
 TARGET		= $(APP).bin
+SDCARD_TARGET	= FIRMWARE.BIN
 
 CMD			= sudo CortexProg info targetsel 0 write $(APP).bin 0x10000000
 	
@@ -68,12 +69,17 @@ $(APP): $(OBJS)
 	$(EXTRA)
 
 
-.PHONY: app AVR clean flash trace
+.PHONY: app AVR clean flash sdcard trace
 
 app: $(TARGET)
 
 %.bin: %
 	$(OBJCOPY) -O binary $< $@ -j.text -j.rodata -j.data -j.vectors
+
+$(SDCARD_TARGET): $(APP).bin
+	cp $< $@
+
+sdcard: $(SDCARD_TARGET)
 
 AVR:	$(APP)
 	sudo avrdude -V -p ATmega1284p -c avrisp2 -P usb -U flash:w:$(APP).hex:i
@@ -85,7 +91,7 @@ AVR:	$(APP)
 	$(CC) $(CCFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(APP) $(APP).bin *.o
+	rm -f $(APP) $(APP).bin $(SDCARD_TARGET) *.o
 
 
 flash: $(APP).bin

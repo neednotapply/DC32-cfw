@@ -44,28 +44,28 @@ jobs:
 
       - name: Build firmware
         working-directory: src
-        run: make app
+        run: make app sdcard
 
       - name: Package firmware artifacts
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
-          cp src/uGB.bin "$ARTIFACT_DIR/uGB.bin"
-          picotool uf2 convert "$ARTIFACT_DIR/uGB.bin" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
+          cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
+          picotool uf2 convert "$ARTIFACT_DIR/FIRMWARE.BIN" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: |
-            ${{ runner.temp }}/firmware/uGB.bin
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/FIRMWARE.BIN
 
       - name: Attach firmware to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/firmware/uGB.bin
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/FIRMWARE.BIN
           overwrite_files: true

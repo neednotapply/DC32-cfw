@@ -467,6 +467,8 @@ static void uiPrvUpscalerMain(void)
 
 	#ifdef UPSCALER_ROTATES
 		fb += DISP_WIDTH - 1 - (lineNum * 3 / 2);
+		if (mRotateGame && !(sourceLineNum & 1))
+			fb--;
 	#else
 		fb += DISP_WIDTH * (lineNum * 3 / 2);
 	#endif
@@ -475,8 +477,17 @@ static void uiPrvUpscalerMain(void)
 
 			uiPrvHorizStretch(lines[1], pixelsIn);
 			uiPrvMix(lines[0], lines[1]);
-			fb = uiPrvOuputStretchedOnly(fb, lines[0]);
-			fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
+		#ifdef UPSCALER_ROTATES
+			if (mRotateGame) {
+				fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
+				fb = uiPrvOuputStretchedOnly(fb, lines[0]);
+			}
+			else
+		#endif
+			{
+				fb = uiPrvOuputStretchedOnly(fb, lines[0]);
+				fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
+			}
 		}
 		else {
 			uiPrvHorizStretch(lines[0], pixelsIn);

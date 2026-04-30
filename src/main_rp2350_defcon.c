@@ -453,7 +453,7 @@ static void uiPrvUpscalerMain(void)
 		static PIXFMT __attribute__((aligned(4))) pixelsIn[160];
 		uint32_t *pixTwice = (uint32_t*)pixelsIn;
 		uint16_t *fb = dispGetFb();
-		uint32_t *dataIn, lineNum;
+		uint32_t *dataIn, lineNum, sourceLineNum;
 		uint_fast8_t i, j;
 		PIXFMT* pixels;
 		
@@ -461,6 +461,7 @@ static void uiPrvUpscalerMain(void)
 		
 		memcpy(pixelsIn, (PIXFMT*)dataIn[0], sizeof(pixelsIn));
 		lineNum = dataIn[1];
+		sourceLineNum = dataIn[2];
 		
 		uiPrvFifoTx(0);
 
@@ -470,7 +471,7 @@ static void uiPrvUpscalerMain(void)
 		fb += DISP_WIDTH * (lineNum * 3 / 2);
 	#endif
 
-		if (lineNum & 1) {		//mix and output mix
+		if (sourceLineNum & 1) {		//mix and output mix
 
 			uiPrvHorizStretch(lines[1], pixelsIn);
 			uiPrvMix(lines[0], lines[1]);
@@ -537,7 +538,7 @@ void gbDrawLine(uint8_t lineNum, PIXFMT* pixels)
 
 	if (mUpscaling) {
 
-		uint32_t info[2] = {(uintptr_t)linePixels, outLineNum};
+		uint32_t info[3] = {(uintptr_t)linePixels, outLineNum, lineNum};
 
 		uiPrvFifoTx((uintptr_t)info);
 		uiPrvFifoRx();	//wait for copied-out status

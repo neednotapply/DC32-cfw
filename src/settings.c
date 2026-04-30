@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			8
+#define SETTINGS_CUR_VER			9
 
 
 union SettingsPage {
@@ -106,6 +106,10 @@ void settingsGet(struct Settings *settings)
 
 		case 7:				//upgrade from v7
 			settings->ledBrightness = 255;
+			//fallthrough
+
+		case 8:				//upgrade from v8
+			settings->rotation = 0;
 			//fallthrough
 
 		//other cases here, in increasing order

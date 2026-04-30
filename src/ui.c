@@ -1078,7 +1078,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	
 	while (1) {
 		
-		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, ledSettingsOption;
+		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, rotationOption, ledSettingsOption;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speeds[][8] = DISP_SPEED_NAMES;
 
@@ -1099,6 +1099,12 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "UPSCALE:", -1);
 		cnv->foreColor = 15;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings.upscale ? "YES       " : "NO       ", -1);
+	
+		rotationOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "ROTATION:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings.rotation ? "FLIPPED  " : "NORMAL   ", -1);
 	
 		speedOption = numOptions++;
 		cnv->foreColor = 11;
@@ -1142,6 +1148,11 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			
 			restartCurGame = true;
 			settings.actLikeGBC = !settings.actLikeGBC;
+		}
+
+		if (selOption == rotationOption) {
+			
+			settings.rotation = !settings.rotation;
 		}
 		
 		if (selOption == speedOption) {

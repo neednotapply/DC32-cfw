@@ -23,7 +23,9 @@
 static void uiPrvUpscalerInit(void);
 static void uiPrvUpscalerDeinit(void);
 static bool shouldUpscale(void);
+static bool shouldRotateGame(void);
 static bool mUpscaling;
+static bool mRotateGame;
 
 static uint64_t mRtcTickOffset;		//ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
@@ -200,6 +202,7 @@ static void exitGame(void)
 	uiInGame();
 	memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
 	mUpscaling = shouldUpscale();
+	mRotateGame = shouldRotateGame();
 	if (mUpscaling)
 		uiPrvUpscalerInit();
 }
@@ -515,14 +518,26 @@ static void uiPrvUpscalerDeinit(void)
 void gbDrawLine(uint8_t lineNum, PIXFMT* pixels)
 {
 	uint16_t *fb = dispGetFb();
+	PIXFMT flippedPixels[160];
+	PIXFMT *linePixels = pixels;
+	uint8_t outLineNum = lineNum;
 	
+	if (mRotateGame) {
+		uint_fast16_t i;
+
+		outLineNum = 143 - lineNum;
+		for (i = 0; i < 160; i++)
+			flippedPixels[i] = pixels[159 - i];
+		linePixels = flippedPixels;
+	}
+
 	if (!lineNum)
 		dispPrvFrameCtrWait();
 
 
 	if (mUpscaling) {
 
-		uint32_t info[2] = {(uintptr_t)pixels, lineNum};
+		uint32_t info[2] = {(uintptr_t)linePixels, outLineNum};
 
 		uiPrvFifoTx((uintptr_t)info);
 		uiPrvFifoRx();	//wait for copied-out status
@@ -537,18 +552,18 @@ void gbDrawLine(uint8_t lineNum, PIXFMT* pixels)
 			
 			fb += (DISP_WIDTH - 144) / 2;
 			fb += DISP_WIDTH * (DISP_HEIGHT - 160) / 2;
-			fb += 144 - lineNum - 1;
+			fb += 144 - outLineNum - 1;
 
 			
 			for (i = 0; i < 160; i++, fb += DISP_WIDTH)
-				*fb = *pixels++ &~ BG_FLAG_UNDER_OBJS;
+				*fb = *linePixels++ &~ BG_FLAG_UNDER_OBJS;
 
 		#else
 
-			fb += DISP_WIDTH * (lineNum + (DISP_HEIGHT - 144) / 2) + (DISP_WIDTH - 160) / 2;
+			fb += DISP_WIDTH * (outLineNum + (DISP_HEIGHT - 144) / 2) + (DISP_WIDTH - 160) / 2;
 			
 			for (i = 0; i < 160; i++)
-				fb[i] = pixels[i] &~ BG_FLAG_UNDER_OBJS;
+				fb[i] = linePixels[i] &~ BG_FLAG_UNDER_OBJS;
 		#endif
 	}
 	
@@ -616,6 +631,15 @@ static bool __attribute__((noinline)) shouldUpscale(void)
 	return settings.upscale;
 }
 
+static bool __attribute__((noinline)) shouldRotateGame(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+
+	return settings.rotation;
+}
+
 static void applySavedLeds(void)
 {
 	struct Settings settings;
@@ -638,6 +662,7 @@ static void gb(void)
 			
 			dispPrvFrameCtrReset();
 			mUpscaling = shouldUpscale();
+			mRotateGame = shouldRotateGame();
 			if (mUpscaling) 
 				uiPrvUpscalerInit();
 			memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);	

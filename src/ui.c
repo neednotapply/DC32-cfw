@@ -15,7 +15,6 @@
 #include "irRemote.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
-#include "wavPlayer.h"
 #include "audioPwm.h"
 #include "timebase.h"
 #include "utf.h"
@@ -54,14 +53,8 @@ struct MusicOption {
 	struct MusicOption *prev, *next;
 	struct FatFileLocator locator;
 	uint32_t size;
-	uint8_t type;
 	uint8_t isDir;
 	char name[];
-};
-
-enum MusicOptionType {
-	MusicOptionTypeRtttl,
-	MusicOptionTypeWav,
 };
 
 enum MusicPlaybackControlUi {
@@ -2574,29 +2567,9 @@ bool uiSaveSavestate(void)
 		}
 	}
 
-	static bool uiPrvMusicTypeForName(const char *fname, uint8_t *typeP)
+	static bool uiPrvMusicPlayableName(const char *fname)
 	{
-		if (uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt")) {
-			*typeP = MusicOptionTypeRtttl;
-			return true;
-		}
-		if (uiPrvStrEndsWithNoCase(fname, ".wav")) {
-			*typeP = MusicOptionTypeWav;
-			return true;
-		}
-		return false;
-	}
-
-	static const char *uiPrvMusicTypeName(uint8_t type)
-	{
-		switch (type) {
-			case MusicOptionTypeRtttl:
-				return "RTTTL";
-			case MusicOptionTypeWav:
-				return "WAV";
-			default:
-				return "?";
-		}
+		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt");
 	}
 
 	static uint_fast8_t uiPrvContentTop(struct Canvas *cnv)
@@ -2620,7 +2593,7 @@ bool uiSaveSavestate(void)
 		return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
 	}
 
-	static bool uiPrvMusicListAppend(struct MusicListCtx *ctx, const char *fname, uint32_t fileSz, uint8_t type, bool isDir, const struct FatFileLocator *locator)
+	static bool uiPrvMusicListAppend(struct MusicListCtx *ctx, const char *fname, uint32_t fileSz, bool isDir, const struct FatFileLocator *locator)
 	{
 		uint32_t nameLen = strlen(fname), spaceNeeded;
 
@@ -2634,7 +2607,6 @@ bool uiSaveSavestate(void)
 		ctx->nextAvail->next = NULL;
 		ctx->nextAvail->locator = *locator;
 		ctx->nextAvail->size = fileSz;
-		ctx->nextAvail->type = type;
 		ctx->nextAvail->isDir = isDir;
 		memcpy(ctx->nextAvail->name, fname, nameLen + 1);
 		if (ctx->tail)
@@ -2656,8 +2628,6 @@ bool uiSaveSavestate(void)
 		uint32_t seen = 0;
 
 		while (fatfsDirRead(dir, ctx->fname, &fileSz, &attrs, &locator)) {
-			uint8_t type;
-
 			if (!(++seen & 0x0f))
 				badgeLedsTick();
 			if (attrs & FATFS_ATTR_VOL_LBL)
@@ -2666,13 +2636,13 @@ bool uiSaveSavestate(void)
 			if (attrs & FATFS_ATTR_DIR) {
 				if (uiPrvMusicIsDotDir(ctx->fname))
 					continue;
-				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, MusicOptionTypeRtttl, true, &locator))
+				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, true, &locator))
 					break;
 				continue;
 			}
 
-			if (uiPrvMusicTypeForName(ctx->fname, &type))
-				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, type, false, &locator))
+			if (uiPrvMusicPlayableName(ctx->fname))
+				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, false, &locator))
 					break;
 		}
 	}
@@ -2732,7 +2702,6 @@ bool uiSaveSavestate(void)
 		struct Canvas *cnv;
 		struct Settings *settings;
 		const char *name;
-		uint8_t type;
 		uint8_t prevKeys;
 		uint8_t focus;
 		uint8_t lastPct;
@@ -2842,10 +2811,7 @@ bool uiSaveSavestate(void)
 		cnv->foreColor = 0;
 		uiPrvFillRect(cnv, 10, row, cnv->w - 1, row + uiPrvGlyphHeight(cnv));
 		cnv->foreColor = 15;
-		if (data->type == MusicOptionTypeRtttl)
-			uiPrintf(cnv, row, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
-		else
-			uiPrintf(cnv, row, 10, "%s %u%% %s %uHz", status->paused ? "Paused" : "Playing", pct, uiPrvMusicTypeName(data->type), status->sampleRate);
+		uiPrintf(cnv, row, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
 		cnv->foreColor = fore;
 	}
 
@@ -2921,7 +2887,7 @@ bool uiSaveSavestate(void)
 	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings)
 	{
 		struct FatfsFil *fil;
-		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = song->name, .type = song->type, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
+		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = song->name, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
 		enum MusicPlayerResult ret;
 
 		audioPwmSetVolume(settings->musicVolume);
@@ -2933,28 +2899,14 @@ bool uiSaveSavestate(void)
 
 		data.prevKeys = uiGetKeys();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
-		switch (song->type) {
-			case MusicOptionTypeRtttl:
-				ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
-				break;
-			case MusicOptionTypeWav:
-				ret = wavPlayerPlayFile(fil, uiPrvMusicControl, &data);
-				break;
-			default:
-				ret = MusicPlayerResultDecodeError;
-				break;
-		}
+		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		fatfsFileClose(fil);
 		if (ret == MusicPlayerResultStopped)
 			uiPrvWaitKeysReleased();
 		if (ret == MusicPlayerResultFileError)
 			uiAlert(cnv, "Music read failed", DialogTypeOk);
-		else if (ret == MusicPlayerResultDecodeError) {
-			if (song->type == MusicOptionTypeWav)
-				uiAlert(cnv, "Unsupported WAV file", DialogTypeOk);
-			else
-				uiAlert(cnv, "Bad RTTTL file", DialogTypeOk);
-		}
+		else if (ret == MusicPlayerResultDecodeError)
+			uiAlert(cnv, "Bad RTTTL file", DialogTypeOk);
 
 		return ret;
 	}

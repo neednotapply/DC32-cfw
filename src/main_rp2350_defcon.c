@@ -14,6 +14,7 @@
 #include "memMap.h"
 #include "printf.h"
 #include "sleep.h"
+#include "audioPwm.h"
 #include "2350.h"
 #include "qspi.h"
 #include "mbc.h"
@@ -42,35 +43,9 @@ static bool mPrevIrdaModeWasTx;
 
 
 
-#define AUDIO_PWM_IDX		4
-
-
 static void doFreq(uint32_t freq)
 {
-	uint32_t duty, clkDiv = 32, baseFreq = TICKS_PER_SECOND / clkDiv;
-
-	//divider is 8 bits, counter is 16
-	//with no division, min freq possible is 2.3KHz
-	//widh division by 32, min freq possible is 71Hz
-
-	pwm_hw->slice[AUDIO_PWM_IDX].cc = 0;	//wait for it to go low now
-	while (sio_hw->gpio_in & (1 << PIN_SPQR));
-	pwm_hw->slice[AUDIO_PWM_IDX].csr &=~ PWM_CH0_CSR_EN_BITS;
-
-	duty = (baseFreq + freq / 2) / freq;
-	if (duty < 2)
-		duty = 2;
-
-	while (pwm_hw->slice[AUDIO_PWM_IDX].csr & PWM_CH0_CSR_EN_BITS);
-	
-	if (freq) {
-		pwm_hw->slice[AUDIO_PWM_IDX].top = (pwm_hw->slice[AUDIO_PWM_IDX].top &~ PWM_CH0_TOP_BITS) | ((duty - 1) << PWM_CH1_TOP_LSB);		//this is correct. valus valis for "cc" become 0..8191 to span the range of 0..100% duty
-		pwm_hw->slice[AUDIO_PWM_IDX].ctr = 0;
-		*(volatile uint16_t*)&pwm_hw->slice[AUDIO_PWM_IDX].cc = duty / 2;
-		pwm_hw->slice[AUDIO_PWM_IDX].csr = (pwm_hw->slice[AUDIO_PWM_IDX].csr &~ (PWM_CH0_CSR_PH_ADV_BITS | PWM_CH0_CSR_PH_RET_BITS | PWM_CH0_CSR_DIVMODE_BITS | PWM_CH0_CSR_B_INV_BITS)) | (PWM_CH0_CSR_DIVMODE_VALUE_DIV << PWM_CH0_CSR_DIVMODE_LSB) | PWM_CH0_CSR_A_INV_BITS;
-		pwm_hw->slice[AUDIO_PWM_IDX].div = (pwm_hw->slice[AUDIO_PWM_IDX].div &~ (PWM_CH0_DIV_INT_BITS | PWM_CH0_DIV_FRAC_BITS)) | (32 << PWM_CH0_DIV_INT_LSB);
-		pwm_hw->slice[AUDIO_PWM_IDX].csr |= PWM_CH0_CSR_EN_BITS;
-	}
+	(void)audioPwmTone(freq);
 }
 
 static void note(uint32_t freq, uint32_t dur)

@@ -7,6 +7,7 @@
 #include "memMap.h"
 
 #define MP3_INPUT_BUF_SZ	16384
+#define MP3_MAX_FRAME_SEARCH	(MP3_INPUT_BUF_SZ * 4)
 
 #define MP3_DECODER_PTR	((mp3dec_t*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + 0x8000))
 #define MP3_INPUT_PTR	((uint8_t*)(((uintptr_t)(MP3_DECODER_PTR + 1) + 3) &~ 3u))
@@ -15,6 +16,40 @@
 static enum Mp3PlayerControl mp3PlayerPrvPoll(Mp3PlayerControlF controlF, void *userData, struct Mp3PlayerStatus *status)
 {
 	return controlF ? controlF(userData, status) : Mp3PlayerControlNone;
+}
+
+static enum Mp3PlayerResult mp3PlayerPrvPause(Mp3PlayerControlF controlF, void *userData, struct Mp3PlayerStatus *status);
+
+static bool mp3PlayerPrvHandleControl(Mp3PlayerControlF controlF, void *userData, struct Mp3PlayerStatus *status, enum Mp3PlayerResult *retP)
+{
+	enum Mp3PlayerControl ctl = mp3PlayerPrvPoll(controlF, userData, status);
+
+	if (ctl == Mp3PlayerControlPause) {
+		enum Mp3PlayerResult paused = mp3PlayerPrvPause(controlF, userData, status);
+
+		if (paused == Mp3PlayerResultDone)
+			return false;
+
+		audioPwmStop();
+		*retP = paused;
+		return true;
+	}
+	if (ctl == Mp3PlayerControlStop) {
+		audioPwmStop();
+		*retP = Mp3PlayerResultStopped;
+		return true;
+	}
+	if (ctl == Mp3PlayerControlPrev) {
+		audioPwmStop();
+		*retP = Mp3PlayerResultPrev;
+		return true;
+	}
+	if (ctl == Mp3PlayerControlNext) {
+		audioPwmStop();
+		*retP = Mp3PlayerResultNext;
+		return true;
+	}
+	return false;
 }
 
 static enum Mp3PlayerResult mp3PlayerPrvPause(Mp3PlayerControlF controlF, void *userData, struct Mp3PlayerStatus *status)
@@ -46,7 +81,7 @@ enum Mp3PlayerResult mp3PlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 	uint8_t *mp3Input = MP3_INPUT_PTR;
 	mp3d_sample_t *pcm = MP3_PCM_PTR;
 	mp3dec_t *decoder = MP3_DECODER_PTR;
-	uint32_t have = 0, nRead = 0;
+	uint32_t have = 0, nRead = 0, frameSearchBytes = 0;
 	bool eof = false, audioStarted = false;
 
 	memset(&status, 0, sizeof(status));
@@ -55,9 +90,13 @@ enum Mp3PlayerResult mp3PlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 
 	while (1) {
 		mp3dec_frame_info_t info;
-		enum Mp3PlayerControl ctl;
+		enum Mp3PlayerResult ctlRet;
 		int samples;
 		uint32_t consumed;
+
+		status.bytesPlayed = fatfsFileTell(fil) >= have ? fatfsFileTell(fil) - have : fatfsFileTell(fil);
+		if (mp3PlayerPrvHandleControl(controlF, userData, &status, &ctlRet))
+			return ctlRet;
 
 		while (!eof && have < MP3_INPUT_BUF_SZ / 2) {
 			if (!fatfsFileRead(fil, mp3Input + have, MP3_INPUT_BUF_SZ - have, &nRead)) {
@@ -83,6 +122,10 @@ enum Mp3PlayerResult mp3PlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 				return Mp3PlayerResultDecodeError;
 			}
 			consumed = 1;
+			if (++frameSearchBytes > MP3_MAX_FRAME_SEARCH) {
+				audioPwmStop();
+				return Mp3PlayerResultDecodeError;
+			}
 		}
 		if (consumed > have)
 			consumed = have;
@@ -90,6 +133,7 @@ enum Mp3PlayerResult mp3PlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 		if (samples > 0 && info.hz > 0 && info.channels > 0) {
 			int i;
 
+			frameSearchBytes = 0;
 			if (!audioStarted || status.sampleRate != (uint32_t)info.hz) {
 				audioPwmStop();
 				status.sampleRate = info.hz;
@@ -110,33 +154,15 @@ enum Mp3PlayerResult mp3PlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 				audioPwmWaitNext();
 
 				if (!(i & 0x7f)) {
-					ctl = mp3PlayerPrvPoll(controlF, userData, &status);
-					if (ctl == Mp3PlayerControlPause) {
-						enum Mp3PlayerResult paused = mp3PlayerPrvPause(controlF, userData, &status);
-						if (paused != Mp3PlayerResultDone) {
-							audioPwmStop();
-							return paused;
-						}
-					}
-					else if (ctl == Mp3PlayerControlStop) {
-						audioPwmStop();
-						return Mp3PlayerResultStopped;
-					}
-					else if (ctl == Mp3PlayerControlPrev) {
-						audioPwmStop();
-						return Mp3PlayerResultPrev;
-					}
-					else if (ctl == Mp3PlayerControlNext) {
-						audioPwmStop();
-						return Mp3PlayerResultNext;
-					}
+					if (mp3PlayerPrvHandleControl(controlF, userData, &status, &ctlRet))
+						return ctlRet;
 				}
 			}
 		}
 
-		status.bytesPlayed = fatfsFileTell(fil);
 		if (consumed < have)
 			memmove(mp3Input, mp3Input + consumed, have - consumed);
 		have -= consumed;
+		status.bytesPlayed = fatfsFileTell(fil) >= have ? fatfsFileTell(fil) - have : fatfsFileTell(fil);
 	}
 }

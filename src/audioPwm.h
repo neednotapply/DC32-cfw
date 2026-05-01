@@ -7,6 +7,7 @@
 bool audioPwmStart(uint32_t sampleRate);
 void audioPwmWriteSample(int16_t sample);
 void audioPwmWaitNext(void);
+bool audioPwmTone(uint32_t freq);
 void audioPwmStop(void);
 
 #endif

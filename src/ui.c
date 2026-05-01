@@ -14,6 +14,7 @@
 #include "mbc.h"
 #include "irRemote.h"
 #include "mp3Player.h"
+#include "audioPwm.h"
 #include "timebase.h"
 #include "utf.h"
 #include "ui.h"
@@ -2653,6 +2654,8 @@ bool uiSaveSavestate(void)
 			return Mp3PlayerResultStopped;
 		}
 
+		data.prevKeys = uiGetKeys();
+		data.lastDraw = getTime() - TICKS_PER_SECOND;
 		ret = mp3PlayerPlayFile(fil, uiPrvMp3Control, &data);
 		fatfsFileClose(fil);
 		if (ret == Mp3PlayerResultFileError)
@@ -2661,6 +2664,24 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "MP3 decode failed", DialogTypeOk);
 
 		return ret;
+	}
+
+	static void uiPrvSpeakerTest(struct Canvas *cnv)
+	{
+		static const uint16_t freqs[] = {500, 1000, 2000, 4000};
+		uint_fast8_t i;
+
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, 10, 10, "Speaker Test", -1);
+		uiPuts(cnv, 10 + uiPrvGlyphHeight(cnv) + 2, 10, "Playing tone sweep...", -1);
+
+		for (i = 0; i < sizeof(freqs) / sizeof(*freqs); i++) {
+			(void)audioPwmTone(freqs[i]);
+			delayMsec(250);
+			audioPwmStop();
+			delayMsec(60);
+		}
+		uiAlert(cnv, "Speaker test complete.", DialogTypeOk);
 	}
 
 	static void uiPrvMp3Player(struct Canvas *cnv)
@@ -2758,17 +2779,18 @@ bool uiSaveSavestate(void)
 
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t irOption = 0, mp3Option = 1, backOption = 2;
+			uint_fast8_t irOption = 0, mp3Option = 1, speakerOption = 2, backOption = 3;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "IR Tools", -1);
-			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "MP3 Player", -1);
+			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR Tools", -1);
+			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "MP3 Player", -1);
+			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Speaker Test", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
-			selOption = uiPrvMenu(cnv, 0, 3, &button);
+			selOption = uiPrvMenu(cnv, 0, 4, &button);
 			if (button == KEY_BIT_B || selOption == backOption)
 				return borrowedGameRam;
 			if (selOption == irOption) {
@@ -2779,6 +2801,8 @@ bool uiSaveSavestate(void)
 				uiPrvMp3Player(cnv);
 				borrowedGameRam = true;
 			}
+			else if (selOption == speakerOption)
+				uiPrvSpeakerTest(cnv);
 		}
 	}
 

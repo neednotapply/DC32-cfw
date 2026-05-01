@@ -29,6 +29,7 @@ static uint32_t mPcmAlarmPhase;
 static uint32_t mPcmNextAlarm;
 static uint32_t mToneDuty;
 static uint8_t mVolume = AUDIO_PWM_VOLUME_MAX;
+static bool mPcmDutySamples;
 static bool mPcmTimerInited;
 static volatile enum AudioPwmMode mMode;
 
@@ -149,7 +150,10 @@ void TIMER0_IRQ_3_IRQHandler(void)
 			mPcmReadIdx = 0;
 		mPcmQueued--;
 	}
-	audioPwmPrvWriteSampleNow(sample);
+	if (mPcmDutySamples)
+		audioPwmPrvWriteDuty((uint8_t)sample);
+	else
+		audioPwmPrvWriteSampleNow(sample);
 	audioPwmPrvArmNextPcmAlarm();
 }
 
@@ -164,6 +168,17 @@ void audioPwmSetVolume(uint_fast8_t volume)
 		else
 			audioPwmStop();
 	}
+	else if (mMode == AudioPwmModePcm && mPcmDutySamples) {
+		if (mVolume) {
+			audioPwmPrvPinToPwm();
+			pwm_hw->slice[AUDIO_PWM_IDX].csr |= PWM_CH0_CSR_EN_BITS;
+		}
+		else {
+			audioPwmPrvDisable();
+			audioPwmPrvWriteDuty(0);
+			audioPwmPrvPinLow();
+		}
+	}
 }
 
 uint_fast8_t audioPwmGetVolume(void)
@@ -171,7 +186,7 @@ uint_fast8_t audioPwmGetVolume(void)
 	return mVolume;
 }
 
-bool audioPwmStart(uint32_t sampleRate)
+static bool audioPwmPrvStartPcm(uint32_t sampleRate, bool dutySamples)
 {
 	if (!sampleRate)
 		return false;
@@ -188,6 +203,11 @@ bool audioPwmStart(uint32_t sampleRate)
 	pwm_hw->slice[AUDIO_PWM_IDX].csr = (pwm_hw->slice[AUDIO_PWM_IDX].csr &~ (PWM_CH0_CSR_PH_ADV_BITS | PWM_CH0_CSR_PH_RET_BITS |
 		PWM_CH0_CSR_DIVMODE_BITS | PWM_CH0_CSR_B_INV_BITS | PWM_CH0_CSR_A_INV_BITS | PWM_CH0_CSR_PH_CORRECT_BITS)) |
 		(PWM_CH0_CSR_DIVMODE_VALUE_DIV << PWM_CH0_CSR_DIVMODE_LSB) | audioPwmPrvInvertBit() | PWM_CH0_CSR_EN_BITS;
+	if (dutySamples && !mVolume) {
+		audioPwmPrvDisable();
+		audioPwmPrvWriteDuty(0);
+		audioPwmPrvPinLow();
+	}
 
 	mPcmReadIdx = 0;
 	mPcmWriteIdx = 0;
@@ -195,6 +215,7 @@ bool audioPwmStart(uint32_t sampleRate)
 	mPcmSampleRate = sampleRate;
 	mPcmAlarmPhase = 0;
 	mPcmNextAlarm = AUDIO_PCM_TIMER->timerawl + 2;
+	mPcmDutySamples = dutySamples;
 	mMode = AudioPwmModePcm;
 	NVIC_SetPriority(AUDIO_PCM_IRQ, 0);
 	NVIC_ClearPendingIRQ(AUDIO_PCM_IRQ);
@@ -204,7 +225,17 @@ bool audioPwmStart(uint32_t sampleRate)
 	return true;
 }
 
-void audioPwmWriteSample(int16_t sample)
+bool audioPwmStart(uint32_t sampleRate)
+{
+	return audioPwmPrvStartPcm(sampleRate, false);
+}
+
+bool audioPwmStartDuty(uint32_t sampleRate)
+{
+	return audioPwmPrvStartPcm(sampleRate, true);
+}
+
+static void audioPwmPrvWritePcmValue(int16_t sample)
 {
 	uint64_t timeout;
 
@@ -232,6 +263,16 @@ void audioPwmWriteSample(int16_t sample)
 		mPcmQueued++;
 	}
 	__enable_irq();
+}
+
+void audioPwmWriteSample(int16_t sample)
+{
+	audioPwmPrvWritePcmValue(sample);
+}
+
+void audioPwmWriteDutySample(uint8_t duty)
+{
+	audioPwmPrvWritePcmValue(duty);
 }
 
 void audioPwmWaitNext(void)
@@ -300,5 +341,6 @@ void audioPwmStop(void)
 	audioPwmPrvWriteDuty(0);
 	audioPwmPrvPinLow();
 	mPcmQueued = 0;
+	mPcmDutySamples = false;
 	mMode = AudioPwmModeStopped;
 }

@@ -1,18 +1,10 @@
 #include <string.h>
 #include "audioPwm.h"
 #include "memMap.h"
-#include "timebase.h"
 #include "wavPlayer.h"
 
 #define WAV_BUF_SZ	2048
 #define WAV_BUF		((uint8_t*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + QSPI_RAM_SIZE_MAX / 2))
-#define WAV_WINDOW_MIN_SAMPLES	128
-#define WAV_WINDOW_MAX_SAMPLES	1024
-#define WAV_WINDOW_HZ			50
-#define WAV_SILENCE_PEAK		1200
-#define WAV_ZERO_HYST			900
-#define WAV_FREQ_MIN			80
-#define WAV_FREQ_MAX			5000
 
 static uint16_t wavPrvReadLe16(const uint8_t *p)
 {
@@ -42,6 +34,7 @@ static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, st
 			ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
 			if (ctl == MusicPlayerControlPause) {
 				status->paused = false;
+				(void)audioPwmStartDuty(status->sampleRate);
 				return false;
 			}
 			if (ctl == MusicPlayerControlStop) {
@@ -76,120 +69,51 @@ static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, st
 	return false;
 }
 
-static bool wavPrvWaitUntil(uint64_t end, MusicPlayerControlF controlF, void *userData, struct MusicPlayerStatus *status, enum MusicPlayerResult *retP)
-{
-	while ((int64_t)(end - getTime()) > 0) {
-		uint64_t stepEnd = getTime() + TICKS_PER_SECOND / 100;
-
-		if ((int64_t)(stepEnd - end) > 0)
-			stepEnd = end;
-		if (wavPrvHandleControl(controlF, userData, status, retP))
-			return true;
-		while ((int64_t)(stepEnd - getTime()) > 0);
-	}
-	return false;
-}
-
-static int16_t wavPrvSample(const uint8_t *p, uint16_t channels, uint16_t bitsPerSample)
+static int32_t wavPrvSigned8Sample(const uint8_t *p, uint16_t channels, uint16_t bitsPerSample)
 {
 	if (bitsPerSample == 8) {
-		int32_t sample = p[0];
+		int32_t sample = (int32_t)p[0] - 128;
 
 		if (channels == 2)
-			sample = (sample + p[1]) / 2;
-		return (sample - 128) << 8;
+			sample = (sample + (int32_t)p[1] - 128) / 2;
+		return sample;
 	}
 	else {
 		int32_t sample = (int16_t)wavPrvReadLe16(p);
 
 		if (channels == 2)
 			sample = (sample + (int16_t)wavPrvReadLe16(p + 2)) / 2;
-		return sample;
+		return sample / 256;
 	}
 }
 
-struct WavToneWindow {
-	uint32_t sampleRate;
-	uint32_t targetSamples;
-	uint32_t samples;
-	uint32_t crossings;
-	uint32_t peak;
-	int8_t sign;
-	uint32_t lastFreq;
-};
-
-static uint32_t wavPrvAbs16(int16_t sample)
+static int32_t wavPrvAbs32(int32_t value)
 {
-	return sample < 0 ? -(int32_t)sample : sample;
+	return value < 0 ? -value : value;
 }
 
-static void wavPrvToneWindowInit(struct WavToneWindow *win, uint32_t sampleRate)
+static uint8_t wavPrvDutyFromSigned8(int32_t sample)
 {
-	win->sampleRate = sampleRate;
-	win->targetSamples = sampleRate / WAV_WINDOW_HZ;
-	if (win->targetSamples < WAV_WINDOW_MIN_SAMPLES)
-		win->targetSamples = WAV_WINDOW_MIN_SAMPLES;
-	if (win->targetSamples > WAV_WINDOW_MAX_SAMPLES)
-		win->targetSamples = WAV_WINDOW_MAX_SAMPLES;
-	win->samples = 0;
-	win->crossings = 0;
-	win->peak = 0;
-	win->sign = 0;
-	win->lastFreq = 0;
-}
+	uint_fast8_t volume = audioPwmGetVolume();
+	int32_t gainSample, limited, duty;
 
-static void wavPrvToneWindowReset(struct WavToneWindow *win)
-{
-	win->samples = 0;
-	win->crossings = 0;
-	win->peak = 0;
-	win->sign = 0;
-}
-
-static void wavPrvToneWindowSample(struct WavToneWindow *win, int16_t sample)
-{
-	uint32_t amp = wavPrvAbs16(sample);
-	int8_t sign = win->sign;
-
-	if (amp > win->peak)
-		win->peak = amp;
-	if (sample > WAV_ZERO_HYST)
-		sign = 1;
-	else if (sample < -WAV_ZERO_HYST)
-		sign = -1;
-
-	if (win->sign && sign != win->sign)
-		win->crossings++;
-	win->sign = sign;
-	win->samples++;
-}
-
-static uint32_t wavPrvToneWindowFreq(struct WavToneWindow *win)
-{
-	uint32_t freq;
-
-	if (win->peak < WAV_SILENCE_PEAK || win->samples < 2 || win->crossings < 2) {
-		win->lastFreq = 0;
+	if (!volume)
 		return 0;
-	}
 
-	freq = (win->crossings * win->sampleRate + win->samples) / (2 * win->samples);
-	if (freq < WAV_FREQ_MIN || freq > WAV_FREQ_MAX) {
-		win->lastFreq = 0;
+	/* Maps 0..15 to roughly Flipper's 0.0..10.0 gain range, then softly limits. */
+	gainSample = (sample * (int32_t)volume * 10) / AUDIO_PWM_VOLUME_MAX;
+	limited = (gainSample * 128) / (96 + wavPrvAbs32(gainSample));
+	duty = limited + 128;
+	if (duty < 0)
 		return 0;
-	}
+	if (duty > 255)
+		return 255;
+	return duty;
+}
 
-	if (win->lastFreq) {
-		uint32_t low = win->lastFreq * 92 / 100, high = win->lastFreq * 108 / 100;
-
-		if (freq >= low && freq <= high)
-			freq = win->lastFreq;
-		else if (freq >= win->lastFreq * 3 / 4 && freq <= win->lastFreq * 4 / 3)
-			freq = (win->lastFreq + freq * 3) / 4;
-	}
-
-	win->lastFreq = freq;
-	return freq;
+static uint8_t wavPrvDutySample(const uint8_t *p, uint16_t channels, uint16_t bitsPerSample)
+{
+	return wavPrvDutyFromSigned8(wavPrvSigned8Sample(p, channels, bitsPerSample));
 }
 
 enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerControlF controlF, void *userData)
@@ -197,9 +121,7 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 	struct MusicPlayerStatus status;
 	uint32_t dataPos = 0, dataSize = 0, bytesDone = 0;
 	uint16_t audioFormat = 0, channels = 0, bitsPerSample = 0, blockAlign = 0;
-	struct WavToneWindow toneWin;
 	uint8_t *buf = WAV_BUF;
-	uint64_t nextWindowTime;
 	uint8_t hdr[12];
 	bool haveFmt = false, haveData = false;
 
@@ -254,13 +176,13 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 		return MusicPlayerResultDecodeError;
 	if (!fatfsFileSeek(fil, dataPos))
 		return MusicPlayerResultFileError;
+	if (!audioPwmStartDuty(status.sampleRate))
+		return MusicPlayerResultDecodeError;
 
 	status.fileSize = dataSize;
-	wavPrvToneWindowInit(&toneWin, status.sampleRate);
-	nextWindowTime = getTime();
 	while (bytesDone < dataSize) {
 		enum MusicPlayerResult ctlRet;
-		uint32_t bytesLeft = dataSize - bytesDone, bytesToRead = WAV_BUF_SZ, nRead, pos;
+		uint32_t bytesLeft = dataSize - bytesDone, bytesToRead = WAV_BUF_SZ, nRead, pos, frame = 0;
 
 		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
 			return ctlRet;
@@ -277,34 +199,23 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 		if (!nRead)
 			break;
 
-		for (pos = 0; pos < nRead; pos += blockAlign) {
-			uint32_t samplesThisWindow;
-
+		for (pos = 0; pos < nRead; pos += blockAlign, frame++) {
 			status.bytesPlayed = bytesDone + pos;
-			wavPrvToneWindowSample(&toneWin, wavPrvSample(buf + pos, channels, bitsPerSample));
-			if (toneWin.samples < toneWin.targetSamples)
-				continue;
-
-			(void)audioPwmTone(wavPrvToneWindowFreq(&toneWin));
-			samplesThisWindow = toneWin.samples;
-			wavPrvToneWindowReset(&toneWin);
-			nextWindowTime += ((uint64_t)samplesThisWindow * TICKS_PER_SECOND + status.sampleRate / 2) / status.sampleRate;
-			if (wavPrvWaitUntil(nextWindowTime, controlF, userData, &status, &ctlRet))
-				return ctlRet;
-			if ((int64_t)(getTime() - nextWindowTime) > 0) {
-				nextWindowTime = getTime();
+			audioPwmWriteDutySample(wavPrvDutySample(buf + pos, channels, bitsPerSample));
+			if ((frame & 0x3f) == 0) {
+				audioPwmWaitNext();
+				if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
+					return ctlRet;
 			}
 		}
 		bytesDone += nRead;
 	}
 
-	if (toneWin.samples) {
+	status.bytesPlayed = dataSize;
+	while (!audioPwmPcmDrained()) {
 		enum MusicPlayerResult ctlRet;
-		uint32_t samplesThisWindow = toneWin.samples;
 
-		(void)audioPwmTone(wavPrvToneWindowFreq(&toneWin));
-		nextWindowTime += ((uint64_t)samplesThisWindow * TICKS_PER_SECOND + status.sampleRate / 2) / status.sampleRate;
-		if (wavPrvWaitUntil(nextWindowTime, controlF, userData, &status, &ctlRet))
+		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
 			return ctlRet;
 	}
 	audioPwmStop();

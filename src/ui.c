@@ -2716,6 +2716,18 @@ bool uiSaveSavestate(void)
 		return song;
 	}
 
+	static struct MusicOption *uiPrvMusicOptionAt(struct MusicOption *head, uint32_t depth, uint32_t selectedItem)
+	{
+		uint32_t skip;
+
+		if (depth && !selectedItem)
+			return NULL;
+		skip = selectedItem - (depth ? 1 : 0);
+		while (head && skip--)
+			head = head->next;
+		return head;
+	}
+
 	struct MusicUiData {
 		struct Canvas *cnv;
 		struct Settings *settings;
@@ -2723,8 +2735,11 @@ bool uiSaveSavestate(void)
 		uint8_t type;
 		uint8_t prevKeys;
 		uint8_t focus;
+		uint8_t lastPct;
+		uint32_t lastProgressFillRight;
 		uint64_t lastDraw;
 		bool forceDraw;
+		bool lastPaused;
 	};
 
 	static void uiPrvMusicSanitizeSettings(struct Settings *settings)
@@ -2759,14 +2774,22 @@ bool uiSaveSavestate(void)
 		uiPrvMusicSaveSettings(data);
 	}
 
-	static void uiPrvMusicDrawProgress(struct Canvas *cnv, uint32_t row, uint32_t pct)
+	static uint32_t uiPrvMusicProgressFillRight(struct Canvas *cnv, const struct MusicPlayerStatus *status)
 	{
-		uint32_t left = 10, right = cnv->w - 11, fillRight;
-		int8_t fore = cnv->foreColor;
+		uint32_t left = 10, right = cnv->w - 11;
+		uint32_t bytesPlayed = status->bytesPlayed;
 
-		if (pct > 100)
-			pct = 100;
-		fillRight = left + ((right - left + 1) * pct) / 100;
+		if (!status->fileSize)
+			return left;
+		if (bytesPlayed > status->fileSize)
+			bytesPlayed = status->fileSize;
+		return left + (uint32_t)(((uint64_t)(right - left + 1) * bytesPlayed) / status->fileSize);
+	}
+
+	static void uiPrvMusicDrawProgress(struct Canvas *cnv, uint32_t row, uint32_t fillRight)
+	{
+		uint32_t left = 10, right = cnv->w - 11;
+		int8_t fore = cnv->foreColor;
 
 		cnv->foreColor = 4;
 		uiPrvFillRect(cnv, left, row, right, row + 4);
@@ -2812,6 +2835,20 @@ bool uiSaveSavestate(void)
 		cnv->foreColor = fore;
 	}
 
+	static void uiPrvMusicDrawStatus(struct Canvas *cnv, struct MusicUiData *data, const struct MusicPlayerStatus *status, uint32_t row, uint32_t pct)
+	{
+		int8_t fore = cnv->foreColor;
+
+		cnv->foreColor = 0;
+		uiPrvFillRect(cnv, 10, row, cnv->w - 1, row + uiPrvGlyphHeight(cnv));
+		cnv->foreColor = 15;
+		if (data->type == MusicOptionTypeRtttl)
+			uiPrintf(cnv, row, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+		else
+			uiPrintf(cnv, row, 10, "%s %u%% %s %uHz", status->paused ? "Paused" : "Playing", pct, uiPrvMusicTypeName(data->type), status->sampleRate);
+		cnv->foreColor = fore;
+	}
+
 	static enum MusicPlayerControl uiPrvMusicControl(void *userData, const struct MusicPlayerStatus *status)
 	{
 		struct MusicUiData *data = (struct MusicUiData*)userData;
@@ -2838,21 +2875,28 @@ bool uiSaveSavestate(void)
 		if (pressed & KEY_BIT_DOWN)
 			uiPrvMusicAdjustVolume(data, -1);
 
-		if (now - data->lastDraw > TICKS_PER_SECOND / 4 || data->forceDraw) {
+		{
 			struct Canvas *cnv = data->cnv;
 			uint32_t row = uiPrvContentTop(cnv);
 			uint32_t pct = status->fileSize ? status->bytesPlayed * 100 / status->fileSize : 0;
+			uint32_t progressFillRight = uiPrvMusicProgressFillRight(cnv, status);
+			bool fullDraw = data->forceDraw || data->lastPct > 100 || data->lastPaused != status->paused;
+			bool progressDraw = pct != data->lastPct || progressFillRight != data->lastProgressFillRight;
 
-			uiPrvReset(cnv, false);
-			uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
-			if (data->type == MusicOptionTypeRtttl)
-				uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
-			else
-				uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% %s %uHz", status->paused ? "Paused" : "Playing", pct, uiPrvMusicTypeName(data->type), status->sampleRate);
-			uiPrvMusicDrawProgress(cnv, row + 2 * uiPrvGlyphHeight(cnv) + 8, pct);
-			uiPrvMusicDrawControls(cnv, data, status);
-			data->lastDraw = now;
-			data->forceDraw = false;
+			if (fullDraw || ((now - data->lastDraw > TICKS_PER_SECOND / 4) && progressDraw)) {
+				if (fullDraw) {
+					uiPrvReset(cnv, false);
+					uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
+					uiPrvMusicDrawControls(cnv, data, status);
+				}
+				uiPrvMusicDrawStatus(cnv, data, status, row + uiPrvGlyphHeight(cnv) + 2, pct);
+				uiPrvMusicDrawProgress(cnv, row + 2 * uiPrvGlyphHeight(cnv) + 8, progressFillRight);
+				data->lastPct = pct;
+				data->lastProgressFillRight = progressFillRight;
+				data->lastPaused = status->paused;
+				data->lastDraw = now;
+				data->forceDraw = false;
+			}
 		}
 
 		if (pressed & KEY_BIT_A) {
@@ -2877,7 +2921,7 @@ bool uiSaveSavestate(void)
 	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings)
 	{
 		struct FatfsFil *fil;
-		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = song->name, .type = song->type, .focus = MusicPlaybackControlPlay, .forceDraw = true};
+		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = song->name, .type = song->type, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
 		enum MusicPlayerResult ret;
 
 		audioPwmSetVolume(settings->musicVolume);
@@ -2981,6 +3025,7 @@ reload_dir:
 			struct MusicOption *draw = head;
 			uint32_t i, totalItems = numItems + (depth ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
 
+			cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 			if (prevTopItem != topItem) {
 				uint_fast8_t firstRow = 0, scrollWidth;
 				uint32_t skipItems;
@@ -3100,23 +3145,28 @@ reload_dir:
 
 				case KEY_BIT_DOWN:
 					if (selectedItem + 1 < totalItems) {
-						if (depth && selectedItem == 0)
-							cur = head;
-						else if (cur && cur->next)
-							cur = cur->next;
 						selectedItem++;
-						if (selectedItem >= topItem + itemsOnscreen)
-							topItem++;
+						if (selectedItem >= topItem + itemsOnscreen) {
+							topItem += itemsOnscreen;
+							if (topItem + itemsOnscreen > totalItems)
+								topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
+						}
+						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					}
 					break;
 
 				case KEY_BIT_UP:
 					if (selectedItem) {
-						if (!(depth && selectedItem == 1) && cur)
-							cur = cur->prev;
 						selectedItem--;
-						if (selectedItem < topItem)
-							topItem--;
+						if (selectedItem < topItem) {
+							if (topItem > itemsOnscreen)
+								topItem -= itemsOnscreen;
+							else
+								topItem = 0;
+							if (selectedItem < topItem)
+								topItem = selectedItem;
+						}
+						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					}
 					break;
 			}

@@ -1,10 +1,28 @@
 #include <string.h>
+#include <stdint.h>
 #include "audioPwm.h"
 #include "memMap.h"
 #include "wavPlayer.h"
 
-#define WAV_BUF_SZ	2048
-#define WAV_BUF		((uint8_t*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + QSPI_RAM_SIZE_MAX / 2))
+#define WAV_DMA_RING_BITS	14
+#define WAV_DMA_BUF_BYTES	(1u << WAV_DMA_RING_BITS)
+#define WAV_DMA_SAMPLES		(WAV_DMA_BUF_BYTES / sizeof(uint16_t))
+#define WAV_DMA_HALF_SAMPLES	(WAV_DMA_SAMPLES / 2)
+#define WAV_RAW_BUF_SZ		(WAV_DMA_HALF_SAMPLES * 4)
+#define WAV_BUF			((uint8_t*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + QSPI_RAM_SIZE_MAX / 2))
+
+struct WavPlayback {
+	struct FatfsFil *fil;
+	uint16_t *dmaBuf;
+	uint8_t *rawBuf;
+	uint16_t channels;
+	uint16_t bitsPerSample;
+	uint16_t blockAlign;
+	uint32_t totalFrames;
+	uint32_t framesPrepared;
+	uint8_t dutyLut[256];
+	uint8_t lutVolume;
+};
 
 static uint16_t wavPrvReadLe16(const uint8_t *p)
 {
@@ -23,18 +41,116 @@ static bool wavPrvReadExact(struct FatfsFil *fil, void *buf, uint32_t len)
 	return fatfsFileRead(fil, buf, len, &nRead) && nRead == len;
 }
 
+static int32_t wavPrvAbs32(int32_t value)
+{
+	return value < 0 ? -value : value;
+}
+
+static void wavPrvBuildDutyLut(struct WavPlayback *wav)
+{
+	uint_fast8_t volume = audioPwmGetVolume();
+	uint32_t i;
+
+	wav->lutVolume = volume;
+	for (i = 0; i < sizeof(wav->dutyLut); i++) {
+		int32_t sample = (int32_t)i - 128;
+		int32_t gainSample, limited, duty;
+
+		if (!volume) {
+			wav->dutyLut[i] = 0;
+			continue;
+		}
+
+		gainSample = (sample * (int32_t)volume * 10) / AUDIO_PWM_VOLUME_MAX;
+		limited = (gainSample * 128) / (96 + wavPrvAbs32(gainSample));
+		duty = limited + 128;
+		if (duty < 0)
+			duty = 0;
+		else if (duty > 255)
+			duty = 255;
+		wav->dutyLut[i] = duty;
+	}
+}
+
+static void wavPrvMaybeUpdateDutyLut(struct WavPlayback *wav)
+{
+	if (wav->lutVolume != audioPwmGetVolume())
+		wavPrvBuildDutyLut(wav);
+}
+
+static uint16_t wavPrvCenterDuty(const struct WavPlayback *wav)
+{
+	return wav->dutyLut[128];
+}
+
+static uint16_t wavPrvConvertFrame(const struct WavPlayback *wav, const uint8_t *p)
+{
+	uint8_t idx;
+
+	if (wav->bitsPerSample == 8) {
+		if (wav->channels == 2)
+			idx = (uint8_t)(((uint16_t)p[0] + p[1]) / 2);
+		else
+			idx = p[0];
+	}
+	else {
+		if (wav->channels == 2) {
+			int32_t sample = ((int32_t)(int8_t)p[1] + (int32_t)(int8_t)p[3]) / 2;
+			idx = (uint8_t)(sample + 128);
+		}
+		else
+			idx = (uint8_t)(p[1] + 128);
+	}
+	return wav->dutyLut[idx];
+}
+
+static bool wavPrvFillDmaFrames(struct WavPlayback *wav, uint32_t startFrame, uint32_t numFrames)
+{
+	uint32_t done = 0;
+
+	wavPrvMaybeUpdateDutyLut(wav);
+	while (done < numFrames && wav->framesPrepared < wav->totalFrames) {
+		uint32_t framesLeft = wav->totalFrames - wav->framesPrepared;
+		uint32_t framesToRead = numFrames - done;
+		uint32_t bytesToRead, nRead, framesRead, i;
+
+		if (framesToRead > framesLeft)
+			framesToRead = framesLeft;
+		if (framesToRead > WAV_RAW_BUF_SZ / wav->blockAlign)
+			framesToRead = WAV_RAW_BUF_SZ / wav->blockAlign;
+		bytesToRead = framesToRead * wav->blockAlign;
+		if (!fatfsFileRead(wav->fil, wav->rawBuf, bytesToRead, &nRead))
+			return false;
+		nRead -= nRead % wav->blockAlign;
+		framesRead = nRead / wav->blockAlign;
+		if (!framesRead)
+			return false;
+
+		for (i = 0; i < framesRead; i++)
+			wav->dmaBuf[startFrame + done + i] = wavPrvConvertFrame(wav, wav->rawBuf + i * wav->blockAlign);
+		wav->framesPrepared += framesRead;
+		done += framesRead;
+		if (framesRead != framesToRead)
+			return false;
+	}
+
+	while (done < numFrames)
+		wav->dmaBuf[startFrame + done++] = wavPrvCenterDuty(wav);
+	return true;
+}
+
 static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, struct MusicPlayerStatus *status, enum MusicPlayerResult *retP)
 {
 	enum MusicPlayerControl ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
 
 	if (ctl == MusicPlayerControlPause) {
 		status->paused = true;
-		audioPwmStop();
+		audioPwmDmaPause(true);
 		while (1) {
 			ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
 			if (ctl == MusicPlayerControlPause) {
 				status->paused = false;
-				(void)audioPwmStartDuty(status->sampleRate);
+				audioPwmDmaPause(false);
 				return false;
 			}
 			if (ctl == MusicPlayerControlStop) {
@@ -69,63 +185,17 @@ static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, st
 	return false;
 }
 
-static int32_t wavPrvSigned8Sample(const uint8_t *p, uint16_t channels, uint16_t bitsPerSample)
-{
-	if (bitsPerSample == 8) {
-		int32_t sample = (int32_t)p[0] - 128;
-
-		if (channels == 2)
-			sample = (sample + (int32_t)p[1] - 128) / 2;
-		return sample;
-	}
-	else {
-		int32_t sample = (int16_t)wavPrvReadLe16(p);
-
-		if (channels == 2)
-			sample = (sample + (int16_t)wavPrvReadLe16(p + 2)) / 2;
-		return sample / 256;
-	}
-}
-
-static int32_t wavPrvAbs32(int32_t value)
-{
-	return value < 0 ? -value : value;
-}
-
-static uint8_t wavPrvDutyFromSigned8(int32_t sample)
-{
-	uint_fast8_t volume = audioPwmGetVolume();
-	int32_t gainSample, limited, duty;
-
-	if (!volume)
-		return 0;
-
-	/* Maps 0..15 to roughly Flipper's 0.0..10.0 gain range, then softly limits. */
-	gainSample = (sample * (int32_t)volume * 10) / AUDIO_PWM_VOLUME_MAX;
-	limited = (gainSample * 128) / (96 + wavPrvAbs32(gainSample));
-	duty = limited + 128;
-	if (duty < 0)
-		return 0;
-	if (duty > 255)
-		return 255;
-	return duty;
-}
-
-static uint8_t wavPrvDutySample(const uint8_t *p, uint16_t channels, uint16_t bitsPerSample)
-{
-	return wavPrvDutyFromSigned8(wavPrvSigned8Sample(p, channels, bitsPerSample));
-}
-
 enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerControlF controlF, void *userData)
 {
 	struct MusicPlayerStatus status;
-	uint32_t dataPos = 0, dataSize = 0, bytesDone = 0;
+	struct WavPlayback wav;
+	uint32_t dataPos = 0, dataSize = 0, totalFrames, nextRefillSerial = 1;
 	uint16_t audioFormat = 0, channels = 0, bitsPerSample = 0, blockAlign = 0;
-	uint8_t *buf = WAV_BUF;
 	uint8_t hdr[12];
 	bool haveFmt = false, haveData = false;
 
 	memset(&status, 0, sizeof(status));
+	memset(&wav, 0, sizeof(wav));
 	status.fileSize = fatfsFileGetSize(fil);
 
 	if (!wavPrvReadExact(fil, hdr, sizeof(hdr)))
@@ -174,50 +244,53 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 
 	if (blockAlign != channels * bitsPerSample / 8 || dataSize < blockAlign)
 		return MusicPlayerResultDecodeError;
+	dataSize -= dataSize % blockAlign;
+	totalFrames = dataSize / blockAlign;
+	if (!totalFrames || totalFrames > 0x0fffffff)
+		return MusicPlayerResultDecodeError;
 	if (!fatfsFileSeek(fil, dataPos))
 		return MusicPlayerResultFileError;
-	if (!audioPwmStartDuty(status.sampleRate))
+
+	wav.fil = fil;
+	wav.dmaBuf = (uint16_t*)WAV_BUF;
+	wav.rawBuf = WAV_BUF + WAV_DMA_BUF_BYTES;
+	wav.channels = channels;
+	wav.bitsPerSample = bitsPerSample;
+	wav.blockAlign = blockAlign;
+	wav.totalFrames = totalFrames;
+	wav.lutVolume = 0xff;
+	if (((uintptr_t)wav.dmaBuf & (WAV_DMA_BUF_BYTES - 1)) != 0)
+		return MusicPlayerResultDecodeError;
+	wavPrvBuildDutyLut(&wav);
+	if (!wavPrvFillDmaFrames(&wav, 0, WAV_DMA_HALF_SAMPLES))
+		return MusicPlayerResultFileError;
+	if (!wavPrvFillDmaFrames(&wav, WAV_DMA_HALF_SAMPLES, WAV_DMA_HALF_SAMPLES))
+		return MusicPlayerResultFileError;
+	if (!audioPwmStartDutyDma(status.sampleRate, wav.dmaBuf, totalFrames, WAV_DMA_RING_BITS))
 		return MusicPlayerResultDecodeError;
 
 	status.fileSize = dataSize;
-	while (bytesDone < dataSize) {
+	while (!audioPwmDmaDone()) {
 		enum MusicPlayerResult ctlRet;
-		uint32_t bytesLeft = dataSize - bytesDone, bytesToRead = WAV_BUF_SZ, nRead, pos, frame = 0;
+		uint32_t framesPlayed = totalFrames - audioPwmDmaSamplesRemaining();
+		uint32_t halfSerial = framesPlayed / WAV_DMA_HALF_SAMPLES;
 
+		status.bytesPlayed = framesPlayed * blockAlign;
+		if (status.bytesPlayed > dataSize)
+			status.bytesPlayed = dataSize;
 		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
 			return ctlRet;
-		if (bytesToRead > bytesLeft)
-			bytesToRead = bytesLeft;
-		bytesToRead -= bytesToRead % blockAlign;
-		if (!bytesToRead)
-			break;
-		if (!fatfsFileRead(fil, buf, bytesToRead, &nRead)) {
-			audioPwmStop();
-			return MusicPlayerResultFileError;
-		}
-		nRead -= nRead % blockAlign;
-		if (!nRead)
-			break;
 
-		for (pos = 0; pos < nRead; pos += blockAlign, frame++) {
-			status.bytesPlayed = bytesDone + pos;
-			audioPwmWriteDutySample(wavPrvDutySample(buf + pos, channels, bitsPerSample));
-			if ((frame & 0x3f) == 0) {
-				audioPwmWaitNext();
-				if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
-					return ctlRet;
+		while (nextRefillSerial <= halfSerial) {
+			uint32_t half = (nextRefillSerial - 1) & 1;
+			if (!wavPrvFillDmaFrames(&wav, half ? WAV_DMA_HALF_SAMPLES : 0, WAV_DMA_HALF_SAMPLES)) {
+				audioPwmStop();
+				return MusicPlayerResultFileError;
 			}
+			nextRefillSerial++;
 		}
-		bytesDone += nRead;
-	}
-
-	status.bytesPlayed = dataSize;
-	while (!audioPwmPcmDrained()) {
-		enum MusicPlayerResult ctlRet;
-
-		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
-			return ctlRet;
 	}
 	audioPwmStop();
+	status.bytesPlayed = dataSize;
 	return MusicPlayerResultDone;
 }

@@ -8,6 +8,10 @@
 #include "sleep.h"
 #include "fonts.h"
 #include "fatfs.h"
+#include "flipper_ir.h"
+#include "mp3_player.h"
+#include "timebase.h"
+#include "ir_tx.h"
 #include "qspi.h"
 #include "cpu.h"
 #include "mbc.h"
@@ -16,6 +20,7 @@
 #include "sd.h"
 #include "gb.h"
 
+void irdaRoll(void);
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 
@@ -40,6 +45,12 @@ struct ScreenPrintfData {
 
 struct RomOption {
 	struct RomOption *prev, *next;
+	char name[];
+} __attribute__((packed));
+
+struct MusicOption {
+	struct MusicOption *prev, *next;
+	uint32_t size;
 	char name[];
 } __attribute__((packed));
 
@@ -940,6 +951,342 @@ static void uiPrvDrawTruncText(struct Canvas *cnv, int32_t r, int32_t c, uint32_
 	}
 }
 
+static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
+{
+	uint32_t strLen = strlen(str), suffixLen = strlen(suffix), i;
+
+	if (strLen < suffixLen)
+		return false;
+	str += strLen - suffixLen;
+	for (i = 0; i < suffixLen; i++) {
+		char a = str[i], b = suffix[i];
+		if (a >= 'A' && a <= 'Z')
+			a += 'a' - 'A';
+		if (b >= 'A' && b <= 'Z')
+			b += 'a' - 'A';
+		if (a != b)
+			return false;
+	}
+	return true;
+}
+
+struct IrBlastUiData {
+	struct Canvas *cnv;
+	bool cancelled;
+};
+
+static bool uiPrvIrCancel(void *userData)
+{
+	struct IrBlastUiData *data = (struct IrBlastUiData*)userData;
+
+	if (uiGetKeys() & KEY_BIT_B) {
+		data->cancelled = true;
+		return true;
+	}
+	return false;
+}
+
+static bool uiPrvMuteBlastSignal(void *userData, const struct FlipperIrSignal *sig, uint32_t index)
+{
+	struct IrBlastUiData *data = (struct IrBlastUiData*)userData;
+	struct Canvas *cnv = data->cnv;
+	uint32_t row = uiPrvGlyphHeight(cnv) + 4;
+
+	uiPrvReset(cnv, false);
+	uiPuts(cnv, row, 10, "Mute Blast", -1);
+	uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "Sending #%u", index);
+	uiPrintf(cnv, row + (uiPrvGlyphHeight(cnv) + 2) * 2, 10, "%s", sig->protocol[0] ? sig->protocol : "raw");
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B: Cancel", -1);
+
+	return irTxSendRaw(sig->timings, sig->numTimings, sig->frequency, uiPrvIrCancel, data);
+}
+
+static void uiPrvMuteBlast(struct Canvas *cnv)
+{
+	struct FatfsVol *vol;
+	struct FatfsFil *fil;
+	struct IrBlastUiData data = {.cnv = cnv};
+	uint32_t numSent = 0, numUnsupported = 0;
+	bool completed;
+
+	vol = uiPrvMountCard(cnv, false);
+	if (!vol)
+		return;
+
+	fil = fatfsFileOpen(vol, "/IR/tv.ir", OPEN_MODE_READ);
+	if (!fil) {
+		uiAlert(cnv, "Cannot open /IR/tv.ir", DialogTypeOk);
+		goto out_unmount;
+	}
+
+	completed = flipperIrBlastNamed(fil, "Mute", uiPrvMuteBlastSignal, &data, &numSent, &numUnsupported);
+	fatfsFileClose(fil);
+
+	if (data.cancelled || !completed)
+		uiAlert(cnv, "Mute Blast cancelled", DialogTypeOk);
+	else if (!numSent)
+		uiAlert(cnv, "No Mute codes were found in /IR/tv.ir", DialogTypeOk);
+	else if (numUnsupported)
+		uiAlert(cnv, "Mute Blast finished. Some codes were unsupported.", DialogTypeOk);
+	else
+		uiAlert(cnv, "Mute Blast finished", DialogTypeOk);
+
+out_unmount:
+	(void)uiPrvCardPreUnmount();
+	fatfsUnmount(vol);
+}
+
+static void uiPrvPowerBlast(struct Canvas *cnv)
+{
+	uint32_t row = uiPrvGlyphHeight(cnv) + 4;
+
+	uiPrvReset(cnv, false);
+	uiPuts(cnv, row, 10, "Power Blast", -1);
+	uiPuts(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "Sending...", -1);
+	irdaRoll();
+	uiAlert(cnv, "Power Blast finished", DialogTypeOk);
+}
+
+static void uiPrvIrTools(struct Canvas *cnv)
+{
+	while (1) {
+		int_fast8_t powerOption = 0, muteOption = 1, backOption = 2, selOption;
+		uint_fast8_t itemHeight;
+
+		uiPrvReset(cnv, false);
+		itemHeight = uiPrvGlyphHeight(cnv) + 1;
+		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Power Blast", -1);
+		uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Mute Blast", -1);
+		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
+
+		selOption = uiPrvMenu(cnv, 0, 3, NULL);
+		if (selOption == powerOption)
+			uiPrvPowerBlast(cnv);
+		else if (selOption == muteOption)
+			uiPrvMuteBlast(cnv);
+		else if (selOption == backOption)
+			return;
+	}
+}
+
+static uint32_t uiPrvListMusic(struct FatfsVol *vol, struct MusicOption **headP, struct MusicOption **tailP)
+{
+	struct MusicOption *nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM, *head = NULL, *tail = NULL;
+	uint32_t spaceAvail = QSPI_RAM_SIZE_MAX / 2, count = 0;
+	struct FatfsDir *dir;
+	char fname[FATFS_NAME_BUF_LEN];
+	uint32_t fileSz;
+	uint8_t attrs;
+
+	dir = fatfsDirOpen(vol, "/MUSIC");
+	if (!dir)
+		goto out;
+
+	while (fatfsDirRead(dir, fname, &fileSz, &attrs, NULL)) {
+		uint32_t len = strlen(fname), spaceNeeded;
+
+		if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
+			continue;
+		if (!uiPrvStrEndsWithNoCase(fname, ".mp3"))
+			continue;
+
+		spaceNeeded = (sizeof(struct MusicOption) + len + 1 + 3) &~ 3;
+		if (spaceNeeded > spaceAvail)
+			break;
+
+		nextAvail->prev = tail;
+		nextAvail->next = NULL;
+		nextAvail->size = fileSz;
+		memcpy(nextAvail->name, fname, len + 1);
+		if (tail)
+			tail->next = nextAvail;
+		else
+			head = nextAvail;
+		tail = nextAvail;
+		nextAvail = (struct MusicOption*)(((uint8_t*)nextAvail) + spaceNeeded);
+		spaceAvail -= spaceNeeded;
+		count++;
+	}
+	fatfsDirClose(dir);
+
+out:
+	*headP = head;
+	*tailP = tail;
+	return count;
+}
+
+struct Mp3UiData {
+	struct Canvas *cnv;
+	const char *name;
+	uint8_t prevKeys;
+	uint64_t lastDraw;
+};
+
+static enum Mp3PlayerControl uiPrvMp3Control(void *userData, const struct Mp3PlayerStatus *status)
+{
+	struct Mp3UiData *data = (struct Mp3UiData*)userData;
+	uint8_t keys = uiGetKeys(), pressed = keys &~ data->prevKeys;
+	uint64_t now = getTime();
+
+	data->prevKeys = keys;
+	if (now - data->lastDraw > TICKS_PER_SECOND / 4) {
+		struct Canvas *cnv = data->cnv;
+		uint32_t row = uiPrvGlyphHeight(cnv) + 4;
+		uint32_t pct = status->fileSize ? status->bytesPlayed * 100 / status->fileSize : 0;
+
+		uiPrvReset(cnv, false);
+		uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
+		uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% %uHz", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+		uiPuts(cnv, cnv->h - 2 * uiPrvGlyphHeight(cnv) - 2, 10, "A: Pause  B: Back", -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Left/Right: Track", -1);
+		data->lastDraw = now;
+	}
+
+	if (pressed & KEY_BIT_A)
+		return Mp3PlayerControlPause;
+	if (pressed & KEY_BIT_B)
+		return Mp3PlayerControlStop;
+	if (pressed & KEY_BIT_LEFT)
+		return Mp3PlayerControlPrev;
+	if (pressed & KEY_BIT_RIGHT)
+		return Mp3PlayerControlNext;
+	return Mp3PlayerControlNone;
+}
+
+static enum Mp3PlayerResult uiPrvPlayMp3(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song)
+{
+	struct FatfsDir *dir;
+	struct FatfsFil *fil;
+	struct Mp3UiData data = {.cnv = cnv, .name = song->name};
+	enum Mp3PlayerResult ret;
+
+	dir = fatfsDirOpen(vol, "/MUSIC");
+	if (!dir) {
+		uiAlert(cnv, "Cannot open /MUSIC", DialogTypeOk);
+		return Mp3PlayerResultStopped;
+	}
+	fil = fatfsFileOpenAt(dir, song->name, OPEN_MODE_READ);
+	fatfsDirClose(dir);
+	if (!fil) {
+		uiAlert(cnv, "Cannot open MP3 file", DialogTypeOk);
+		return Mp3PlayerResultStopped;
+	}
+
+	ret = mp3PlayerPlayFile(fil, uiPrvMp3Control, &data);
+	fatfsFileClose(fil);
+	if (ret == Mp3PlayerResultFileError)
+		uiAlert(cnv, "MP3 read failed", DialogTypeOk);
+	else if (ret == Mp3PlayerResultDecodeError)
+		uiAlert(cnv, "MP3 decode failed", DialogTypeOk);
+	return ret;
+}
+
+static void uiPrvMp3Player(struct Canvas *cnv)
+{
+	struct FatfsVol *vol;
+	struct MusicOption *head = NULL, *tail = NULL, *cur = NULL;
+	uint32_t numSongs, topItem = 0, selectedItem = 0;
+	uint_fast8_t itemHeight, itemsOnscreen, listTop, scrollWidth;
+
+	vol = uiPrvMountCard(cnv, false);
+	if (!vol)
+		return;
+
+	numSongs = uiPrvListMusic(vol, &head, &tail);
+	if (!numSongs) {
+		uiAlert(cnv, "No MP3 files found in /MUSIC", DialogTypeOk);
+		goto out_unmount;
+	}
+	cur = head;
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+	listTop = uiPrvGlyphHeight(cnv) + 2;
+	itemsOnscreen = (cnv->h - listTop) / itemHeight;
+
+	while (1) {
+		struct MusicOption *draw;
+		uint32_t i, selectedOnscreenItem = selectedItem - topItem;
+
+		uiPrvReset(cnv, false);
+		scrollWidth = uiPrvDrawScrollbar(cnv, listTop, numSongs, topItem, itemsOnscreen);
+		draw = head;
+		for (i = 0; i < topItem && draw; i++)
+			draw = draw->next;
+		for (i = 0; i < itemsOnscreen && draw; i++, draw = draw->next)
+			uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, draw->name);
+		uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+
+		switch (uiPrvRecvKeypress()) {
+			case KEY_BIT_A:
+				while (cur) {
+					enum Mp3PlayerResult ret = uiPrvPlayMp3(cnv, vol, cur);
+					if ((ret == Mp3PlayerResultNext || ret == Mp3PlayerResultDone) && cur->next) {
+						cur = cur->next;
+						selectedItem++;
+					}
+					else if (ret == Mp3PlayerResultPrev && cur->prev) {
+						cur = cur->prev;
+						selectedItem--;
+					}
+					else {
+						break;
+					}
+					if (selectedItem < topItem)
+						topItem = selectedItem;
+					if (selectedItem >= topItem + itemsOnscreen)
+						topItem = selectedItem + 1 - itemsOnscreen;
+				}
+				break;
+
+			case KEY_BIT_B:
+				goto out_unmount;
+
+			case KEY_BIT_DOWN:
+				if (cur->next) {
+					cur = cur->next;
+					selectedItem++;
+					if (selectedItem >= topItem + itemsOnscreen)
+						topItem++;
+				}
+				break;
+
+			case KEY_BIT_UP:
+				if (cur->prev) {
+					cur = cur->prev;
+					selectedItem--;
+					if (selectedItem < topItem)
+						topItem--;
+				}
+				break;
+		}
+	}
+
+out_unmount:
+	(void)uiPrvCardPreUnmount();
+	fatfsUnmount(vol);
+}
+
+static void uiPrvTools(struct Canvas *cnv)
+{
+	while (1) {
+		int_fast8_t irOption = 0, mp3Option = 1, backOption = 2, selOption;
+		uint_fast8_t itemHeight;
+
+		uiPrvReset(cnv, false);
+		itemHeight = uiPrvGlyphHeight(cnv) + 1;
+		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "IR Tools", -1);
+		uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "MP3 Player", -1);
+		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
+
+		selOption = uiPrvMenu(cnv, 0, 3, NULL);
+		if (selOption == irOption)
+			uiPrvIrTools(cnv);
+		else if (selOption == mp3Option)
+			uiPrvMp3Player(cnv);
+		else if (selOption == backOption)
+			return;
+	}
+}
+
 static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
@@ -1722,7 +2069,7 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 
 	while (1) {
 		
-		int_fast8_t playOption = -1, selectGameOption = -1, aboutOption, settingsOption, fwUpdateOption, rollOption, powerOffOption, numOptions = 0, selOption, itemHeight;
+		int_fast8_t playOption = -1, selectGameOption = -1, aboutOption, settingsOption, fwUpdateOption, toolsOption, powerOffOption, numOptions = 0, selOption, itemHeight;
 		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
 		uint32_t ramSz = 0;
@@ -1738,9 +2085,9 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 			uint_fast8_t height;
 			
 		#ifdef NO_SD_CARD
-				height = 4;
+				height = 5;
 		#else
-				height = 6;
+				height = 7;
 		#endif
 			
 			static const char colorTypes[][5] = {
@@ -1754,10 +2101,12 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 		}
 		#ifndef NO_SD_CARD
 			selectGameOption = numOptions++;
-			uiPuts(cnv, cnv->h - 5 * itemHeight, 10, validRom ? "Select Another Game" : "Select a Game", -1);
+			uiPuts(cnv, cnv->h - 6 * itemHeight, 10, validRom ? "Select Another Game" : "Select a Game", -1);
 			fwUpdateOption = numOptions++;
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Firmware Update", -1);
+			uiPuts(cnv, cnv->h - 5 * itemHeight, 10, "Firmware Update", -1);
 		#endif
+		toolsOption = numOptions++;
+		uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Tools", -1);
 		settingsOption = numOptions++;
 		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Settings", -1);
 		aboutOption = numOptions++;
@@ -1798,6 +2147,10 @@ static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulat
 			
 			if (uiPrvSettings(cnv))
 				ret = true;
+		}
+		else if (selOption == toolsOption) {
+			
+			uiPrvTools(cnv);
 		}
 		else if (selOption == powerOffOption) {
 			

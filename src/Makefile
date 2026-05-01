@@ -35,7 +35,7 @@ LD_FLAGS	+= -Wl,--gc-sections -Wl,-T linker_rp2350_defcon.lkr -lm $(CPU)
 CC			= arm-none-eabi-gcc
 LD			= arm-none-eabi-gcc
 OBJCOPY		= arm-none-eabi-objcopy
-EXTRA_OBJS	= main_rp2350_defcon.o crt_rp2350.o timebase.o printf.o dispDefcon.o utf.o qspi2350.o ui.o settings.o badgeLeds.o fonts.o sleepDefcon.o sd.o fatfs.o sdHwRP2350.o pioI2C.o pioIrdaSIR.o pioWS2812.o
+EXTRA_OBJS	= main_rp2350_defcon.o crt_rp2350.o timebase.o printf.o dispDefcon.o utf.o qspi2350.o ui.o settings.o badgeLeds.o fonts.o sleepDefcon.o sd.o fatfs.o sdHwRP2350.o pioI2C.o pioIrdaSIR.o pioWS2812.o ir_tx.o flipper_ir.o audio_pwm.o mp3_player.o minimp3_impl.o
 
 CC_FLAGS	+= -isysteminc_RP2350
 

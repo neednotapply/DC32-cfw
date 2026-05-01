@@ -14,6 +14,8 @@
 #include "mbc.h"
 #include "irRemote.h"
 #include "mp3Player.h"
+#include "rtttlPlayer.h"
+#include "wavPlayer.h"
 #include "audioPwm.h"
 #include "timebase.h"
 #include "utf.h"
@@ -51,8 +53,15 @@ struct RomOption {
 struct MusicOption {
 	struct MusicOption *prev, *next;
 	uint32_t size;
+	uint8_t type;
 	char name[];
 } __attribute__((packed));
+
+enum MusicOptionType {
+	MusicOptionTypeMp3,
+	MusicOptionTypeRtttl,
+	MusicOptionTypeWav,
+};
 
 enum CurOp {
 	CurentlyIdle,
@@ -2550,6 +2559,35 @@ bool uiSaveSavestate(void)
 		}
 	}
 
+	static bool uiPrvMusicTypeForName(const char *fname, uint8_t *typeP)
+	{
+		if (uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt")) {
+			*typeP = MusicOptionTypeRtttl;
+			return true;
+		}
+		if (uiPrvStrEndsWithNoCase(fname, ".wav")) {
+			*typeP = MusicOptionTypeWav;
+			return true;
+		}
+		if (uiPrvStrEndsWithNoCase(fname, ".mp3")) {
+			*typeP = MusicOptionTypeMp3;
+			return true;
+		}
+		return false;
+	}
+
+	static const char *uiPrvMusicTypeName(uint8_t type)
+	{
+		switch (type) {
+			case MusicOptionTypeRtttl:
+				return "RTTTL";
+			case MusicOptionTypeWav:
+				return "WAV";
+			default:
+				return "MP3 exp";
+		}
+	}
+
 	static uint32_t uiPrvListMusic(struct FatfsVol *vol, struct MusicOption **headP, struct MusicOption **tailP)
 	{
 		struct MusicOption *nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM, *head = NULL, *tail = NULL;
@@ -2565,10 +2603,11 @@ bool uiSaveSavestate(void)
 
 		while (fatfsDirRead(dir, fname, &fileSz, &attrs, NULL)) {
 			uint32_t len = strlen(fname), spaceNeeded;
+			uint8_t type;
 
 			if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
 				continue;
-			if (!uiPrvStrEndsWithNoCase(fname, ".mp3"))
+			if (!uiPrvMusicTypeForName(fname, &type))
 				continue;
 
 			spaceNeeded = (sizeof(struct MusicOption) + len + 1 + 3) &~ 3;
@@ -2578,6 +2617,7 @@ bool uiSaveSavestate(void)
 			nextAvail->prev = tail;
 			nextAvail->next = NULL;
 			nextAvail->size = fileSz;
+			nextAvail->type = type;
 			memcpy(nextAvail->name, fname, len + 1);
 			if (tail)
 				tail->next = nextAvail;
@@ -2596,16 +2636,17 @@ bool uiSaveSavestate(void)
 		return count;
 	}
 
-	struct Mp3UiData {
+	struct MusicUiData {
 		struct Canvas *cnv;
 		const char *name;
+		uint8_t type;
 		uint8_t prevKeys;
 		uint64_t lastDraw;
 	};
 
-	static enum Mp3PlayerControl uiPrvMp3Control(void *userData, const struct Mp3PlayerStatus *status)
+	static enum Mp3PlayerControl uiPrvMusicControl(void *userData, const struct Mp3PlayerStatus *status)
 	{
-		struct Mp3UiData *data = (struct Mp3UiData*)userData;
+		struct MusicUiData *data = (struct MusicUiData*)userData;
 		uint8_t keys = uiGetKeys(), pressed = keys &~ data->prevKeys;
 		uint64_t now = getTime();
 
@@ -2617,7 +2658,10 @@ bool uiSaveSavestate(void)
 
 			uiPrvReset(cnv, false);
 			uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
-			uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% %uHz", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+			if (data->type == MusicOptionTypeRtttl)
+				uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+			else
+				uiPrintf(cnv, row + uiPrvGlyphHeight(cnv) + 2, 10, "%s %u%% %s %uHz", status->paused ? "Paused" : "Playing", pct, uiPrvMusicTypeName(data->type), status->sampleRate);
 			uiPuts(cnv, cnv->h - 2 * uiPrvGlyphHeight(cnv) - 2, 10, "A: Pause  B: Back", -1);
 			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Left/Right: Track", -1);
 			data->lastDraw = now;
@@ -2634,11 +2678,11 @@ bool uiSaveSavestate(void)
 		return Mp3PlayerControlNone;
 	}
 
-	static enum Mp3PlayerResult uiPrvPlayMp3(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song)
+	static enum Mp3PlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song)
 	{
 		struct FatfsDir *dir;
 		struct FatfsFil *fil;
-		struct Mp3UiData data = {.cnv = cnv, .name = song->name};
+		struct MusicUiData data = {.cnv = cnv, .name = song->name, .type = song->type};
 		enum Mp3PlayerResult ret;
 
 		dir = fatfsDirOpen(vol, "/MUSIC");
@@ -2650,18 +2694,34 @@ bool uiSaveSavestate(void)
 		fil = fatfsFileOpenAt(dir, song->name, OPEN_MODE_READ);
 		fatfsDirClose(dir);
 		if (!fil) {
-			uiAlert(cnv, "Cannot open MP3 file", DialogTypeOk);
+			uiAlert(cnv, "Cannot open music file", DialogTypeOk);
 			return Mp3PlayerResultStopped;
 		}
 
 		data.prevKeys = uiGetKeys();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
-		ret = mp3PlayerPlayFile(fil, uiPrvMp3Control, &data);
+		switch (song->type) {
+			case MusicOptionTypeRtttl:
+				ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
+				break;
+			case MusicOptionTypeWav:
+				ret = wavPlayerPlayFile(fil, uiPrvMusicControl, &data);
+				break;
+			default:
+				ret = mp3PlayerPlayFile(fil, uiPrvMusicControl, &data);
+				break;
+		}
 		fatfsFileClose(fil);
 		if (ret == Mp3PlayerResultFileError)
-			uiAlert(cnv, "MP3 read failed", DialogTypeOk);
-		else if (ret == Mp3PlayerResultDecodeError)
-			uiAlert(cnv, "MP3 decode failed", DialogTypeOk);
+			uiAlert(cnv, "Music read failed", DialogTypeOk);
+		else if (ret == Mp3PlayerResultDecodeError) {
+			if (song->type == MusicOptionTypeMp3)
+				uiAlert(cnv, "MP3 decode failed (experimental)", DialogTypeOk);
+			else if (song->type == MusicOptionTypeWav)
+				uiAlert(cnv, "Unsupported WAV file", DialogTypeOk);
+			else
+				uiAlert(cnv, "Bad RTTTL file", DialogTypeOk);
+		}
 
 		return ret;
 	}
@@ -2684,7 +2744,7 @@ bool uiSaveSavestate(void)
 		uiAlert(cnv, "Speaker test complete.", DialogTypeOk);
 	}
 
-	static void uiPrvMp3Player(struct Canvas *cnv)
+	static void uiPrvMusicPlayer(struct Canvas *cnv)
 	{
 		struct FatfsVol *vol;
 		struct MusicOption *head = NULL, *tail = NULL, *cur = NULL;
@@ -2697,7 +2757,7 @@ bool uiSaveSavestate(void)
 
 		numSongs = uiPrvListMusic(vol, &head, &tail);
 		if (!numSongs) {
-			uiAlert(cnv, "No MP3 files found in /MUSIC", DialogTypeOk);
+			uiAlert(cnv, "No music files found in /MUSIC", DialogTypeOk);
 			goto out_unmount;
 		}
 
@@ -2724,7 +2784,7 @@ bool uiSaveSavestate(void)
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
 					while (cur) {
-						enum Mp3PlayerResult playRet = uiPrvPlayMp3(cnv, vol, cur);
+						enum Mp3PlayerResult playRet = uiPrvPlayMusic(cnv, vol, cur);
 
 						if ((playRet == Mp3PlayerResultNext || playRet == Mp3PlayerResultDone) && cur->next) {
 							cur = cur->next;
@@ -2779,14 +2839,14 @@ bool uiSaveSavestate(void)
 
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t irOption = 0, mp3Option = 1, speakerOption = 2, backOption = 3;
+			uint_fast8_t irOption = 0, musicOption = 1, speakerOption = 2, backOption = 3;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR Tools", -1);
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "MP3 Player", -1);
+			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Music Player", -1);
 			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Speaker Test", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
@@ -2797,8 +2857,8 @@ bool uiSaveSavestate(void)
 				if (uiPrvIrTools(cnv))
 					borrowedGameRam = true;
 			}
-			else if (selOption == mp3Option) {
-				uiPrvMp3Player(cnv);
+			else if (selOption == musicOption) {
+				uiPrvMusicPlayer(cnv);
 				borrowedGameRam = true;
 			}
 			else if (selOption == speakerOption)

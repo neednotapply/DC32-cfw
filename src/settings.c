@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			10
+#define SETTINGS_CUR_VER			11
 
 
 union SettingsPage {
@@ -115,6 +115,10 @@ void settingsGet(struct Settings *settings)
 		case 9:				//upgrade from v9
 			settings->musicVolume = 7;
 			settings->musicLoopTrack = false;
+			//fallthrough
+
+		case 10:			//upgrade music volume from 0-10 scale to 0-15 scale
+			settings->musicVolume = (settings->musicVolume * 15 + 5) / 10;
 			//fallthrough
 
 		//other cases here, in increasing order

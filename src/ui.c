@@ -55,6 +55,7 @@ struct MusicOption {
 	struct FatFileLocator locator;
 	uint32_t size;
 	uint8_t type;
+	uint8_t isDir;
 	char name[];
 };
 
@@ -2605,7 +2606,7 @@ bool uiSaveSavestate(void)
 		struct MusicOption *tail;
 		uint32_t spaceAvail;
 		uint32_t count;
-		char path[FATFS_NAME_BUF_LEN];
+		bool overflow;
 		char fname[FATFS_NAME_BUF_LEN];
 	};
 
@@ -2614,21 +2615,23 @@ bool uiSaveSavestate(void)
 		return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
 	}
 
-	static void uiPrvMusicListAppend(struct MusicListCtx *ctx, const char *fname, uint32_t fileSz, uint8_t type, const struct FatFileLocator *locator)
+	static bool uiPrvMusicListAppend(struct MusicListCtx *ctx, const char *fname, uint32_t fileSz, uint8_t type, bool isDir, const struct FatFileLocator *locator)
 	{
-		uint32_t pathLen = strlen(ctx->path), nameLen = strlen(fname), len = pathLen + nameLen, spaceNeeded;
+		uint32_t nameLen = strlen(fname), spaceNeeded;
 
-		spaceNeeded = (sizeof(struct MusicOption) + len + 1 + 3) &~ 3;
-		if (spaceNeeded > ctx->spaceAvail)
-			return;
+		spaceNeeded = (sizeof(struct MusicOption) + nameLen + 1 + 3) &~ 3;
+		if (spaceNeeded > ctx->spaceAvail) {
+			ctx->overflow = true;
+			return false;
+		}
 
 		ctx->nextAvail->prev = ctx->tail;
 		ctx->nextAvail->next = NULL;
 		ctx->nextAvail->locator = *locator;
 		ctx->nextAvail->size = fileSz;
 		ctx->nextAvail->type = type;
-		memcpy(ctx->nextAvail->name, ctx->path, pathLen);
-		memcpy(ctx->nextAvail->name + pathLen, fname, nameLen + 1);
+		ctx->nextAvail->isDir = isDir;
+		memcpy(ctx->nextAvail->name, fname, nameLen + 1);
 		if (ctx->tail)
 			ctx->tail->next = ctx->nextAvail;
 		else
@@ -2637,6 +2640,7 @@ bool uiSaveSavestate(void)
 		ctx->nextAvail = (struct MusicOption*)(((uint8_t*)ctx->nextAvail) + spaceNeeded);
 		ctx->spaceAvail -= spaceNeeded;
 		ctx->count++;
+		return true;
 	}
 
 	static void uiPrvListMusicDir(struct MusicListCtx *ctx, struct FatfsDir *dir)
@@ -2644,43 +2648,31 @@ bool uiSaveSavestate(void)
 		uint32_t fileSz;
 		uint8_t attrs;
 		struct FatFileLocator locator;
+		uint32_t seen = 0;
 
 		while (fatfsDirRead(dir, ctx->fname, &fileSz, &attrs, &locator)) {
-			uint32_t pathLen, nameLen;
 			uint8_t type;
 
+			if (!(++seen & 0x0f))
+				badgeLedsTick();
 			if (attrs & FATFS_ATTR_VOL_LBL)
 				continue;
 
 			if (attrs & FATFS_ATTR_DIR) {
-				struct FatfsDir *child;
-
 				if (uiPrvMusicIsDotDir(ctx->fname))
 					continue;
-
-				pathLen = strlen(ctx->path);
-				nameLen = strlen(ctx->fname);
-				if (pathLen + nameLen + 2 > sizeof(ctx->path))
-					continue;
-
-				memcpy(ctx->path + pathLen, ctx->fname, nameLen);
-				ctx->path[pathLen + nameLen] = '/';
-				ctx->path[pathLen + nameLen + 1] = 0;
-				child = fatfsDirOpenWithLocator(ctx->vol, &locator);
-				if (child) {
-					uiPrvListMusicDir(ctx, child);
-					fatfsDirClose(child);
-				}
-				ctx->path[pathLen] = 0;
+				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, MusicOptionTypeRtttl, true, &locator))
+					break;
 				continue;
 			}
 
 			if (uiPrvMusicTypeForName(ctx->fname, &type))
-				uiPrvMusicListAppend(ctx, ctx->fname, fileSz, type, &locator);
+				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, type, false, &locator))
+					break;
 		}
 	}
 
-	static uint32_t uiPrvListMusic(struct FatfsVol *vol, struct MusicOption **headP, struct MusicOption **tailP)
+	static uint32_t uiPrvListMusic(struct FatfsVol *vol, const struct FatFileLocator *dirLoc, struct MusicOption **headP, struct MusicOption **tailP, bool *overflowP)
 	{
 		struct MusicListCtx ctx;
 		struct FatfsDir *dir;
@@ -2690,7 +2682,7 @@ bool uiSaveSavestate(void)
 		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
 		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
 
-		dir = fatfsDirOpen(vol, "/MUSIC");
+		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, "/MUSIC");
 		if (!dir)
 			goto out;
 
@@ -2700,7 +2692,23 @@ bool uiSaveSavestate(void)
 	out:
 		*headP = ctx.head;
 		*tailP = ctx.tail;
+		if (overflowP)
+			*overflowP = ctx.overflow;
 		return ctx.count;
+	}
+
+	static struct MusicOption *uiPrvMusicNextSong(struct MusicOption *song)
+	{
+		while (song && song->isDir)
+			song = song->next;
+		return song;
+	}
+
+	static struct MusicOption *uiPrvMusicPrevSong(struct MusicOption *song)
+	{
+		while (song && song->isDir)
+			song = song->prev;
+		return song;
 	}
 
 	struct MusicUiData {
@@ -2717,7 +2725,7 @@ bool uiSaveSavestate(void)
 	static void uiPrvMusicSanitizeSettings(struct Settings *settings)
 	{
 		if (settings->musicVolume > AUDIO_PWM_VOLUME_MAX)
-			settings->musicVolume = 7;
+			settings->musicVolume = 11;
 	}
 
 	static void uiPrvMusicSaveSettings(struct MusicUiData *data)
@@ -2922,9 +2930,13 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol;
 		struct MusicOption *head = NULL, *tail = NULL, *cur = NULL;
+		struct FatFileLocator dirStack[8];
+		uint16_t pathLenStack[8];
+		char path[sizeof("/MUSIC/") + FATFS_NAME_BUF_LEN * 2];
 		struct Settings settings;
-		uint32_t numSongs, topItem = 0, selectedItem = 0;
+		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0;
 		uint_fast8_t itemHeight, itemsOnscreen, listTop, scrollWidth;
+		bool overflow = false, haveDirLoc = false;
 
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
@@ -2934,47 +2946,103 @@ bool uiSaveSavestate(void)
 		if (!vol)
 			return;
 
-		numSongs = uiPrvListMusic(vol, &head, &tail);
-		if (!numSongs) {
+		strcpy(path, "/MUSIC");
+reload_dir:
+		numItems = uiPrvListMusic(vol, haveDirLoc ? &dirStack[depth - 1] : NULL, &head, &tail, &overflow);
+		if (!numItems && !depth) {
 			uiAlert(cnv, "No music files found in /MUSIC", DialogTypeOk);
 			goto out_unmount;
 		}
+		if (overflow)
+			uiAlert(cnv, "Folder has too many entries; showing what fits", DialogTypeOk);
 
 		cur = head;
+		topItem = 0;
+		selectedItem = 0;
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
 		listTop = uiPrvContentTop(cnv);
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
-		if (itemsOnscreen > numSongs)
-			itemsOnscreen = numSongs;
+		if (itemsOnscreen > numItems + (depth ? 1 : 0))
+			itemsOnscreen = numItems + (depth ? 1 : 0);
 
 		while (1) {
 			struct MusicOption *draw;
-			uint32_t i, selectedOnscreenItem = selectedItem - topItem;
+			uint32_t i, totalItems = numItems + (depth ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
 
 			uiPrvReset(cnv, false);
-			scrollWidth = numSongs > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numSongs, topItem, itemsOnscreen) : 0;
+			uiPrvDrawTruncText(cnv, 0, 10, cnv->w - 10, path);
+			scrollWidth = totalItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, totalItems, topItem, itemsOnscreen) : 0;
 			draw = head;
-			for (i = 0; i < topItem && draw; i++)
-				draw = draw->next;
-			for (i = 0; i < itemsOnscreen && draw; i++, draw = draw->next)
-				uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, draw->name);
+			if (depth) {
+				if (!topItem)
+					uiPrvDrawTruncText(cnv, listTop, 10, cnv->w - scrollWidth - 10, "[..]");
+				for (i = 1; i < topItem && draw; i++)
+					draw = draw->next;
+			}
+			else {
+				for (i = 0; i < topItem && draw; i++)
+					draw = draw->next;
+			}
+			for (i = depth && !topItem ? 1 : 0; i < itemsOnscreen && draw; i++, draw = draw->next) {
+				char label[FATFS_NAME_BUF_LEN + 3];
+
+				if (draw->isDir) {
+					label[0] = '[';
+					strcpy(label + 1, draw->name);
+					strcat(label, "]");
+					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, label);
+				}
+				else
+					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, draw->name);
+			}
 			uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
 
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
-					while (cur) {
+					if (depth && selectedItem == 0) {
+						depth--;
+						haveDirLoc = depth != 0;
+						path[pathLenStack[depth]] = 0;
+						goto reload_dir;
+					}
+					if (cur && cur->isDir) {
+						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
+
+						if (depth < sizeof(dirStack) / sizeof(*dirStack)) {
+							pathLenStack[depth] = pathLen;
+							dirStack[depth++] = cur->locator;
+							haveDirLoc = true;
+							if (pathLen + 1 < sizeof(path)) {
+								path[pathLen++] = '/';
+								if (pathLen + nameLen < sizeof(path))
+									memcpy(path + pathLen, cur->name, nameLen + 1);
+								else if (pathLen + 4 <= sizeof(path))
+									strcpy(path + pathLen, "...");
+								else
+									path[pathLen - 1] = 0;
+							}
+							goto reload_dir;
+						}
+						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
+						break;
+					}
+					while (cur && !cur->isDir) {
 						enum MusicPlayerResult playRet = uiPrvPlayMusic(cnv, vol, cur, &settings);
 
 						if (playRet == MusicPlayerResultDone && settings.musicLoopTrack)
 							continue;
 
-						if ((playRet == MusicPlayerResultNext || playRet == MusicPlayerResultDone) && cur->next) {
-							cur = cur->next;
-							selectedItem++;
+						if ((playRet == MusicPlayerResultNext || playRet == MusicPlayerResultDone) && uiPrvMusicNextSong(cur->next)) {
+							do {
+								cur = cur->next;
+								selectedItem++;
+							} while (cur && cur->isDir);
 						}
-						else if (playRet == MusicPlayerResultPrev && cur->prev) {
-							cur = cur->prev;
-							selectedItem--;
+						else if (playRet == MusicPlayerResultPrev && uiPrvMusicPrevSong(cur->prev)) {
+							do {
+								cur = cur->prev;
+								selectedItem--;
+							} while (cur && cur->isDir);
 						}
 						else {
 							break;
@@ -2988,11 +3056,21 @@ bool uiSaveSavestate(void)
 					break;
 
 				case KEY_BIT_B:
-					goto out_unmount;
+					if (depth) {
+						depth--;
+						haveDirLoc = depth != 0;
+						path[pathLenStack[depth]] = 0;
+						goto reload_dir;
+					}
+					else
+						goto out_unmount;
 
 				case KEY_BIT_DOWN:
-					if (cur->next) {
-						cur = cur->next;
+					if (selectedItem + 1 < totalItems) {
+						if (depth && selectedItem == 0)
+							cur = head;
+						else if (cur && cur->next)
+							cur = cur->next;
 						selectedItem++;
 						if (selectedItem >= topItem + itemsOnscreen)
 							topItem++;
@@ -3000,8 +3078,9 @@ bool uiSaveSavestate(void)
 					break;
 
 				case KEY_BIT_UP:
-					if (cur->prev) {
-						cur = cur->prev;
+					if (selectedItem) {
+						if (!(depth && selectedItem == 1) && cur)
+							cur = cur->prev;
 						selectedItem--;
 						if (selectedItem < topItem)
 							topItem--;

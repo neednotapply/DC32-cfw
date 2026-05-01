@@ -29,6 +29,10 @@ static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, st
 
 	if (ctl == MusicPlayerControlPause) {
 		status->paused = true;
+		while (!audioPwmPcmDrained()) {
+			if (controlF)
+				(void)controlF(userData, status);
+		}
 		audioPwmStop();
 		while (1) {
 			ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
@@ -173,13 +177,23 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 		for (pos = 0; pos < nRead; pos += blockAlign) {
 			status.bytesPlayed = bytesDone + pos;
 			audioPwmWriteSample(wavPrvSample(buf + pos, channels, bitsPerSample));
-			audioPwmWaitNext();
+			if (!((pos / blockAlign) & 0x3f)) {
+				audioPwmWaitNext();
+				if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
+					return ctlRet;
+			}
 			if (!((pos / blockAlign) & 0x7f) && wavPrvHandleControl(controlF, userData, &status, &ctlRet))
 				return ctlRet;
 		}
 		bytesDone += nRead;
 	}
 
+	while (!audioPwmPcmDrained()) {
+		enum MusicPlayerResult ctlRet;
+
+		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
+			return ctlRet;
+	}
 	audioPwmStop();
 	return MusicPlayerResultDone;
 }

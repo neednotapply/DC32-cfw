@@ -5,13 +5,15 @@
 #include <stdint.h>
 
 #define AUDIO_PWM_VOLUME_MIN	0
-#define AUDIO_PWM_VOLUME_MAX	10
+#define AUDIO_PWM_VOLUME_MAX	15
 
 void audioPwmSetVolume(uint_fast8_t volume);
 uint_fast8_t audioPwmGetVolume(void);
 bool audioPwmStart(uint32_t sampleRate);
 void audioPwmWriteSample(int16_t sample);
 void audioPwmWaitNext(void);
+bool audioPwmPcmDrained(void);
+uint32_t audioPwmPcmQueued(void);
 bool audioPwmTone(uint32_t freq);
 void audioPwmStop(void);
 

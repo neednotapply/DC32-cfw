@@ -2,8 +2,8 @@
 #define _WAV_PLAYER_H_
 
 #include "fatfs.h"
-#include "mp3Player.h"
+#include "musicPlayer.h"
 
-enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF controlF, void *userData);
+enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerControlF controlF, void *userData);
 
 #endif

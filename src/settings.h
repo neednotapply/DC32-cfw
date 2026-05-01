@@ -30,6 +30,9 @@ struct Settings {
 	uint8_t ledMode;
 	uint8_t ledSpeed;
 	uint8_t ledBrightness;
+	uint8_t musicVolume		:	4;
+	uint8_t musicLoopTrack	:	1;
+	uint8_t reserved		:	3;
 };
 
 

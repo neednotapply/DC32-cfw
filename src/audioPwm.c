@@ -16,6 +16,8 @@ enum AudioPwmMode {
 
 static uint64_t mNextSampleTime;
 static uint32_t mTicksPerSample;
+static uint32_t mToneDuty;
+static uint8_t mVolume = AUDIO_PWM_VOLUME_MAX;
 static enum AudioPwmMode mMode;
 
 static void audioPwmPrvPinToPwm(void)
@@ -52,6 +54,25 @@ static void audioPwmPrvWriteDuty(uint32_t duty)
 		pwm_hw->slice[AUDIO_PWM_IDX].cc = (pwm_hw->slice[AUDIO_PWM_IDX].cc &~ PWM_CH0_CC_A_BITS) | (duty << PWM_CH0_CC_A_LSB);
 }
 
+static void audioPwmPrvWriteToneDuty(void)
+{
+	audioPwmPrvWriteDuty((mToneDuty * mVolume) / (AUDIO_PWM_VOLUME_MAX * 2));
+}
+
+void audioPwmSetVolume(uint_fast8_t volume)
+{
+	if (volume > AUDIO_PWM_VOLUME_MAX)
+		volume = AUDIO_PWM_VOLUME_MAX;
+	mVolume = volume;
+	if (mMode == AudioPwmModeTone)
+		audioPwmPrvWriteToneDuty();
+}
+
+uint_fast8_t audioPwmGetVolume(void)
+{
+	return mVolume;
+}
+
 bool audioPwmStart(uint32_t sampleRate)
 {
 	if (!sampleRate)
@@ -76,12 +97,14 @@ bool audioPwmStart(uint32_t sampleRate)
 
 void audioPwmWriteSample(int16_t sample)
 {
+	int32_t scaled;
 	uint32_t duty;
 
 	if (mMode != AudioPwmModePcm)
 		return;
 
-	duty = (((int32_t)sample + 32768) * AUDIO_PWM_TOP) / 65535;
+	scaled = ((int32_t)sample * mVolume) / AUDIO_PWM_VOLUME_MAX;
+	duty = ((scaled + 32768) * AUDIO_PWM_TOP) / 65535;
 	audioPwmPrvWriteDuty(duty);
 }
 
@@ -118,7 +141,8 @@ bool audioPwmTone(uint32_t freq)
 
 	pwm_hw->slice[AUDIO_PWM_IDX].top = (pwm_hw->slice[AUDIO_PWM_IDX].top &~ PWM_CH0_TOP_BITS) | ((duty - 1) << PWM_CH0_TOP_LSB);
 	pwm_hw->slice[AUDIO_PWM_IDX].ctr = 0;
-	audioPwmPrvWriteDuty(duty / 2);
+	mToneDuty = duty;
+	audioPwmPrvWriteToneDuty();
 	pwm_hw->slice[AUDIO_PWM_IDX].div = (pwm_hw->slice[AUDIO_PWM_IDX].div &~ (PWM_CH0_DIV_INT_BITS | PWM_CH0_DIV_FRAC_BITS)) |
 		(AUDIO_TONE_CLK_DIV << PWM_CH0_DIV_INT_LSB);
 	pwm_hw->slice[AUDIO_PWM_IDX].csr = (pwm_hw->slice[AUDIO_PWM_IDX].csr &~ (PWM_CH0_CSR_PH_ADV_BITS | PWM_CH0_CSR_PH_RET_BITS |

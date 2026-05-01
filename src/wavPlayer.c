@@ -23,50 +23,50 @@ static bool wavPrvReadExact(struct FatfsFil *fil, void *buf, uint32_t len)
 	return fatfsFileRead(fil, buf, len, &nRead) && nRead == len;
 }
 
-static bool wavPrvHandleControl(Mp3PlayerControlF controlF, void *userData, struct Mp3PlayerStatus *status, enum Mp3PlayerResult *retP)
+static bool wavPrvHandleControl(MusicPlayerControlF controlF, void *userData, struct MusicPlayerStatus *status, enum MusicPlayerResult *retP)
 {
-	enum Mp3PlayerControl ctl = controlF ? controlF(userData, status) : Mp3PlayerControlNone;
+	enum MusicPlayerControl ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
 
-	if (ctl == Mp3PlayerControlPause) {
+	if (ctl == MusicPlayerControlPause) {
 		status->paused = true;
 		audioPwmStop();
 		while (1) {
-			ctl = controlF ? controlF(userData, status) : Mp3PlayerControlNone;
-			if (ctl == Mp3PlayerControlPause) {
+			ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
+			if (ctl == MusicPlayerControlPause) {
 				status->paused = false;
 				if (!audioPwmStart(status->sampleRate)) {
-					*retP = Mp3PlayerResultDecodeError;
+					*retP = MusicPlayerResultDecodeError;
 					return true;
 				}
 				return false;
 			}
-			if (ctl == Mp3PlayerControlStop) {
-				*retP = Mp3PlayerResultStopped;
+			if (ctl == MusicPlayerControlStop) {
+				*retP = MusicPlayerResultStopped;
 				return true;
 			}
-			if (ctl == Mp3PlayerControlPrev) {
-				*retP = Mp3PlayerResultPrev;
+			if (ctl == MusicPlayerControlPrev) {
+				*retP = MusicPlayerResultPrev;
 				return true;
 			}
-			if (ctl == Mp3PlayerControlNext) {
-				*retP = Mp3PlayerResultNext;
+			if (ctl == MusicPlayerControlNext) {
+				*retP = MusicPlayerResultNext;
 				return true;
 			}
 		}
 	}
-	if (ctl == Mp3PlayerControlStop) {
+	if (ctl == MusicPlayerControlStop) {
 		audioPwmStop();
-		*retP = Mp3PlayerResultStopped;
+		*retP = MusicPlayerResultStopped;
 		return true;
 	}
-	if (ctl == Mp3PlayerControlPrev) {
+	if (ctl == MusicPlayerControlPrev) {
 		audioPwmStop();
-		*retP = Mp3PlayerResultPrev;
+		*retP = MusicPlayerResultPrev;
 		return true;
 	}
-	if (ctl == Mp3PlayerControlNext) {
+	if (ctl == MusicPlayerControlNext) {
 		audioPwmStop();
-		*retP = Mp3PlayerResultNext;
+		*retP = MusicPlayerResultNext;
 		return true;
 	}
 	return false;
@@ -90,9 +90,9 @@ static int16_t wavPrvSample(const uint8_t *p, uint16_t channels, uint16_t bitsPe
 	}
 }
 
-enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF controlF, void *userData)
+enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerControlF controlF, void *userData)
 {
-	struct Mp3PlayerStatus status;
+	struct MusicPlayerStatus status;
 	uint32_t dataPos = 0, dataSize = 0, bytesDone = 0;
 	uint16_t audioFormat = 0, channels = 0, bitsPerSample = 0, blockAlign = 0;
 	uint8_t *buf = WAV_BUF;
@@ -103,16 +103,16 @@ enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 	status.fileSize = fatfsFileGetSize(fil);
 
 	if (!wavPrvReadExact(fil, hdr, sizeof(hdr)))
-		return Mp3PlayerResultFileError;
+		return MusicPlayerResultFileError;
 	if (memcmp(hdr + 0, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4))
-		return Mp3PlayerResultDecodeError;
+		return MusicPlayerResultDecodeError;
 
 	while (fatfsFileTell(fil) + 8 <= status.fileSize) {
 		uint8_t chunkHdr[8];
 		uint32_t chunkSize, nextChunk;
 
 		if (!wavPrvReadExact(fil, chunkHdr, sizeof(chunkHdr)))
-			return Mp3PlayerResultFileError;
+			return MusicPlayerResultFileError;
 		chunkSize = wavPrvReadLe32(chunkHdr + 4);
 		nextChunk = fatfsFileTell(fil) + chunkSize + (chunkSize & 1);
 
@@ -120,7 +120,7 @@ enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 			uint8_t fmt[16];
 
 			if (chunkSize < sizeof(fmt) || !wavPrvReadExact(fil, fmt, sizeof(fmt)))
-				return Mp3PlayerResultDecodeError;
+				return MusicPlayerResultDecodeError;
 			audioFormat = wavPrvReadLe16(fmt + 0);
 			channels = wavPrvReadLe16(fmt + 2);
 			status.sampleRate = wavPrvReadLe32(fmt + 4);
@@ -135,26 +135,26 @@ enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 		}
 
 		if (nextChunk < fatfsFileTell(fil) || nextChunk > status.fileSize + 1)
-			return Mp3PlayerResultDecodeError;
+			return MusicPlayerResultDecodeError;
 		if (!fatfsFileSeek(fil, nextChunk))
-			return Mp3PlayerResultFileError;
+			return MusicPlayerResultFileError;
 		if (haveFmt && haveData)
 			break;
 	}
 
 	if (!haveFmt || !haveData || audioFormat != 1 || (channels != 1 && channels != 2) ||
 		(bitsPerSample != 8 && bitsPerSample != 16) || !status.sampleRate)
-		return Mp3PlayerResultDecodeError;
+		return MusicPlayerResultDecodeError;
 
 	if (blockAlign != channels * bitsPerSample / 8 || dataSize < blockAlign)
-		return Mp3PlayerResultDecodeError;
+		return MusicPlayerResultDecodeError;
 	if (!fatfsFileSeek(fil, dataPos))
-		return Mp3PlayerResultFileError;
+		return MusicPlayerResultFileError;
 	if (!audioPwmStart(status.sampleRate))
-		return Mp3PlayerResultDecodeError;
+		return MusicPlayerResultDecodeError;
 
 	while (bytesDone < dataSize) {
-		enum Mp3PlayerResult ctlRet;
+		enum MusicPlayerResult ctlRet;
 		uint32_t bytesLeft = dataSize - bytesDone, bytesToRead = WAV_BUF_SZ, nRead, pos;
 
 		if (bytesToRead > bytesLeft)
@@ -164,7 +164,7 @@ enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 			break;
 		if (!fatfsFileRead(fil, buf, bytesToRead, &nRead)) {
 			audioPwmStop();
-			return Mp3PlayerResultFileError;
+			return MusicPlayerResultFileError;
 		}
 		nRead -= nRead % blockAlign;
 		if (!nRead)
@@ -181,5 +181,5 @@ enum Mp3PlayerResult wavPlayerPlayFile(struct FatfsFil *fil, Mp3PlayerControlF c
 	}
 
 	audioPwmStop();
-	return Mp3PlayerResultDone;
+	return MusicPlayerResultDone;
 }

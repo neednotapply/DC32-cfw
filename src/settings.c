@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			9
+#define SETTINGS_CUR_VER			10
 
 
 union SettingsPage {
@@ -110,6 +110,11 @@ void settingsGet(struct Settings *settings)
 
 		case 8:				//upgrade from v8
 			settings->rotation = 0;
+			//fallthrough
+
+		case 9:				//upgrade from v9
+			settings->musicVolume = 7;
+			settings->musicLoopTrack = false;
 			//fallthrough
 
 		//other cases here, in increasing order

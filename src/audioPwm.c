@@ -11,8 +11,8 @@
 #define AUDIO_PCM_ALARM			3
 #define AUDIO_PCM_ALARM_BIT		(1u << AUDIO_PCM_ALARM)
 #define AUDIO_PCM_IRQ			TIMER0_IRQ_3_IRQn
-#define AUDIO_PCM_US_PER_SEC	1000000U
 #define AUDIO_PCM_BUF_LEN		1024
+#define AUDIO_PCM_FULL_TIMEOUT	(TICKS_PER_SECOND / 10)
 
 enum AudioPwmMode {
 	AudioPwmModeStopped,
@@ -29,6 +29,7 @@ static uint32_t mPcmAlarmPhase;
 static uint32_t mPcmNextAlarm;
 static uint32_t mToneDuty;
 static uint8_t mVolume = AUDIO_PWM_VOLUME_MAX;
+static bool mPcmTimerInited;
 static volatile enum AudioPwmMode mMode;
 
 static void audioPwmPrvPinToPwm(void)
@@ -101,7 +102,7 @@ static void audioPwmPrvArmNextPcmAlarm(void)
 {
 	uint32_t delta;
 
-	mPcmAlarmPhase += AUDIO_PCM_US_PER_SEC;
+	mPcmAlarmPhase += TICKS_PER_SECOND;
 	delta = mPcmAlarmPhase / mPcmSampleRate;
 	mPcmAlarmPhase -= delta * mPcmSampleRate;
 	if (!delta)
@@ -110,6 +111,28 @@ static void audioPwmPrvArmNextPcmAlarm(void)
 	while ((int32_t)(mPcmNextAlarm - AUDIO_PCM_TIMER->timerawl) <= 0)
 		mPcmNextAlarm += delta;
 	AUDIO_PCM_TIMER->alarm[AUDIO_PCM_ALARM] = mPcmNextAlarm;
+}
+
+static void audioPwmPrvPcmTimerInit(void)
+{
+	if (mPcmTimerInited)
+		return;
+
+	resets_hw->reset &=~ RESETS_RESET_TIMER0_BITS;
+	while ((resets_hw->reset_done & RESETS_RESET_DONE_TIMER0_BITS) != RESETS_RESET_DONE_TIMER0_BITS);
+	AUDIO_PCM_TIMER->source = TIMER_SOURCE_CLK_SYS_VALUE_CLK_SYS << TIMER_SOURCE_CLK_SYS_LSB;
+	mPcmTimerInited = true;
+}
+
+static void audioPwmPrvPcmTimerStop(void)
+{
+	if (!mPcmTimerInited)
+		return;
+
+	NVIC_DisableIRQ(AUDIO_PCM_IRQ);
+	AUDIO_PCM_TIMER->inte &=~ AUDIO_PCM_ALARM_BIT;
+	AUDIO_PCM_TIMER->armed = AUDIO_PCM_ALARM_BIT;
+	AUDIO_PCM_TIMER->intr = AUDIO_PCM_ALARM_BIT;
 }
 
 void TIMER0_IRQ_3_IRQHandler(void)
@@ -149,10 +172,8 @@ bool audioPwmStart(uint32_t sampleRate)
 	if (!sampleRate)
 		return false;
 
-	NVIC_DisableIRQ(AUDIO_PCM_IRQ);
-	AUDIO_PCM_TIMER->inte &=~ AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->armed = AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->intr = AUDIO_PCM_ALARM_BIT;
+	audioPwmPrvPcmTimerInit();
+	audioPwmPrvPcmTimerStop();
 	audioPwmPrvDisable();
 	audioPwmPrvPinToPwm();
 
@@ -181,10 +202,21 @@ bool audioPwmStart(uint32_t sampleRate)
 
 void audioPwmWriteSample(int16_t sample)
 {
+	uint64_t timeout;
+
 	if (mMode != AudioPwmModePcm)
 		return;
 
-	while (mMode == AudioPwmModePcm && mPcmQueued >= AUDIO_PCM_BUF_LEN);
+	timeout = getTime() + AUDIO_PCM_FULL_TIMEOUT;
+	while (mMode == AudioPwmModePcm && mPcmQueued >= AUDIO_PCM_BUF_LEN) {
+		if (getTime() > timeout) {
+			__disable_irq();
+			if (mPcmQueued)
+				mPcmQueued--;
+			__enable_irq();
+			break;
+		}
+	}
 	if (mMode != AudioPwmModePcm)
 		return;
 
@@ -200,7 +232,12 @@ void audioPwmWriteSample(int16_t sample)
 
 void audioPwmWaitNext(void)
 {
-	while (mMode == AudioPwmModePcm && mPcmQueued >= AUDIO_PCM_BUF_LEN / 2);
+	uint64_t timeout = getTime() + AUDIO_PCM_FULL_TIMEOUT;
+
+	while (mMode == AudioPwmModePcm && mPcmQueued >= AUDIO_PCM_BUF_LEN / 2) {
+		if (getTime() > timeout)
+			break;
+	}
 }
 
 bool audioPwmPcmDrained(void)
@@ -222,10 +259,7 @@ bool audioPwmTone(uint32_t freq)
 		return true;
 	}
 
-	NVIC_DisableIRQ(AUDIO_PCM_IRQ);
-	AUDIO_PCM_TIMER->inte &=~ AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->armed = AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->intr = AUDIO_PCM_ALARM_BIT;
+	audioPwmPrvPcmTimerStop();
 	audioPwmPrvDisable();
 	audioPwmPrvPinToPwm();
 
@@ -253,10 +287,7 @@ void audioPwmStop(void)
 	if (mMode == AudioPwmModeStopped)
 		return;
 
-	NVIC_DisableIRQ(AUDIO_PCM_IRQ);
-	AUDIO_PCM_TIMER->inte &=~ AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->armed = AUDIO_PCM_ALARM_BIT;
-	AUDIO_PCM_TIMER->intr = AUDIO_PCM_ALARM_BIT;
+	audioPwmPrvPcmTimerStop();
 	audioPwmPrvDisable();
 	audioPwmPrvWriteDuty(0);
 	audioPwmPrvPinLow();

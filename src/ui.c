@@ -1066,11 +1066,10 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	{
 		struct UiFileListCtx ctx;
 		struct FatfsDir *dir;
-		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
-		ctx.spaceAvail = listMem.size;
+		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
+		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
 		ctx.filterF = filterF;
 
 		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);

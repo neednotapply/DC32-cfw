@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			11
+#define SETTINGS_CUR_VER			12
 
 
 union SettingsPage {
@@ -119,6 +119,17 @@ void settingsGet(struct Settings *settings)
 
 		case 10:			//upgrade music volume from 0-10 scale to 0-15 scale
 			settings->musicVolume = (settings->musicVolume * 15 + 5) / 10;
+			//fallthrough
+
+		case 11:			//upgrade LED speed from 1-4 scale to 1-10 scale
+			if (settings->ledSpeed <= 1)
+				settings->ledSpeed = 1;
+			else if (settings->ledSpeed == 2)
+				settings->ledSpeed = 4;
+			else if (settings->ledSpeed == 3)
+				settings->ledSpeed = 7;
+			else
+				settings->ledSpeed = 10;
 			//fallthrough
 
 		//other cases here, in increasing order

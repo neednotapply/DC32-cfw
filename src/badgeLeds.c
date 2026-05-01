@@ -8,7 +8,7 @@
 #define LED_DEFAULT_TINT				56
 #define LED_MIN_BRIGHTNESS				15
 #define LED_MIN_SPEED					1
-#define LED_MAX_SPEED					4
+#define LED_MAX_SPEED					10
 
 
 static struct Settings mLedSettings;
@@ -24,7 +24,7 @@ static uint_fast8_t badgeLedsPrvSanitizeMode(uint_fast8_t mode)
 
 static uint_fast8_t badgeLedsPrvSanitizeSpeed(uint_fast8_t speed)
 {
-	return speed >= LED_MIN_SPEED && speed <= LED_MAX_SPEED ? speed : 2;
+	return speed >= LED_MIN_SPEED && speed <= LED_MAX_SPEED ? speed : 4;
 }
 
 static uint_fast8_t badgeLedsPrvBrightness(void)
@@ -43,7 +43,7 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 		[LedModeOff] = "OFF",
 		[LedModeSolid] = "SOLID",
 		[LedModeRainbow] = "RAINBOW",
-		[LedModeFlame] = "FLAME",
+		[LedModeFlame] = "PULSE",
 		[LedModeTravelingDot] = "DOT",
 	};
 
@@ -86,7 +86,7 @@ static void badgeLedsPrvWheel(uint_fast8_t pos, uint8_t *rP, uint8_t *gP, uint8_
 
 static uint_fast8_t badgeLedsPrvFrameIntervalIdx(uint_fast8_t speed)
 {
-	static const uint8_t intervals[] = {0, 3, 6, 12, 24};
+	static const uint8_t intervals[] = {0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24};
 
 	speed = badgeLedsPrvSanitizeSpeed(speed);
 	return intervals[speed];
@@ -113,16 +113,18 @@ static void badgeLedsPrvRenderRainbow(void)
 	ws2812refresh();
 }
 
-static void badgeLedsPrvRenderFlame(void)
+static void badgeLedsPrvRenderPulse(void)
 {
 	uint_fast8_t i;
+	uint_fast8_t red = mLedSettings.ledRed, green = mLedSettings.ledGreen, blue = mLedSettings.ledBlue;
 	uint_fast8_t pulse = (mLedFrame & 0x1f) <= 15 ? (mLedFrame & 0x0f) : (31 - (mLedFrame & 0x1f));
+	uint_fast8_t scale = 48 + pulse * 13;
+
+	if (!red && !green && !blue)
+		red = green = blue = LED_DEFAULT_TINT;
 
 	for (i = 0; i < NUM_WS2812s; i++) {
-		uint_fast8_t flicker = (mLedFrame * 17 + i * 47 + (i * i * 13)) & 0x3f;
-		uint_fast8_t heat = 48 + pulse * 4 + flicker / 2;
-
-		badgeLedsPrvSetRgb(i, heat, heat / 3 + flicker / 4, flicker / 16);
+		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
 	}
 	ws2812refresh();
 }
@@ -160,7 +162,7 @@ static void badgeLedsPrvRenderCurrent(void)
 			break;
 
 		case LedModeFlame:
-			badgeLedsPrvRenderFlame();
+			badgeLedsPrvRenderPulse();
 			break;
 
 		case LedModeTravelingDot:

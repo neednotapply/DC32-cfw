@@ -13,6 +13,7 @@
 #include "cpu.h"
 #include "mbc.h"
 #include "irRemote.h"
+#include "badUsb.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
@@ -990,10 +991,278 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	return true;
 }
 
+#ifndef NO_SD_CARD
+	static void uiPrvCopyStr(char *dst, uint32_t dstLen, const char *src);
+
+	typedef bool (*UiFileNameFilterF)(const char *name);
+
+	struct UiFileListCtx {
+		struct MusicOption *nextAvail;
+		struct MusicOption *head;
+		struct MusicOption *tail;
+		uint32_t spaceAvail;
+		uint32_t count;
+		bool overflow;
+		UiFileNameFilterF filterF;
+		char fname[FATFS_NAME_BUF_LEN];
+	};
+
+	static bool uiPrvIsDotDir(const char *name)
+	{
+		return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
+	}
+
+	static bool uiPrvFileListAppend(struct UiFileListCtx *ctx, const char *fname, uint32_t fileSz, bool isDir, const struct FatFileLocator *locator)
+	{
+		uint32_t nameLen = strlen(fname), spaceNeeded = (sizeof(struct MusicOption) + nameLen + 1 + 3) &~ 3;
+
+		if (spaceNeeded > ctx->spaceAvail) {
+			ctx->overflow = true;
+			return false;
+		}
+
+		ctx->nextAvail->prev = ctx->tail;
+		ctx->nextAvail->next = NULL;
+		ctx->nextAvail->locator = *locator;
+		ctx->nextAvail->size = fileSz;
+		ctx->nextAvail->isDir = isDir;
+		memcpy(ctx->nextAvail->name, fname, nameLen + 1);
+		if (ctx->tail)
+			ctx->tail->next = ctx->nextAvail;
+		else
+			ctx->head = ctx->nextAvail;
+		ctx->tail = ctx->nextAvail;
+		ctx->nextAvail = (struct MusicOption*)(((uint8_t*)ctx->nextAvail) + spaceNeeded);
+		ctx->spaceAvail -= spaceNeeded;
+		ctx->count++;
+		return true;
+	}
+
+	static void uiPrvFileListReadDir(struct UiFileListCtx *ctx, struct FatfsDir *dir)
+	{
+		uint32_t fileSz, seen = 0;
+		uint8_t attrs;
+		struct FatFileLocator locator;
+
+		while (fatfsDirRead(dir, ctx->fname, &fileSz, &attrs, &locator)) {
+			if (!(++seen & 0x0f))
+				badgeLedsTick();
+			if (attrs & FATFS_ATTR_VOL_LBL)
+				continue;
+			if (attrs & FATFS_ATTR_DIR) {
+				if (!uiPrvIsDotDir(ctx->fname))
+					if (!uiPrvFileListAppend(ctx, ctx->fname, fileSz, true, &locator))
+						break;
+				continue;
+			}
+			if (!ctx->filterF || ctx->filterF(ctx->fname))
+				if (!uiPrvFileListAppend(ctx, ctx->fname, fileSz, false, &locator))
+					break;
+		}
+	}
+
+	static uint32_t uiPrvListFiles(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, UiFileNameFilterF filterF, struct MusicOption **headP, bool *overflowP)
+	{
+		struct UiFileListCtx ctx;
+		struct FatfsDir *dir;
+
+		memset(&ctx, 0, sizeof(ctx));
+		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
+		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		ctx.filterF = filterF;
+
+		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
+		if (dir) {
+			uiPrvFileListReadDir(&ctx, dir);
+			fatfsDirClose(dir);
+		}
+
+		*headP = ctx.head;
+		if (overflowP)
+			*overflowP = ctx.overflow;
+		return ctx.count;
+	}
+
+	static struct MusicOption *uiPrvFileOptionAt(struct MusicOption *head, uint32_t depth, uint32_t selectedItem)
+	{
+		uint32_t skip;
+
+		if (depth && !selectedItem)
+			return NULL;
+		skip = selectedItem - (depth ? 1 : 0);
+		while (head && skip--)
+			head = head->next;
+		return head;
+	}
+
+	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
+	{
+		struct MusicOption *head = NULL, *cur = NULL;
+		struct FatFileLocator dirStack[8];
+		uint16_t pathLenStack[8];
+		char path[sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 2];
+		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
+		uint_fast8_t itemHeight, itemsOnscreen, pathTop, listTop, itemLeft;
+		bool overflow = false, haveDirLoc = false;
+		struct FontGlyphInfo gi;
+
+		uiPrvCopyStr(path, sizeof(path), rootPath);
+reload_dir:
+		numItems = uiPrvListFiles(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, &head, &overflow);
+		if (!numItems && !depth) {
+			uiAlert(cnv, emptyMsg, DialogTypeOk);
+			return false;
+		}
+		if (overflow)
+			uiAlert(cnv, "Folder has too many entries; showing what fits", DialogTypeOk);
+
+		topItem = 0;
+		selectedItem = 0;
+		itemHeight = uiPrvGlyphHeight(cnv) + 1;
+		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
+		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
+		listTop = pathTop + itemHeight;
+		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (itemsOnscreen > numItems + (depth ? 1 : 0))
+			itemsOnscreen = numItems + (depth ? 1 : 0);
+		prevTopItem = topItem + 1;
+		prevSelOnscreenItem = selectedItem - topItem + 1;
+
+		while (1) {
+			struct MusicOption *draw = head;
+			uint32_t i, totalItems = numItems + (depth ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
+
+			cur = uiPrvFileOptionAt(head, depth, selectedItem);
+			if (prevTopItem != topItem) {
+				uint_fast8_t firstRow = 0, scrollWidth;
+				uint32_t skipItems;
+
+				uiPrvReset(cnv, false);
+				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, path);
+				scrollWidth = totalItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, totalItems, topItem, itemsOnscreen) : 0;
+
+				if (depth && !topItem) {
+					cnv->foreColor = 12;
+					uiPrvDrawTruncText(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "[..]");
+					firstRow = 1;
+					skipItems = 0;
+				}
+				else
+					skipItems = topItem - (depth ? 1 : 0);
+
+				for (i = 0; i < skipItems && draw; i++)
+					draw = draw->next;
+
+				cnv->foreColor = 12;
+				for (i = firstRow; i < itemsOnscreen && draw; i++, draw = draw->next) {
+					char label[FATFS_NAME_BUF_LEN + 3];
+
+					if (draw->isDir) {
+						label[0] = '[';
+						strcpy(label + 1, draw->name);
+						strcat(label, "]");
+						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, label);
+					}
+					else
+						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+				}
+
+				prevSelOnscreenItem = selectedOnscreenItem + 1;
+			}
+			prevTopItem = topItem;
+			if (prevSelOnscreenItem != selectedOnscreenItem) {
+				if (prevSelOnscreenItem < itemsOnscreen) {
+					cnv->foreColor = 0;
+					uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
+				}
+				cnv->foreColor = 15;
+				uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+			}
+			prevSelOnscreenItem = selectedOnscreenItem;
+
+			switch (uiPrvRecvKeypress()) {
+				case KEY_BIT_A:
+					if (depth && selectedItem == 0) {
+						depth--;
+						haveDirLoc = depth != 0;
+						path[pathLenStack[depth]] = 0;
+						goto reload_dir;
+					}
+					if (cur && cur->isDir) {
+						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
+
+						if (depth < sizeof(dirStack) / sizeof(*dirStack)) {
+							pathLenStack[depth] = pathLen;
+							dirStack[depth++] = cur->locator;
+							haveDirLoc = true;
+							if (pathLen + 1 < sizeof(path)) {
+								path[pathLen++] = '/';
+								if (pathLen + nameLen < sizeof(path))
+									memcpy(path + pathLen, cur->name, nameLen + 1);
+								else if (pathLen + 4 <= sizeof(path))
+									strcpy(path + pathLen, "...");
+								else
+									path[pathLen - 1] = 0;
+							}
+							goto reload_dir;
+						}
+						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
+						prevTopItem = topItem + 1;
+					}
+					else if (cur) {
+						*locatorOut = cur->locator;
+						if (nameOut && nameOutSz)
+							uiPrvCopyStr(nameOut, nameOutSz, cur->name);
+						return true;
+					}
+					break;
+
+				case KEY_BIT_B:
+					if (depth) {
+						depth--;
+						haveDirLoc = depth != 0;
+						path[pathLenStack[depth]] = 0;
+						goto reload_dir;
+					}
+					return false;
+
+				case KEY_BIT_DOWN:
+					if (selectedItem + 1 < totalItems) {
+						selectedItem++;
+						if (selectedItem >= topItem + itemsOnscreen) {
+							topItem += itemsOnscreen;
+							if (topItem + itemsOnscreen > totalItems)
+								topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
+						}
+					}
+					break;
+
+				case KEY_BIT_UP:
+					if (selectedItem) {
+						selectedItem--;
+						if (selectedItem < topItem) {
+							if (topItem > itemsOnscreen)
+								topItem -= itemsOnscreen;
+							else
+								topItem = 0;
+							if (selectedItem < topItem)
+								topItem = selectedItem;
+						}
+					}
+					break;
+			}
+		}
+	}
+#endif
+
 #define LED_BRIGHTNESS_RAW_MIN			15
 #define LED_BRIGHTNESS_RAW_MAX			255
 #define LED_BRIGHTNESS_MENU_MIN			1
 #define LED_BRIGHTNESS_MENU_MAX			10
+#define LED_COLOR_RAW_MAX				255
+#define LED_COLOR_MENU_MAX				25
+#define LED_SPEED_MENU_MIN				1
+#define LED_SPEED_MENU_MAX				10
 
 static uint_fast8_t uiPrvLedBrightnessToMenu(uint_fast8_t brightness)
 {
@@ -1015,6 +1284,22 @@ static uint8_t uiPrvLedBrightnessFromMenu(uint_fast8_t brightness)
 	return LED_BRIGHTNESS_RAW_MIN + (((uint32_t)brightness - LED_BRIGHTNESS_MENU_MIN) * (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) + (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) / 2) / (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN);
 }
 
+static uint_fast8_t uiPrvLedColorToMenu(uint_fast8_t color)
+{
+	if (color >= LED_COLOR_RAW_MAX)
+		return LED_COLOR_MENU_MAX;
+
+	return ((uint32_t)color * LED_COLOR_MENU_MAX + LED_COLOR_RAW_MAX / 2) / LED_COLOR_RAW_MAX;
+}
+
+static uint8_t uiPrvLedColorFromMenu(uint_fast8_t color)
+{
+	if (color >= LED_COLOR_MENU_MAX)
+		return LED_COLOR_RAW_MAX;
+
+	return ((uint32_t)color * LED_COLOR_RAW_MAX + LED_COLOR_MENU_MAX / 2) / LED_COLOR_MENU_MAX;
+}
+
 static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
@@ -1022,8 +1307,8 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 
 	if (settings->ledMode >= LedModeNumModes)
 		settings->ledMode = LedModeOff;
-	if (settings->ledSpeed < 1 || settings->ledSpeed > 4)
-		settings->ledSpeed = 2;
+	if (settings->ledSpeed < LED_SPEED_MENU_MIN || settings->ledSpeed > LED_SPEED_MENU_MAX)
+		settings->ledSpeed = 4;
 	settings->ledBrightness = uiPrvLedBrightnessFromMenu(uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
 	uiPrvReset(cnv, false);
@@ -1050,19 +1335,19 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED RED:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->ledRed);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledRed));
 
 		ledGreenOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED GREEN:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->ledGreen);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledGreen));
 
 		ledBlueOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BLUE:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->ledBlue);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
 
 		ledSpeedOption = numOptions++;
 		cnv->foreColor = 11;
@@ -1099,20 +1384,22 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 
 		if (selOption == ledRedOption || selOption == ledGreenOption || selOption == ledBlueOption) {
 			uint8_t *valP = (selOption == ledRedOption) ? &settings->ledRed : ((selOption == ledGreenOption) ? &settings->ledGreen : &settings->ledBlue);
+			uint_fast8_t color = uiPrvLedColorToMenu(*valP);
 
 			if (button == KEY_BIT_LEFT) {
-				if (*valP)
-					(*valP)--;
+				if (color)
+					color--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (*valP != 0xff)
-					(*valP)++;
+				if (color < LED_COLOR_MENU_MAX)
+					color++;
 				else
 					continue;
 			}
 
+			*valP = uiPrvLedColorFromMenu(color);
 			badgeLedsApplySettings(settings, true);
 		}
 
@@ -1139,13 +1426,13 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		if (selOption == ledSpeedOption) {
 
 			if (button == KEY_BIT_LEFT) {
-				if (settings->ledSpeed > 1)
+				if (settings->ledSpeed > LED_SPEED_MENU_MIN)
 					settings->ledSpeed--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings->ledSpeed < 4)
+				if (settings->ledSpeed < LED_SPEED_MENU_MAX)
 					settings->ledSpeed++;
 				else
 					continue;
@@ -1166,8 +1453,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 	settingsGet(&settings);
 	if (settings.ledMode >= LedModeNumModes)
 		settings.ledMode = LedModeOff;
-	if (settings.ledSpeed < 1 || settings.ledSpeed > 4)
-		settings.ledSpeed = 2;
+	if (settings.ledSpeed < LED_SPEED_MENU_MIN || settings.ledSpeed > LED_SPEED_MENU_MAX)
+		settings.ledSpeed = 4;
 	
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
@@ -2291,7 +2578,7 @@ bool uiSaveSavestate(void)
 				bool malformed = false, cancelled = false;
 
 				codeIdx++;
-				if (uiPrvIrSendCodeLine(cnv, "IR Power Blast", uiPrvTrim(trimmed + 5), name, carrier, repeat, codeIdx, &malformed, &cancelled))
+				if (uiPrvIrSendCodeLine(cnv, "IR Power Spam", uiPrvTrim(trimmed + 5), name, carrier, repeat, codeIdx, &malformed, &cancelled))
 					stats->sent++;
 				if (malformed)
 					stats->malformed++;
@@ -2313,14 +2600,14 @@ bool uiSaveSavestate(void)
 		return stats->sent != 0;
 	}
 
-	static bool uiPrvIrBlastFlipper(struct Canvas *cnv, struct FatfsFil *fil, char *line, struct IrBlastStats *stats, const char *wantedName, const char *title)
+	static bool uiPrvIrBlastFlipper(struct Canvas *cnv, struct FatfsFil *fil, char *line, struct IrBlastStats *stats, const char *wantedName, const char *title, uint32_t maxSent)
 	{
 		struct FlipperIrRecord rec;
 		bool haveHeader = false, haveVersion = false;
 
 		uiPrvFlipperRecordInit(&rec);
 
-		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled) {
+		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled && (!maxSent || stats->sent < maxSent)) {
 			char *trimmed = uiPrvTrim(line);
 
 			if (!*trimmed)
@@ -2407,7 +2694,8 @@ bool uiSaveSavestate(void)
 			}
 		}
 
-		uiPrvFlipperRecordFinish(cnv, &rec, stats, wantedName, title);
+		if (!maxSent || stats->sent < maxSent)
+			uiPrvFlipperRecordFinish(cnv, &rec, stats, wantedName, title);
 
 		if (!haveHeader || !haveVersion)
 			stats->malformed++;
@@ -2441,7 +2729,7 @@ bool uiSaveSavestate(void)
 		memset(&stats, 0, sizeof(stats));
 		irRemoteBegin();
 		irStarted = true;
-		ret = isFlipper ? uiPrvIrBlastFlipper(cnv, fil, line, &stats, NULL, "IR Power Blast") : uiPrvIrPowerBlastDc32(cnv, fil, line, &stats);
+		ret = isFlipper ? uiPrvIrBlastFlipper(cnv, fil, line, &stats, NULL, "IR Power Spam", 0) : uiPrvIrPowerBlastDc32(cnv, fil, line, &stats);
 
 	out:
 		if (irStarted)
@@ -2461,12 +2749,12 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "IR blast cancelled", DialogTypeOk);
+			uiAlert(cnv, "IR spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
-			(void)sprintf(msg, "IR blast complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			(void)sprintf(msg, "IR spam complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (path) {
@@ -2502,7 +2790,7 @@ bool uiSaveSavestate(void)
 		memset(&stats, 0, sizeof(stats));
 		irRemoteBegin();
 		irStarted = true;
-		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, "Mute", "IR Mute Blast");
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, "Mute", "IR Mute Spam", 0);
 
 	out:
 		if (irStarted)
@@ -2522,16 +2810,222 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "Mute Blast cancelled", DialogTypeOk);
+			uiAlert(cnv, "Mute Spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
-			(void)sprintf(msg, "Mute Blast complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			(void)sprintf(msg, "Mute Spam complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (fil) {
 			uiAlert(cnv, "No mute codes found in /IR/tv.ir", DialogTypeOk);
+		}
+
+		return ret;
+	}
+
+	static bool uiPrvIrRemoteFileName(const char *fname)
+	{
+		return uiPrvStrEndsWithNoCase(fname, ".ir");
+	}
+
+	static bool uiPrvIrButtonListAppend(struct UiFileListCtx *ctx, const char *name)
+	{
+		struct FatFileLocator loc;
+
+		memset(&loc, 0, sizeof(loc));
+		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
+	}
+
+	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP)
+	{
+		struct UiFileListCtx ctx;
+		struct IrBlastStats stats;
+		bool isFlipper = false;
+
+		memset(&ctx, 0, sizeof(ctx));
+		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
+		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		memset(&stats, 0, sizeof(stats));
+
+		*lineTooLongP = false;
+		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
+			goto out;
+
+		memset(&stats, 0, sizeof(stats));
+		while (uiPrvIrReadLineStat(fil, line, &stats)) {
+			char *trimmed = uiPrvTrim(line);
+
+			if (uiPrvStartsWith(trimmed, "name:"))
+				if (!uiPrvIrButtonListAppend(&ctx, uiPrvTrim(trimmed + 5)))
+					break;
+		}
+
+		*lineTooLongP = stats.lineTooLong;
+
+	out:
+		*headP = ctx.head;
+		if (overflowP)
+			*overflowP = ctx.overflow;
+		return ctx.count;
+	}
+
+	static struct MusicOption *uiPrvChooseFlatOption(struct Canvas *cnv, struct MusicOption *head, uint32_t numItems, const char *title)
+	{
+		uint32_t topItem = 0, selectedItem = 0, prevTopItem, prevSelOnscreenItem;
+		uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1, pathTop, listTop, itemsOnscreen, itemLeft;
+		struct FontGlyphInfo gi;
+
+		if (!numItems)
+			return NULL;
+
+		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
+		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
+		listTop = pathTop + itemHeight;
+		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (itemsOnscreen > numItems)
+			itemsOnscreen = numItems;
+		prevTopItem = topItem + 1;
+		prevSelOnscreenItem = selectedItem - topItem + 1;
+
+		while (1) {
+			struct MusicOption *draw = head;
+			uint32_t i, selectedOnscreenItem = selectedItem - topItem;
+
+			if (prevTopItem != topItem) {
+				uint_fast8_t scrollWidth;
+
+				uiPrvReset(cnv, false);
+				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, title);
+				scrollWidth = numItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numItems, topItem, itemsOnscreen) : 0;
+				for (i = 0; i < topItem && draw; i++)
+					draw = draw->next;
+				cnv->foreColor = 12;
+				for (i = 0; i < itemsOnscreen && draw; i++, draw = draw->next)
+					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+				prevSelOnscreenItem = selectedOnscreenItem + 1;
+			}
+			prevTopItem = topItem;
+			if (prevSelOnscreenItem != selectedOnscreenItem) {
+				if (prevSelOnscreenItem < itemsOnscreen) {
+					cnv->foreColor = 0;
+					uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
+				}
+				cnv->foreColor = 15;
+				uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+			}
+			prevSelOnscreenItem = selectedOnscreenItem;
+
+			switch (uiPrvRecvKeypress()) {
+				case KEY_BIT_A:
+					return uiPrvFileOptionAt(head, 0, selectedItem);
+
+				case KEY_BIT_B:
+					return NULL;
+
+				case KEY_BIT_DOWN:
+					if (selectedItem + 1 < numItems) {
+						selectedItem++;
+						if (selectedItem >= topItem + itemsOnscreen) {
+							topItem += itemsOnscreen;
+							if (topItem + itemsOnscreen > numItems)
+								topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
+						}
+					}
+					break;
+
+				case KEY_BIT_UP:
+					if (selectedItem) {
+						selectedItem--;
+						if (selectedItem < topItem) {
+							if (topItem > itemsOnscreen)
+								topItem -= itemsOnscreen;
+							else
+								topItem = 0;
+							if (selectedItem < topItem)
+								topItem = selectedItem;
+						}
+					}
+					break;
+			}
+		}
+	}
+
+	static bool uiPrvIrRemote(struct Canvas *cnv)
+	{
+		struct FatfsVol *vol = NULL;
+		struct FatfsFil *fil = NULL;
+		struct FatFileLocator locator;
+		struct MusicOption *buttons = NULL, *button;
+		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
+		char *line = (char*)mbcPrvGetWramBuf();
+		struct IrBlastStats stats;
+		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;
+		uint32_t numButtons;
+
+		memset(&stats, 0, sizeof(stats));
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+
+		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName)))
+			goto out_unmount;
+
+		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
+		if (!fil) {
+			uiAlert(cnv, "Cannot open IR remote file", DialogTypeOk);
+			goto out_unmount;
+		}
+
+		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
+		if (lineTooLong) {
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+			goto out_close;
+		}
+		if (overflow)
+			uiAlert(cnv, "Remote has too many buttons; showing what fits", DialogTypeOk);
+		if (!numButtons) {
+			uiAlert(cnv, "No Flipper buttons found in that IR file", DialogTypeOk);
+			goto out_close;
+		}
+
+		button = uiPrvChooseFlatOption(cnv, buttons, numButtons, fileName);
+		if (!button)
+			goto out_close;
+		uiPrvCopyStr(buttonName, sizeof(buttonName), button->name);
+
+		if (!fatfsFileSeek(fil, 0))
+			goto out_close;
+		memset(&stats, 0, sizeof(stats));
+		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
+			goto out_close;
+
+		memset(&stats, 0, sizeof(stats));
+		irRemoteBegin();
+		irStarted = true;
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 1);
+
+	out_close:
+		if (irStarted)
+			irRemoteEnd();
+		if (fil)
+			fatfsFileClose(fil);
+	out_unmount:
+		(void)uiPrvCardPreUnmount();
+		fatfsUnmount(vol);
+
+		if (stats.lineTooLong) {
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.cancelled) {
+			uiAlert(cnv, "IR remote cancelled", DialogTypeOk);
+		}
+		else if (ret) {
+			uiAlert(cnv, "IR remote button sent", DialogTypeOk);
+		}
+		else if (irStarted) {
+			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
 		}
 
 		return ret;
@@ -2543,17 +3037,18 @@ bool uiSaveSavestate(void)
 
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t powerOption = 0, muteOption = 1, backOption = 2;
+			uint_fast8_t powerOption = 0, muteOption = 1, remoteOption = 2, backOption = 3;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Power Blast", -1);
-			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Mute Blast", -1);
+			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Power Spam", -1);
+			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Mute Spam", -1);
+			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Remote", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
-			selOption = uiPrvMenu(cnv, 0, 3, &button);
+			selOption = uiPrvMenu(cnv, 0, 4, &button);
 			if (button == KEY_BIT_B || selOption == backOption)
 				return borrowedGameRam;
 			if (selOption == powerOption) {
@@ -2562,6 +3057,10 @@ bool uiSaveSavestate(void)
 			}
 			else if (selOption == muteOption) {
 				(void)uiPrvIrMuteBlast(cnv);
+				borrowedGameRam = true;
+			}
+			else if (selOption == remoteOption) {
+				(void)uiPrvIrRemote(cnv);
 				borrowedGameRam = true;
 			}
 		}
@@ -2911,24 +3410,6 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static void uiPrvSpeakerTest(struct Canvas *cnv)
-	{
-		static const uint16_t freqs[] = {500, 1000, 2000, 4000};
-		uint_fast8_t i;
-
-		uiPrvReset(cnv, false);
-		uiPuts(cnv, 10, 10, "Speaker Test", -1);
-		uiPuts(cnv, 10 + uiPrvGlyphHeight(cnv) + 2, 10, "Playing tone sweep...", -1);
-
-		for (i = 0; i < sizeof(freqs) / sizeof(*freqs); i++) {
-			(void)audioPwmTone(freqs[i]);
-			delayMsec(250);
-			audioPwmStop();
-			delayMsec(60);
-		}
-		uiAlert(cnv, "Speaker test complete.", DialogTypeOk);
-	}
-
 	static void uiPrvMusicPlayer(struct Canvas *cnv)
 	{
 		struct FatfsVol *vol;
@@ -3129,13 +3610,135 @@ reload_dir:
 		fatfsUnmount(vol);
 	}
 
+	struct BadUsbUiData {
+		struct Canvas *cnv;
+		const char *name;
+		uint64_t lastDraw;
+		uint32_t lastLine;
+		bool forceDraw;
+	};
+
+	static bool uiPrvBadUsbStatus(void *userData, const struct BadUsbStatus *status)
+	{
+		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
+		struct Canvas *cnv = data->cnv;
+		uint64_t now = getTime();
+
+		if (uiGetKeys() & KEY_BIT_B)
+			return false;
+
+		if (data->forceDraw || status->lineNo != data->lastLine || now - data->lastDraw > TICKS_PER_SECOND / 4) {
+			uint32_t row, pct = status->fileSize ? status->bytesRead * 100 / status->fileSize : 0;
+
+			uiPrvReset(cnv, false);
+			cnv->font = FontLarge;
+			row = uiPrvGlyphHeight(cnv) + 1;
+			uiPuts(cnv, row, 10, "BadUSB", -1);
+			row += uiPrvGlyphHeight(cnv) + 2;
+			cnv->font = FontMedium;
+			uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
+			row += uiPrvGlyphHeight(cnv) + 2;
+			uiPrintf(cnv, row, 10, "Line %u  %u%%", (unsigned)status->lineNo, (unsigned)pct);
+			row += uiPrvGlyphHeight(cnv) + 2;
+			if (status->message)
+				uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, status->message);
+			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
+			data->lastDraw = now;
+			data->lastLine = status->lineNo;
+			data->forceDraw = false;
+		}
+		return true;
+	}
+
+	static bool uiPrvBadUsbWaitButton(void *userData, const struct BadUsbStatus *status)
+	{
+		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
+		struct Canvas *cnv = data->cnv;
+
+		uiPrvReset(cnv, false);
+		cnv->font = FontLarge;
+		uiPuts(cnv, uiPrvGlyphHeight(cnv) + 1, 10, "BadUSB Paused", -1);
+		cnv->font = FontMedium;
+		uiPuts(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "A = Continue", -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Cancel", -1);
+		while (1) {
+			uint8_t key = uiPrvRecvKeypress();
+
+			if (key == KEY_BIT_A) {
+				data->forceDraw = true;
+				return true;
+			}
+			if (key == KEY_BIT_B)
+				return false;
+		}
+	}
+
+	static bool uiPrvBadUsbFileName(const char *fname)
+	{
+		return uiPrvStrEndsWithNoCase(fname, ".txt");
+	}
+
+	static bool uiPrvBadUsbTool(struct Canvas *cnv)
+	{
+		struct FatfsVol *vol;
+		struct FatfsFil *fil = NULL;
+		struct FatFileLocator locator;
+		struct BadUsbUiData data;
+		enum BadUsbResult ret;
+		char name[FATFS_NAME_BUF_LEN], shortName[64], msg[96];
+		bool ok = false;
+
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No .txt scripts found in /BADUSB", &locator, name, sizeof(name)))
+			goto out_unmount;
+
+		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
+		if (!fil) {
+			uiAlert(cnv, "Cannot open BadUSB script", DialogTypeOk);
+			goto out_unmount;
+		}
+
+		uiPrvCopyStr(shortName, sizeof(shortName), name);
+		(void)sprintf(msg, "Run BadUSB script?\n%s", shortName);
+		if (!uiAlert(cnv, msg, DialogTypeYesNo))
+			goto out_close;
+
+		memset(&data, 0, sizeof(data));
+		data.cnv = cnv;
+		data.name = name;
+		data.forceDraw = true;
+		ret = badUsbRunFile(fil, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+		if (ret == BadUsbResultDone) {
+			uiAlert(cnv, "BadUSB script complete", DialogTypeOk);
+			ok = true;
+		}
+		else if (ret == BadUsbResultCancelled)
+			uiAlert(cnv, "BadUSB script cancelled", DialogTypeOk);
+		else if (ret == BadUsbResultUsbError)
+			uiAlert(cnv, "BadUSB USB device failed to enumerate", DialogTypeOk);
+		else if (ret == BadUsbResultFileError)
+			uiAlert(cnv, "BadUSB script read failed", DialogTypeOk);
+		else
+			uiAlert(cnv, "BadUSB script has an unsupported or malformed command", DialogTypeOk);
+
+	out_close:
+		if (fil)
+			fatfsFileClose(fil);
+	out_unmount:
+		(void)uiPrvCardPreUnmount();
+		fatfsUnmount(vol);
+		return ok;
+	}
+
 	static bool uiPrvTools(struct Canvas *cnv)
 	{
 		bool borrowedGameRam = false;
 
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t irOption = 0, musicOption = 1, speakerOption = 2, backOption = 3;
+			uint_fast8_t irOption = 0, musicOption = 1, badUsbOption = 2, backOption = 3;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
@@ -3143,7 +3746,7 @@ reload_dir:
 
 			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR Tools", -1);
 			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Music Player", -1);
-			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Speaker Test", -1);
+			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "BadUSB", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
 			selOption = uiPrvMenu(cnv, 0, 4, &button);
@@ -3157,8 +3760,10 @@ reload_dir:
 				uiPrvMusicPlayer(cnv);
 				borrowedGameRam = true;
 			}
-			else if (selOption == speakerOption)
-				uiPrvSpeakerTest(cnv);
+			else if (selOption == badUsbOption) {
+				(void)uiPrvBadUsbTool(cnv);
+				borrowedGameRam = true;
+			}
 		}
 	}
 

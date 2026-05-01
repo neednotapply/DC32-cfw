@@ -448,6 +448,11 @@ static uint_fast8_t uiPrvRecvKeypress(void)
 	return prevVal;
 }
 
+static void uiPrvWaitKeysReleased(void)
+{
+	while (uiGetKeys());
+}
+
 static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint8_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
 {
 	uint_fast8_t i, itemHeight = uiPrvGlyphHeight(cnv) + 1, row = cnv->h - numChoices * itemHeight, fore = cnv->foreColor, back = cnv->backColor, gotKey;
@@ -2896,6 +2901,8 @@ bool uiSaveSavestate(void)
 				break;
 		}
 		fatfsFileClose(fil);
+		if (ret == MusicPlayerResultStopped)
+			uiPrvWaitKeysReleased();
 		if (ret == MusicPlayerResultFileError)
 			uiAlert(cnv, "Music read failed", DialogTypeOk);
 		else if (ret == MusicPlayerResultDecodeError) {
@@ -2934,9 +2941,10 @@ bool uiSaveSavestate(void)
 		uint16_t pathLenStack[8];
 		char path[sizeof("/MUSIC/") + FATFS_NAME_BUF_LEN * 2];
 		struct Settings settings;
-		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0;
-		uint_fast8_t itemHeight, itemsOnscreen, listTop, scrollWidth;
+		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
+		uint_fast8_t itemHeight, itemsOnscreen, pathTop, listTop, itemLeft;
 		bool overflow = false, haveDirLoc = false;
+		struct FontGlyphInfo gi;
 
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
@@ -2960,42 +2968,65 @@ reload_dir:
 		topItem = 0;
 		selectedItem = 0;
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
-		listTop = uiPrvContentTop(cnv);
+		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
+		pathTop = uiPrvContentTop(cnv);
+		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
 		if (itemsOnscreen > numItems + (depth ? 1 : 0))
 			itemsOnscreen = numItems + (depth ? 1 : 0);
+		prevTopItem = topItem + 1;
+		prevSelOnscreenItem = selectedItem - topItem + 1;
 
 		while (1) {
-			struct MusicOption *draw;
+			struct MusicOption *draw = head;
 			uint32_t i, totalItems = numItems + (depth ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
 
-			uiPrvReset(cnv, false);
-			uiPrvDrawTruncText(cnv, 0, 10, cnv->w - 10, path);
-			scrollWidth = totalItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, totalItems, topItem, itemsOnscreen) : 0;
-			draw = head;
-			if (depth) {
-				if (!topItem)
-					uiPrvDrawTruncText(cnv, listTop, 10, cnv->w - scrollWidth - 10, "[..]");
-				for (i = 1; i < topItem && draw; i++)
-					draw = draw->next;
-			}
-			else {
-				for (i = 0; i < topItem && draw; i++)
-					draw = draw->next;
-			}
-			for (i = depth && !topItem ? 1 : 0; i < itemsOnscreen && draw; i++, draw = draw->next) {
-				char label[FATFS_NAME_BUF_LEN + 3];
+			if (prevTopItem != topItem) {
+				uint_fast8_t firstRow = 0, scrollWidth;
+				uint32_t skipItems;
 
-				if (draw->isDir) {
-					label[0] = '[';
-					strcpy(label + 1, draw->name);
-					strcat(label, "]");
-					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, label);
+				uiPrvReset(cnv, false);
+				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, path);
+				scrollWidth = totalItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, totalItems, topItem, itemsOnscreen) : 0;
+
+				if (depth && !topItem) {
+					cnv->foreColor = 12;
+					uiPrvDrawTruncText(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "[..]");
+					firstRow = 1;
+					skipItems = 0;
 				}
 				else
-					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, 10, cnv->w - scrollWidth - 10, draw->name);
+					skipItems = topItem - (depth ? 1 : 0);
+
+				for (i = 0; i < skipItems && draw; i++)
+					draw = draw->next;
+
+				cnv->foreColor = 12;
+				for (i = firstRow; i < itemsOnscreen && draw; i++, draw = draw->next) {
+					char label[FATFS_NAME_BUF_LEN + 3];
+
+					if (draw->isDir) {
+						label[0] = '[';
+						strcpy(label + 1, draw->name);
+						strcat(label, "]");
+						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, label);
+					}
+					else
+						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+				}
+
+				prevSelOnscreenItem = selectedOnscreenItem + 1;
 			}
-			uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+			prevTopItem = topItem;
+			if (prevSelOnscreenItem != selectedOnscreenItem) {
+				if (prevSelOnscreenItem < itemsOnscreen) {
+					cnv->foreColor = 0;
+					uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
+				}
+				cnv->foreColor = 15;
+				uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+			}
+			prevSelOnscreenItem = selectedOnscreenItem;
 
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
@@ -3024,6 +3055,7 @@ reload_dir:
 							goto reload_dir;
 						}
 						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
+						prevTopItem = topItem + 1;
 						break;
 					}
 					while (cur && !cur->isDir) {
@@ -3053,6 +3085,7 @@ reload_dir:
 						if (selectedItem >= topItem + itemsOnscreen)
 							topItem = selectedItem + 1 - itemsOnscreen;
 					}
+					prevTopItem = topItem + 1;
 					break;
 
 				case KEY_BIT_B:

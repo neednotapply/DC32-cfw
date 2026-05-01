@@ -158,8 +158,12 @@ void audioPwmSetVolume(uint_fast8_t volume)
 	if (volume > AUDIO_PWM_VOLUME_MAX)
 		volume = AUDIO_PWM_VOLUME_MAX;
 	mVolume = volume;
-	if (mMode == AudioPwmModeTone)
-		audioPwmPrvWriteToneDuty();
+	if (mMode == AudioPwmModeTone) {
+		if (mVolume)
+			audioPwmPrvWriteToneDuty();
+		else
+			audioPwmStop();
+	}
 }
 
 uint_fast8_t audioPwmGetVolume(void)
@@ -255,6 +259,10 @@ bool audioPwmTone(uint32_t freq)
 	uint32_t duty, baseFreq = TICKS_PER_SECOND / AUDIO_TONE_CLK_DIV;
 
 	if (!freq) {
+		audioPwmStop();
+		return true;
+	}
+	if (!mVolume) {
 		audioPwmStop();
 		return true;
 	}

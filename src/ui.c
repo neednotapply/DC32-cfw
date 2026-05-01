@@ -1005,8 +1005,11 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		uint32_t count;
 		bool overflow;
 		UiFileNameFilterF filterF;
-		char fname[FATFS_NAME_BUF_LEN];
+		char *fname;
 	};
+
+	#define UI_PICK_FILE_PATH_BUF_SZ		(sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 2)
+	#define UI_PICK_FILE_NAME_BUF_SZ		64
 
 	static bool uiPrvIsDotDir(const char *name)
 	{
@@ -1066,11 +1069,20 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	{
 		struct UiFileListCtx ctx;
 		struct FatfsDir *dir;
+		struct ToolWorkspaceSpan nameMem = toolWorkspaceGet(ToolWorkspaceWram);
+		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
-		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		if (!nameMem.ptr || nameMem.size < FATFS_NAME_BUF_LEN || !listMem.ptr || listMem.size < sizeof(struct MusicOption)) {
+			*headP = NULL;
+			if (overflowP)
+				*overflowP = false;
+			return 0;
+		}
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
 		ctx.filterF = filterF;
+		ctx.fname = (char*)nameMem.ptr;
 
 		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
 		if (dir) {
@@ -1096,18 +1108,57 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		return head;
 	}
 
+	static void uiPrvDrawDirLabel(struct Canvas *cnv, int32_t r, int32_t c, uint32_t maxWidth, const char *name)
+	{
+		uint32_t openWidth, closeWidth, stringLen, nameMaxWidth, nameWidth, numCharsFit;
+		static const char open[] = "[", close[] = "]", truncInd[] = "...";
+
+		openWidth = uiPrvCharsWidth(cnv, open, sizeof(open) - 1);
+		closeWidth = uiPrvCharsWidth(cnv, close, sizeof(close) - 1);
+		if (maxWidth <= openWidth + closeWidth)
+			return;
+
+		uiPuts(cnv, r, c, open, sizeof(open) - 1);
+		c += openWidth;
+		nameMaxWidth = maxWidth - openWidth - closeWidth;
+		stringLen = strlen(name);
+		nameWidth = uiPrvCharsMeasure(cnv, name, stringLen, nameMaxWidth, &numCharsFit);
+		if (numCharsFit == stringLen) {
+			uiPuts(cnv, r, c, name, stringLen);
+			c += nameWidth;
+		}
+		else {
+			uint32_t truncWidth = uiPrvCharsWidth(cnv, truncInd, sizeof(truncInd) - 1);
+
+			if (truncWidth < nameMaxWidth) {
+				nameWidth = uiPrvCharsMeasure(cnv, name, stringLen, nameMaxWidth - truncWidth, &numCharsFit);
+				uiPuts(cnv, r, c, name, numCharsFit);
+				c += nameWidth;
+				uiPuts(cnv, r, c, truncInd, sizeof(truncInd) - 1);
+				c += truncWidth;
+			}
+		}
+		uiPuts(cnv, r, c, close, sizeof(close) - 1);
+	}
+
 	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
 	{
 		struct MusicOption *head = NULL, *cur = NULL;
 		struct FatFileLocator dirStack[8];
 		uint16_t pathLenStack[8];
-		char path[sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 2];
+		struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
+		char *path = (char*)pathMem.ptr;
 		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
 		uint_fast8_t itemHeight, itemsOnscreen, pathTop, listTop, itemLeft;
 		bool overflow = false, haveDirLoc = false;
 		struct FontGlyphInfo gi;
 
-		uiPrvCopyStr(path, sizeof(path), rootPath);
+		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || toolWorkspaceGet(ToolWorkspaceWram).size < FATFS_NAME_BUF_LEN || toolWorkspaceGet(ToolWorkspaceCartRamLower).size < sizeof(struct MusicOption)) {
+			uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
+			return false;
+		}
+
+		uiPrvCopyStr(path, UI_PICK_FILE_PATH_BUF_SZ, rootPath);
 reload_dir:
 		numItems = uiPrvListFiles(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, &head, &overflow);
 		if (!numItems && !depth) {
@@ -1156,14 +1207,8 @@ reload_dir:
 
 				cnv->foreColor = 12;
 				for (i = firstRow; i < itemsOnscreen && draw; i++, draw = draw->next) {
-					char label[FATFS_NAME_BUF_LEN + 3];
-
-					if (draw->isDir) {
-						label[0] = '[';
-						strcpy(label + 1, draw->name);
-						strcat(label, "]");
-						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, label);
-					}
+					if (draw->isDir)
+						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
 					else
 						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
 				}
@@ -1196,11 +1241,11 @@ reload_dir:
 							pathLenStack[depth] = pathLen;
 							dirStack[depth++] = cur->locator;
 							haveDirLoc = true;
-							if (pathLen + 1 < sizeof(path)) {
+							if (pathLen + 1 < UI_PICK_FILE_PATH_BUF_SZ) {
 								path[pathLen++] = '/';
-								if (pathLen + nameLen < sizeof(path))
+								if (pathLen + nameLen < UI_PICK_FILE_PATH_BUF_SZ)
 									memcpy(path + pathLen, cur->name, nameLen + 1);
-								else if (pathLen + 4 <= sizeof(path))
+								else if (pathLen + 4 <= UI_PICK_FILE_PATH_BUF_SZ)
 									strcpy(path + pathLen, "...");
 								else
 									path[pathLen - 1] = 0;
@@ -2782,6 +2827,10 @@ bool uiSaveSavestate(void)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
+		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
+			return false;
+		}
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
@@ -2843,6 +2892,10 @@ bool uiSaveSavestate(void)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
+		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
+			return false;
+		}
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
@@ -2916,11 +2969,13 @@ bool uiSaveSavestate(void)
 		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
+		*lineTooLongP = false;
+		if (!listMem.ptr || listMem.size < sizeof(struct MusicOption))
+			goto out;
 		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
 		ctx.spaceAvail = listMem.size;
 		memset(&stats, 0, sizeof(stats));
 
-		*lineTooLongP = false;
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out;
 
@@ -3029,7 +3084,7 @@ bool uiSaveSavestate(void)
 		struct FatfsFil *fil = NULL;
 		struct FatFileLocator locator;
 		struct MusicOption *buttons = NULL, *button;
-		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
+		char fileName[UI_PICK_FILE_NAME_BUF_SZ], buttonName[IR_NAME_BUF_SZ];
 		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
 		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
@@ -3037,6 +3092,11 @@ bool uiSaveSavestate(void)
 		uint32_t numButtons;
 
 		memset(&stats, 0, sizeof(stats));
+		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+			uiAlert(cnv, "Tool workspace is too small for IR remote", DialogTypeOk);
+			return false;
+		}
+
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
@@ -3758,7 +3818,7 @@ reload_dir:
 		struct FatFileLocator locator;
 		struct BadUsbUiData data;
 		enum BadUsbResult ret;
-		char name[FATFS_NAME_BUF_LEN], shortName[64], msg[96];
+		char name[UI_PICK_FILE_NAME_BUF_SZ], msg[96];
 		bool ok = false;
 
 		vol = uiPrvMountCard(cnv, false);
@@ -3773,8 +3833,7 @@ reload_dir:
 			goto out_unmount;
 		}
 
-		uiPrvCopyStr(shortName, sizeof(shortName), name);
-		(void)sprintf(msg, "Run BadUSB script?\n%s", shortName);
+		(void)sprintf(msg, "Run BadUSB script?\n%s", name);
 		if (!uiAlert(cnv, msg, DialogTypeYesNo))
 			goto out_close;
 

@@ -18,6 +18,7 @@
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
 #include "timebase.h"
+#include "toolWorkspace.h"
 #include "utf.h"
 #include "ui.h"
 #include "sd.h"
@@ -1065,10 +1066,11 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	{
 		struct UiFileListCtx ctx;
 		struct FatfsDir *dir;
+		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
-		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
 		ctx.filterF = filterF;
 
 		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
@@ -1443,164 +1445,210 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 	}
 }
 
-static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//return true if anything for the current game may have changes
+static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, struct Settings *settings)
 {
-	bool restartCurGame = false;
 	int_fast8_t selOption = 0;
-	struct Settings settings;
 	uint_fast8_t itemHeight;
-	
-	settingsGet(&settings);
-	if (settings.ledMode >= LedModeNumModes)
-		settings.ledMode = LedModeOff;
-	if (settings.ledSpeed < LED_SPEED_MENU_MIN || settings.ledSpeed > LED_SPEED_MENU_MAX)
-		settings.ledSpeed = 4;
-	
+
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
-	
+
 	while (1) {
-		
-		int_fast8_t numOptions = 0, doneOption, cgbOption, speedOption, contrastOption = -1, brightnessOption = -1, upscaleOption, rotationOption, ledSettingsOption;
+
+		int_fast8_t numOptions = 0, doneOption, contrastOption = -1, brightnessOption = -1, rotationOption;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
-		static const char speeds[][8] = DISP_SPEED_NAMES;
 
 		uiPrvReset(cnv, false);
-		
+
 		doneOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
-		
-		cgbOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "COLOR:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings.actLikeGBC ? "YES       " : "NO       ", -1);
-	
-		upscaleOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "UPSCALE:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings.upscale ? "YES       " : "NO       ", -1);
-	
-		rotationOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "ROTATION:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings.rotation ? "FLIPPED  " : "NORMAL   ", -1);
-	
-		speedOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "SPEED:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, speeds[settings.speed], sizeof(speeds[settings.speed]));
-	
+
 	#ifdef DISP_CONTRAST_ADJUSTABLE
 		contrastOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "CONTRAST:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.contrast);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->contrast);
 	#endif
+
+		rotationOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "ROTATION:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->rotation ? "FLIPPED  " : "NORMAL   ", -1);
 
 	#ifdef DISP_BRIGHTNESS_ADJUSTABLE
 		brightnessOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BRIGHTNESS:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings.brightness);
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->brightness);
 	#endif
 
-		ledSettingsOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED Control", -1);
-
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
-		if (button == KEY_BIT_B || selOption == doneOption){
-			
-			settingsSet(&settings);
-			return restartCurGame;
-		}
-		
-		if (selOption == upscaleOption) {
-			
-			settings.upscale = !settings.upscale;
-		}
-		
-		if (selOption == cgbOption) {
-			
-			restartCurGame = true;
-			settings.actLikeGBC = !settings.actLikeGBC;
-		}
+		if (button == KEY_BIT_B || selOption == doneOption)
+			return;
 
 		if (selOption == rotationOption) {
-			
-			settings.rotation = !settings.rotation;
+			settings->rotation = !settings->rotation;
 		}
-		
-		if (selOption == speedOption) {
-			
-			static const uint8_t speeds[] = DISP_SPEED_SETTINGS;
-			
-			if (button == KEY_BIT_LEFT) {
-				if (settings.speed)
-					settings.speed--;
-				else
-					continue;
-			}
-			else if (button == KEY_BIT_RIGHT) {
-				if (settings.speed != sizeof(speeds) / sizeof(*speeds) - 1)
-					settings.speed++;
-				else continue;
-			}
-			else if (button == KEY_BIT_A)
-				settings.speed++;
-			
-			dispOff();
-			dispInit(speeds[settings.speed]);
-			dispSetContrast(settings.contrast);		//must be reset
-		}
-		
+
 		if (selOption == contrastOption) {
-			
+
 			if (button == KEY_BIT_LEFT) {
-				if (settings.contrast)
-					settings.contrast--;
+				if (settings->contrast)
+					settings->contrast--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings.contrast != 0x1f)
-					settings.contrast++;
+				if (settings->contrast != 0x1f)
+					settings->contrast++;
 				else
 					continue;
 			}
-				
-			dispSetContrast(settings.contrast);
+
+			dispSetContrast(settings->contrast);
 		}
 
 		if (selOption == brightnessOption) {
-			
+
 			if (button == KEY_BIT_LEFT) {
-				if (settings.brightness)
-					settings.brightness--;
+				if (settings->brightness)
+					settings->brightness--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings.brightness != 0x1f)
-					settings.brightness++;
+				if (settings->brightness != 0x1f)
+					settings->brightness++;
 				else
 					continue;
 			}
-				
-			dispSetBrightness(settings.brightness);
+
+			dispSetBrightness(settings->brightness);
+		}
+	}
+}
+
+static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	bool restartCurGame = false;
+	int_fast8_t selOption = 0;
+	uint_fast8_t itemHeight;
+
+	uiPrvReset(cnv, false);
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+
+	while (1) {
+
+		int_fast8_t numOptions = 0, doneOption, cgbOption, upscaleOption, speedOption;
+		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		static const char speedNames[][8] = DISP_SPEED_NAMES;
+		static const uint8_t speedSettings[] = DISP_SPEED_SETTINGS;
+		uint_fast8_t numSpeeds = sizeof(speedSettings) / sizeof(*speedSettings);
+
+		if (settings->speed >= numSpeeds)
+			settings->speed = 1;
+
+		uiPrvReset(cnv, false);
+
+		doneOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
+
+		cgbOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "COLOR:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->actLikeGBC ? "YES       " : "NO       ", -1);
+
+		upscaleOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "UPSCALE:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->upscale ? "YES       " : "NO       ", -1);
+
+		speedOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "SPEED:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, speedNames[settings->speed], sizeof(speedNames[settings->speed]));
+
+		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		if (button == KEY_BIT_B || selOption == doneOption)
+			return restartCurGame;
+
+		if (selOption == speedOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings->speed)
+					settings->speed--;
+				else
+					settings->speed = numSpeeds - 1;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if ((uint_fast8_t)(settings->speed + 1) < numSpeeds)
+					settings->speed++;
+				else
+					settings->speed = 0;
+			}
+
+			dispOff();
+			dispInit(speedSettings[settings->speed]);
+			dispSetContrast(settings->contrast);		//must be reset
 		}
 
-		if (selOption == ledSettingsOption) {
+		if (selOption == upscaleOption) {
 
+			settings->upscale = !settings->upscale;
+		}
+
+		if (selOption == cgbOption) {
+
+			restartCurGame = true;
+			settings->actLikeGBC = !settings->actLikeGBC;
+		}
+	}
+}
+
+static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//return true if anything for the current game may have changes
+{
+	bool restartCurGame = false;
+	struct Settings settings;
+	uint_fast8_t itemHeight;
+
+	settingsGet(&settings);
+	if (settings.ledMode >= LedModeNumModes)
+		settings.ledMode = LedModeOff;
+	if (settings.ledSpeed < LED_SPEED_MENU_MIN || settings.ledSpeed > LED_SPEED_MENU_MAX)
+		settings.ledSpeed = 4;
+
+	uiPrvReset(cnv, false);
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+
+	while (1) {
+		uint_fast8_t screenOption = 0, gameOption = 1, ledSettingsOption = 2, doneOption = 3, selOption;
+		uint8_t button = KEY_BIT_A | KEY_BIT_B;
+
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Screen", -1);
+		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Game", -1);
+		uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "LEDs", -1);
+		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "DONE", -1);
+
+		selOption = uiPrvMenu(cnv, 0, 4, &button);
+		if (button == KEY_BIT_B || selOption == doneOption) {
+			settingsSet(&settings);
+			return restartCurGame;
+		}
+		if (selOption == screenOption)
+			uiPrvScreenSettings(cnv, &settings);
+		else if (selOption == gameOption)
+			restartCurGame = uiPrvGameSettings(cnv, &settings) || restartCurGame;
+		else if (selOption == ledSettingsOption)
 			uiPrvLedSettings(cnv, &settings);
-		}
 	}
 }
 
@@ -1642,6 +1690,11 @@ bool uiSaveSavestate(void)
 	#define IR_LINE_BUF_SZ			32768
 	#define IR_NAME_BUF_SZ			64
 	#define IR_PROTOCOL_BUF_SZ		12
+	#define IR_MIN_CARRIER			1000
+	#define IR_MAX_CARRIER			100000
+	#define IR_MAX_REPEAT			50
+	#define IR_MAX_RAW_DURATION		1000000
+	#define IR_MAX_RAW_DURATIONS	4096
 
 	struct IrBlastStats {
 		uint32_t sent;
@@ -1685,7 +1738,11 @@ bool uiSaveSavestate(void)
 	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr)
 	{
 		uint32_t row, now, nowDone, pos, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
-		uint8_t *buf = mbcPrvGetWramBuf();
+		struct ToolWorkspaceSpan bufMem = toolWorkspaceGet(ToolWorkspaceWram);
+		uint8_t *buf = bufMem.ptr;
+
+		if (bufSz > bufMem.size)
+			bufSz = bufMem.size;
 		
 		cnv->font = FontLarge;
 		row = uiPrvGlyphHeight(cnv) + 1;
@@ -2355,8 +2412,16 @@ bool uiSaveSavestate(void)
 
 		if (!repeat)
 			repeat = 1;
+		if (repeat > IR_MAX_REPEAT) {
+			*malformedP = true;
+			return false;
+		}
 		if (!carrier)
 			carrier = IR_DEFAULT_CARRIER;
+		if (carrier < IR_MIN_CARRIER || carrier > IR_MAX_CARRIER) {
+			*malformedP = true;
+			return false;
+		}
 
 		for (rep = 0; rep < repeat; rep++) {
 			const char *str = codeStr;
@@ -2369,6 +2434,10 @@ bool uiSaveSavestate(void)
 				uint32_t duration;
 
 				if (!uiPrvParseU32(&str, &duration)) {
+					*malformedP = true;
+					return false;
+				}
+				if (!duration || duration > IR_MAX_RAW_DURATION || numDurations >= IR_MAX_RAW_DURATIONS) {
 					*malformedP = true;
 					return false;
 				}
@@ -2708,7 +2777,8 @@ bool uiSaveSavestate(void)
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
 		const char *path = NULL;
-		char *line = (char*)mbcPrvGetWramBuf();
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
 
@@ -2768,7 +2838,8 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
-		char *line = (char*)mbcPrvGetWramBuf();
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
 
@@ -2843,10 +2914,11 @@ bool uiSaveSavestate(void)
 		struct UiFileListCtx ctx;
 		struct IrBlastStats stats;
 		bool isFlipper = false;
+		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
-		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
 		memset(&stats, 0, sizeof(stats));
 
 		*lineTooLongP = false;
@@ -2959,7 +3031,8 @@ bool uiSaveSavestate(void)
 		struct FatFileLocator locator;
 		struct MusicOption *buttons = NULL, *button;
 		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
-		char *line = (char*)mbcPrvGetWramBuf();
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;
 		uint32_t numButtons;
@@ -3150,11 +3223,12 @@ bool uiSaveSavestate(void)
 	{
 		struct MusicListCtx ctx;
 		struct FatfsDir *dir;
+		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
 		ctx.vol = vol;
-		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
-		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
 
 		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, "/MUSIC");
 		if (!dir)
@@ -3736,6 +3810,7 @@ reload_dir:
 	{
 		bool borrowedGameRam = false;
 
+		toolWorkspaceBegin();
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
 			uint_fast8_t irOption = 0, musicOption = 1, badUsbOption = 2, backOption = 3;
@@ -3744,14 +3819,16 @@ reload_dir:
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR Tools", -1);
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Music Player", -1);
+			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR", -1);
+			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Music", -1);
 			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "BadUSB", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
 			selOption = uiPrvMenu(cnv, 0, 4, &button);
-			if (button == KEY_BIT_B || selOption == backOption)
+			if (button == KEY_BIT_B || selOption == backOption) {
+				toolWorkspaceEnd();
 				return borrowedGameRam;
+			}
 			if (selOption == irOption) {
 				if (uiPrvIrTools(cnv))
 					borrowedGameRam = true;

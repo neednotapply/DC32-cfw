@@ -11,6 +11,7 @@ enum LedMode {
 	LedModeRainbow,
 	LedModeFlame,
 	LedModeTravelingDot,
+	LedModeRandom,
 	LedModeNumModes,
 };
 

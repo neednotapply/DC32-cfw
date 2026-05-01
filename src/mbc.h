@@ -39,6 +39,9 @@
 	bool mbcInit(const void *rom, uint32_t *romSzExpectedP, void *ram, uint32_t *ramSzExpectedP);				//analyzes AND init MBC
 	
 	void* mbcPrvGetWramBuf(void);	//we use WRAM for a buffer
+	uint32_t mbcPrvGetWramBufSize(void);
+	void* mbcPrvGetVramBuf(void);	//tool workspace while game is unloaded
+	uint32_t mbcPrvGetVramBufSize(void);
 	
 #endif
 

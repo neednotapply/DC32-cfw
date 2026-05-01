@@ -15,6 +15,8 @@ static struct Settings mLedSettings;
 static bool mHaveLedSettings;
 static uint64_t mNextLedFrameTime, mLastGameLedWriteTime;
 static uint8_t mLedFrame;
+static uint32_t mLedRandomMask;
+static uint32_t mLedRandomSeed;
 
 
 static uint_fast8_t badgeLedsPrvSanitizeMode(uint_fast8_t mode)
@@ -45,6 +47,7 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 		[LedModeRainbow] = "RAINBOW",
 		[LedModeFlame] = "PULSE",
 		[LedModeTravelingDot] = "DOT",
+		[LedModeRandom] = "RANDOM",
 	};
 
 	mode = badgeLedsPrvSanitizeMode(mode);
@@ -150,6 +153,37 @@ static void badgeLedsPrvRenderTravelingDot(void)
 	ws2812refresh();
 }
 
+static uint32_t badgeLedsPrvRandom(void)
+{
+	if (!mLedRandomSeed)
+		mLedRandomSeed = (uint32_t)getTime() ^ 0xa5c35a19ul;
+
+	mLedRandomSeed ^= mLedRandomSeed << 13;
+	mLedRandomSeed ^= mLedRandomSeed >> 17;
+	mLedRandomSeed ^= mLedRandomSeed << 5;
+	return mLedRandomSeed;
+}
+
+static void badgeLedsPrvRenderRandom(void)
+{
+	uint_fast8_t i;
+	uint_fast8_t red = mLedSettings.ledRed, green = mLedSettings.ledGreen, blue = mLedSettings.ledBlue;
+	uint_fast8_t threshold = 18 + badgeLedsPrvSanitizeSpeed(mLedSettings.ledSpeed) * 8;
+
+	if (!red && !green && !blue)
+		red = green = blue = LED_DEFAULT_TINT;
+
+	for (i = 0; i < NUM_WS2812s; i++) {
+		if ((badgeLedsPrvRandom() & 0xff) < threshold)
+			mLedRandomMask ^= 1u << i;
+		if (mLedRandomMask & (1u << i))
+			badgeLedsPrvSetRgb(i, red, green, blue);
+		else
+			badgeLedsPrvSetRgb(i, 0, 0, 0);
+	}
+	ws2812refresh();
+}
+
 static void badgeLedsPrvRenderCurrent(void)
 {
 	switch (badgeLedsPrvSanitizeMode(mLedSettings.ledMode)) {
@@ -167,6 +201,10 @@ static void badgeLedsPrvRenderCurrent(void)
 
 		case LedModeTravelingDot:
 			badgeLedsPrvRenderTravelingDot();
+			break;
+
+		case LedModeRandom:
+			badgeLedsPrvRenderRandom();
 			break;
 
 		case LedModeOff:
@@ -191,6 +229,8 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force)
 
 	if (changed || force) {
 		mLedFrame = 0;
+		mLedRandomMask = 0;
+		mLedRandomSeed = (uint32_t)getTime() ^ 0x31415927ul;
 		mNextLedFrameTime = getTime();
 		badgeLedsPrvRenderCurrent();
 	}

@@ -2,13 +2,15 @@
 #include <stdint.h>
 #include "audioPwm.h"
 #include "memMap.h"
+#include "timebase.h"
 #include "wavPlayer.h"
 
-#define WAV_DMA_RING_BITS	14
+#define WAV_DMA_RING_BITS	13
 #define WAV_DMA_BUF_BYTES	(1u << WAV_DMA_RING_BITS)
 #define WAV_DMA_SAMPLES		(WAV_DMA_BUF_BYTES / sizeof(uint16_t))
 #define WAV_DMA_HALF_SAMPLES	(WAV_DMA_SAMPLES / 2)
-#define WAV_RAW_BUF_SZ		(WAV_DMA_HALF_SAMPLES * 4)
+#define WAV_RAW_BUF_SZ		2048
+#define WAV_DMA_STALL_TIMEOUT	(TICKS_PER_SECOND / 4)
 #define WAV_BUF			((uint8_t*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + QSPI_RAM_SIZE_MAX / 2))
 
 struct WavPlayback {
@@ -190,6 +192,8 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 	struct MusicPlayerStatus status;
 	struct WavPlayback wav;
 	uint32_t dataPos = 0, dataSize = 0, totalFrames, nextRefillSerial = 1;
+	uint32_t lastRemaining;
+	uint64_t lastProgressTime;
 	uint16_t audioFormat = 0, channels = 0, bitsPerSample = 0, blockAlign = 0;
 	uint8_t hdr[12];
 	bool haveFmt = false, haveData = false;
@@ -270,16 +274,35 @@ enum MusicPlayerResult wavPlayerPlayFile(struct FatfsFil *fil, MusicPlayerContro
 		return MusicPlayerResultDecodeError;
 
 	status.fileSize = dataSize;
+	lastRemaining = audioPwmDmaSamplesRemaining();
+	lastProgressTime = getTime();
 	while (!audioPwmDmaDone()) {
 		enum MusicPlayerResult ctlRet;
-		uint32_t framesPlayed = totalFrames - audioPwmDmaSamplesRemaining();
+		uint64_t beforeControl;
+		uint32_t remaining = audioPwmDmaSamplesRemaining();
+		uint32_t framesPlayed = totalFrames - remaining;
 		uint32_t halfSerial = framesPlayed / WAV_DMA_HALF_SAMPLES;
 
 		status.bytesPlayed = framesPlayed * blockAlign;
 		if (status.bytesPlayed > dataSize)
 			status.bytesPlayed = dataSize;
+		beforeControl = getTime();
 		if (wavPrvHandleControl(controlF, userData, &status, &ctlRet))
+		{
+			audioPwmStop();
 			return ctlRet;
+		}
+		if (getTime() - beforeControl > WAV_DMA_STALL_TIMEOUT / 2)
+			lastProgressTime = getTime();
+
+		if (remaining != lastRemaining) {
+			lastRemaining = remaining;
+			lastProgressTime = getTime();
+		}
+		else if (getTime() - lastProgressTime > WAV_DMA_STALL_TIMEOUT) {
+			audioPwmStop();
+			return MusicPlayerResultFileError;
+		}
 
 		while (nextRefillSerial <= halfSerial) {
 			uint32_t half = (nextRefillSerial - 1) & 1;

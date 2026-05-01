@@ -1,7 +1,6 @@
 #include "pinoutRp2350defcon.h"
 #include "timebase.h"
 #include "2350.h"
-#include "hardware/regs/dreq.h"
 #include "audioPwm.h"
 
 #define AUDIO_PWM_IDX			((PIN_SPQR >> 1) & 7)
@@ -9,8 +8,10 @@
 #define AUDIO_PWM_TOP			255
 #define AUDIO_DMA_CH			7
 #define AUDIO_DMA_CH_BIT		(1u << AUDIO_DMA_CH)
-#define AUDIO_DMA_CLK_PWM_IDX	7
+#define AUDIO_DMA_TIMER			0
+#define AUDIO_DMA_TREQ			DMA_CH0_CTRL_TRIG_TREQ_SEL_VALUE_TIMER0
 #define AUDIO_DMA_MAX_COUNT		0x0fffffff
+#define AUDIO_DMA_WAIT_TIMEOUT	(TICKS_PER_SECOND / 1000)
 #define AUDIO_TONE_CLK_DIV		32
 #define AUDIO_PCM_TIMER			timer0_hw
 #define AUDIO_PCM_ALARM			3
@@ -36,6 +37,7 @@ static uint32_t mPcmNextAlarm;
 static uintptr_t mDmaBufAddr;
 static uint32_t mDmaBufSamples;
 static uint32_t mDmaBufMask;
+static uint32_t mDmaTimerValue;
 static uint32_t mToneDuty;
 static uint8_t mVolume = AUDIO_PWM_VOLUME_MAX;
 static bool mPcmDutySamples;
@@ -166,12 +168,16 @@ static void audioPwmPrvPcmTimerStop(void)
 
 static void audioPwmPrvDmaStop(void)
 {
+	uint64_t timeout = getTime() + AUDIO_DMA_WAIT_TIMEOUT;
+
+	dma_hw->timer[AUDIO_DMA_TIMER] = 0;
 	dma_hw->ch[AUDIO_DMA_CH].al1_ctrl &=~ DMA_CH0_CTRL_TRIG_EN_BITS;
 	if (dma_hw->ch[AUDIO_DMA_CH].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS) {
 		dma_hw->abort = AUDIO_DMA_CH_BIT;
-		while (dma_hw->abort & AUDIO_DMA_CH_BIT);
+		while ((dma_hw->abort & AUDIO_DMA_CH_BIT) && getTime() < timeout);
 	}
 	dma_hw->ch[AUDIO_DMA_CH].al1_ctrl = 0;
+	dma_hw->ch[AUDIO_DMA_CH].transfer_count = 0;
 	dma_hw->inte0 &=~ AUDIO_DMA_CH_BIT;
 	dma_hw->inte1 &=~ AUDIO_DMA_CH_BIT;
 	dma_hw->inte2 &=~ AUDIO_DMA_CH_BIT;
@@ -180,47 +186,53 @@ static void audioPwmPrvDmaStop(void)
 	dma_hw->ints1 = AUDIO_DMA_CH_BIT;
 	dma_hw->ints2 = AUDIO_DMA_CH_BIT;
 	dma_hw->ints3 = AUDIO_DMA_CH_BIT;
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr &=~ PWM_CH0_CSR_EN_BITS;
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].ctr = 0;
 	mDmaBufAddr = 0;
 	mDmaBufSamples = 0;
 	mDmaBufMask = 0;
+	mDmaTimerValue = 0;
 	if (mMode == AudioPwmModeDma)
 		mMode = AudioPwmModeStopped;
 }
 
 static bool audioPwmPrvSetDmaSampleClock(uint32_t sampleRate)
 {
-	uint32_t div, top;
-	uint64_t denom;
+	uint32_t x, bestX = 1, bestY = 1;
+	uint64_t bestErr = UINT64_MAX;
+	uint32_t maxX;
 
 	if (!sampleRate)
 		return false;
 
-	denom = (uint64_t)sampleRate * 65536;
-	div = (uint32_t)((TICKS_PER_SECOND + denom - 1) / denom);
-	if (!div)
-		div = 1;
-	if (div > 255)
-		return false;
+	maxX = (uint32_t)(((uint64_t)sampleRate * 65535 + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND) + 1;
+	if (!maxX)
+		maxX = 1;
+	if (maxX > 65535)
+		maxX = 65535;
 
-	top = (uint32_t)(((uint64_t)TICKS_PER_SECOND + ((uint64_t)sampleRate * div) / 2) / ((uint64_t)sampleRate * div));
-	if (!top)
-		top = 1;
-	if (top > 65536)
-		top = 65536;
-	top--;
+	for (x = 1; x <= maxX; x++) {
+		uint32_t y = (uint32_t)(((uint64_t)TICKS_PER_SECOND * x + sampleRate / 2) / sampleRate);
+		uint64_t err;
 
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr &=~ PWM_CH0_CSR_EN_BITS;
-	while (pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr & PWM_CH0_CSR_EN_BITS);
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].top = (pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].top &~ PWM_CH0_TOP_BITS) | (top << PWM_CH0_TOP_LSB);
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].ctr = 0;
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].cc = 0;
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].div = (pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].div &~ (PWM_CH0_DIV_INT_BITS | PWM_CH0_DIV_FRAC_BITS)) |
-		(div << PWM_CH0_DIV_INT_LSB);
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr = (pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr &~ (PWM_CH0_CSR_PH_ADV_BITS |
-		PWM_CH0_CSR_PH_RET_BITS | PWM_CH0_CSR_DIVMODE_BITS | PWM_CH0_CSR_B_INV_BITS | PWM_CH0_CSR_A_INV_BITS |
-		PWM_CH0_CSR_PH_CORRECT_BITS)) | (PWM_CH0_CSR_DIVMODE_VALUE_DIV << PWM_CH0_CSR_DIVMODE_LSB);
+		if (!y)
+			y = 1;
+		if (y > 65535)
+			y = 65535;
+		err = (uint64_t)sampleRate * y;
+		if ((uint64_t)TICKS_PER_SECOND * x > err)
+			err = (uint64_t)TICKS_PER_SECOND * x - err;
+		else
+			err -= (uint64_t)TICKS_PER_SECOND * x;
+		if (err < bestErr) {
+			bestErr = err;
+			bestX = x;
+			bestY = y;
+			if (!err)
+				break;
+		}
+	}
+
+	mDmaTimerValue = (bestX << 16) | bestY;
+	dma_hw->timer[AUDIO_DMA_TIMER] = 0;
 	return true;
 }
 
@@ -337,7 +349,7 @@ bool audioPwmStartDutyDma(uint32_t sampleRate, const uint16_t *samples, uint32_t
 	dma_hw->ch[AUDIO_DMA_CH].write_addr = (uintptr_t)audioPwmPrvDutyCcHalfword();
 	dma_hw->ch[AUDIO_DMA_CH].transfer_count = numSamples;
 	dma_hw->ch[AUDIO_DMA_CH].al1_ctrl =
-		(DREQ_PWM_WRAP7 << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) |
+		(AUDIO_DMA_TREQ << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) |
 		(AUDIO_DMA_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) |
 		(ringBits << DMA_CH0_CTRL_TRIG_RING_SIZE_LSB) |
 		DMA_CH0_CTRL_TRIG_INCR_READ_BITS |
@@ -349,24 +361,27 @@ bool audioPwmStartDutyDma(uint32_t sampleRate, const uint16_t *samples, uint32_t
 	mDmaBufSamples = ringBytes / sizeof(uint16_t);
 	mDmaBufMask = mDmaBufSamples - 1;
 	mMode = AudioPwmModeDma;
-	pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr |= PWM_CH0_CSR_EN_BITS;
+	dma_hw->timer[AUDIO_DMA_TIMER] = mDmaTimerValue;
 	return true;
 }
 
 void audioPwmDmaPause(bool paused)
 {
+	uint64_t timeout;
+
 	if (mMode != AudioPwmModeDma)
 		return;
 
 	if (paused) {
-		pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr &=~ PWM_CH0_CSR_EN_BITS;
+		dma_hw->timer[AUDIO_DMA_TIMER] = 0;
 		dma_hw->ch[AUDIO_DMA_CH].al1_ctrl &=~ DMA_CH0_CTRL_TRIG_EN_BITS;
-		while (dma_hw->ch[AUDIO_DMA_CH].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS);
+		timeout = getTime() + AUDIO_DMA_WAIT_TIMEOUT;
+		while ((dma_hw->ch[AUDIO_DMA_CH].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS) && getTime() < timeout);
 		audioPwmPrvWriteDuty(AUDIO_PWM_TOP / 2);
 	}
 	else if (dma_hw->ch[AUDIO_DMA_CH].transfer_count) {
 		dma_hw->ch[AUDIO_DMA_CH].al1_ctrl |= DMA_CH0_CTRL_TRIG_EN_BITS;
-		pwm_hw->slice[AUDIO_DMA_CLK_PWM_IDX].csr |= PWM_CH0_CSR_EN_BITS;
+		dma_hw->timer[AUDIO_DMA_TIMER] = mDmaTimerValue;
 	}
 }
 

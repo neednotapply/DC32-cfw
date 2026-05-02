@@ -3341,6 +3341,7 @@ bool uiSaveSavestate(void)
 		uint64_t lastDraw;
 		bool forceDraw;
 		bool lastPaused;
+		bool settingsDirty;
 	};
 
 	static void uiPrvMusicSanitizeSettings(struct Settings *settings)
@@ -3349,10 +3350,10 @@ bool uiSaveSavestate(void)
 			settings->musicVolume = 11;
 	}
 
-	static void uiPrvMusicSaveSettings(struct MusicUiData *data)
+	static void uiPrvMusicApplySettings(struct MusicUiData *data)
 	{
 		audioPwmSetVolume(data->settings->musicVolume);
-		settingsSet(data->settings);
+		data->settingsDirty = true;
 		data->forceDraw = true;
 	}
 
@@ -3372,7 +3373,7 @@ bool uiSaveSavestate(void)
 		}
 
 		data->settings->musicVolume = volume;
-		uiPrvMusicSaveSettings(data);
+		uiPrvMusicApplySettings(data);
 	}
 
 	static uint32_t uiPrvMusicProgressFillRight(struct Canvas *cnv, const struct MusicPlayerStatus *status)
@@ -3506,7 +3507,7 @@ bool uiSaveSavestate(void)
 				return MusicPlayerControlNext;
 			if (data->focus == MusicPlaybackControlLoop) {
 				data->settings->musicLoopTrack = !data->settings->musicLoopTrack;
-				uiPrvMusicSaveSettings(data);
+				uiPrvMusicApplySettings(data);
 			}
 			if (data->focus == MusicPlaybackControlVol)
 				uiPrvMusicAdjustVolume(data, 1);
@@ -3533,6 +3534,8 @@ bool uiSaveSavestate(void)
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
 		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		fatfsFileClose(fil);
+		if (data.settingsDirty)
+			settingsSet(settings);
 		if (ret == MusicPlayerResultStopped)
 			uiPrvWaitKeysReleased();
 		if (ret == MusicPlayerResultFileError)

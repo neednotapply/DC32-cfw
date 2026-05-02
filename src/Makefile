@@ -31,7 +31,7 @@ CC_FLAGS	+= -DNO_SUPPORT_DEBUG_PRINTF -DEMBEDDED
 CC_FLAGS	+= -DQUIET_MAPPERS -DFATFS_USE_LFN_SUPPORT=1 -DUSE_WIN_1252_CODE_PAGE
 CC_FLAGS	+= -DQSPI_RAM_SIZE_MAX=65536 -DDISP_LCD_DEFCON -DUNSCALED_IMG_ROTATED -DUPSCALER_ROTATES -DUI_ROTATED
 CC_FLAGS	+= -DGB_HAVE_EXTRA_IO_REGS
-LD_FLAGS	+= -Wl,--gc-sections -Wl,-T linker_rp2350_defcon.lkr -lm $(CPU)
+LD_FLAGS	+= -Wl,--gc-sections -Wl,-T linker_rp2350_defcon.lkr -lm --specs=nosys.specs $(CPU)
 CC			= arm-none-eabi-gcc
 LD			= arm-none-eabi-gcc
 OBJCOPY		= arm-none-eabi-objcopy

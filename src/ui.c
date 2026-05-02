@@ -2855,7 +2855,7 @@ bool uiSaveSavestate(void)
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
 		const char *path = NULL;
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
@@ -2920,7 +2920,7 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
@@ -3123,7 +3123,7 @@ bool uiSaveSavestate(void)
 		struct FatFileLocator locator;
 		struct MusicOption *buttons = NULL, *button;
 		char fileName[UI_PICK_FILE_NAME_BUF_SZ], buttonName[IR_NAME_BUF_SZ];
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceWram);
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
 		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;

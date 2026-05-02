@@ -44,3 +44,4 @@ bool settingsSet(const struct Settings *settings);
 
 
 #endif
+

@@ -18,6 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      ARM_TOOLCHAIN_URL: https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz
       PICOTOOL_RELEASE: v2.2.0-3
       PICOTOOL_VERSION: 2.2.0-a4
     steps:
@@ -26,13 +27,34 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          set -euo pipefail
+
+          # GitHub's Ubuntu mirror can have transient DNS failures. Treat apt as
+          # best-effort for host tools only; the Arm compiler is installed below.
+          sudo apt-get update -o Acquire::Retries=5 || true
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
-            gcc-arm-none-eabi \
-            libusb-1.0-0 \
-            libnewlib-arm-none-eabi
+            libusb-1.0-0 || true
+
+          command -v make
+          command -v curl
+          command -v tar
+          command -v xz
+
+      - name: Install Arm GNU toolchain
+        run: |
+          set -euo pipefail
+
+          curl --fail --location --retry 5 --retry-all-errors --connect-timeout 30 \
+            "$ARM_TOOLCHAIN_URL" \
+            --output "$RUNNER_TEMP/arm-gnu-toolchain.tar.xz"
+          mkdir -p "$HOME/arm-gnu-toolchain"
+          tar -xf "$RUNNER_TEMP/arm-gnu-toolchain.tar.xz" \
+            --strip-components=1 \
+            -C "$HOME/arm-gnu-toolchain"
+          echo "$HOME/arm-gnu-toolchain/bin" >> "$GITHUB_PATH"
+          "$HOME/arm-gnu-toolchain/bin/arm-none-eabi-gcc" --version
 
       - name: Install picotool
         run: |
@@ -44,28 +66,28 @@ jobs:
 
       - name: Build firmware
         working-directory: src
-        run: make app
+        run: make app sdcard
 
       - name: Package firmware artifacts
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
-          cp src/uGB.bin "$ARTIFACT_DIR/uGB.bin"
-          picotool uf2 convert "$ARTIFACT_DIR/uGB.bin" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
+          cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
+          picotool uf2 convert "$ARTIFACT_DIR/FIRMWARE.BIN" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: |
-            ${{ runner.temp }}/firmware/uGB.bin
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/FIRMWARE.BIN
 
       - name: Attach firmware to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/firmware/uGB.bin
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/FIRMWARE.BIN
           overwrite_files: true

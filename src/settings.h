@@ -11,6 +11,7 @@ enum LedMode {
 	LedModeRainbow,
 	LedModeFlame,
 	LedModeTravelingDot,
+	LedModeRandom,
 	LedModeNumModes,
 };
 
@@ -20,6 +21,7 @@ struct Settings {
 	uint8_t contrast	:	5;
 
 	uint8_t upscale		:	1;
+	uint8_t rotation	:	1;
 	uint8_t brightness	:	5;
 	uint8_t ledsEnabled	:	1;	//legacy v6 migration field
 	uint8_t screenFlipped	:	1;
@@ -30,6 +32,9 @@ struct Settings {
 	uint8_t ledMode;
 	uint8_t ledSpeed;
 	uint8_t ledBrightness;
+	uint8_t musicVolume		:	4;
+	uint8_t musicLoopTrack	:	1;
+	uint8_t reserved		:	3;
 };
 
 

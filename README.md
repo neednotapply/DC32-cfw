@@ -23,7 +23,7 @@ This repository contains the custom firmware image that shipped with the DEF CON
 | `src/sd*.c`, `src/fatfs.c` | Storage stack and filesystem integration for ROM loading. |
 | `src/timebase.c`, `src/sleepDefcon.c` | Timing, delay, and power utilities for the badge runtime. |
 | `src/settings.c`, `src/ui.c`, `src/fonts.c` | Badge configuration UI, persistence, and fonts. |
-| `src/Makefile` | Build rules for generating the badge firmware binary and related utilities. |
+| `src/Makefile` | Build rules for generating the badge firmware binary, UF2 input, and SD-card updater image. |
 
 ## Getting started
 
@@ -40,7 +40,12 @@ This repository contains the custom firmware image that shipped with the DEF CON
    make app
    ```
    This produces `uGB.bin`, which contains the firmware image built with the badge-specific drivers and emulator core.
-3. Optional flags:
+3. Build the SD-card updater image, if needed:
+   ```bash
+   make sdcard
+   ```
+   This produces `FIRMWARE.BIN`, a byte-for-byte copy of `uGB.bin` with the exact filename the badge's on-device updater looks for at the SD card root.
+4. Optional flags:
    - `SDL=1` links against SDL2 to enable the desktop simulation front-end used for development builds.
    - `HQX=1` adds HQ3x upscaling support when building the optional host tooling.
 
@@ -48,11 +53,24 @@ Clean intermediate objects with `make clean` when switching build options or upd
 
 ### Flashing to a badge
 
-The GitHub Actions workflow packages a `firmware` artifact after it builds a commit. Download that artifact and use the included `uGB.uf2` for the recommended flashing path.
+The GitHub Actions workflow packages a `firmware` artifact after it builds a commit. GitHub releases also receive the two end-user update files:
+
+- `uGB.uf2` - recommended RP2350 USB bootloader image.
+- `FIRMWARE.BIN` - SD-card updater image for the badge UI.
+
+The build still creates `uGB.bin` internally as the raw firmware image, but release packages only publish the files users should copy to a badge. Use one flashing path per update:
+
+#### UF2 bootloader
 
 Put the badge into the RP2350 USB bootloader mode, then copy the downloaded `uGB.uf2` onto the mounted UF2 drive. The drive will disconnect after the copy completes and the badge will boot the new firmware.
 
-The older direct binary path is still available with `sudo make flash`; it wraps the `CortexProg` invocation defined in `CMD` and writes `uGB.bin` to the RP2350 XIP address space (0x10000000). Modify the command or provide the appropriate permissions if your setup differs.
+#### Direct BIN programmer
+
+The direct binary path is available with `sudo make flash`; it wraps the `CortexProg` invocation defined in `CMD` and writes `uGB.bin` to the RP2350 XIP address space (`0x10000000`). Modify the command or provide the appropriate permissions if your setup differs.
+
+#### SD-card updater
+
+Copy `FIRMWARE.BIN` to the root of the badge SD card so `/FIRMWARE.BIN` exists. Insert the SD card, boot the badge, and use the on-device firmware update option. The updater looks specifically for `/FIRMWARE.BIN`, so keep the filename uppercase and unchanged.
 
 A `make trace` target is also provided for developers who want to start the badge with hardware tracing enabled at the configured watch address (`ZWT_ADDR`).
 

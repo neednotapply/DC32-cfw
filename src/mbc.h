@@ -39,6 +39,7 @@
 	bool mbcInit(const void *rom, uint32_t *romSzExpectedP, void *ram, uint32_t *ramSzExpectedP);				//analyzes AND init MBC
 	
 	void* mbcPrvGetWramBuf(void);	//we use WRAM for a buffer
+	void* mbcPrvGetVramBuf(void);	//tools may use VRAM while the emulator is not running
 	
 #endif
 

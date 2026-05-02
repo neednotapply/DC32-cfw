@@ -1642,7 +1642,7 @@ bool uiSaveSavestate(void)
 	#define IR_LINE_BUF_SZ			32768
 	#define IR_NAME_BUF_SZ			64
 	#define IR_PROTOCOL_BUF_SZ		12
-	#define IR_REMOTE_MAX_BUTTONS	512
+	#define IR_REMOTE_MAX_BUTTONS	256
 
 	struct IrBlastStats {
 		uint32_t sent;
@@ -1674,8 +1674,6 @@ bool uiSaveSavestate(void)
 		bool hasData;
 		bool sentRaw;
 	};
-
-	static char mIrRemoteButtons[IR_REMOTE_MAX_BUTTONS][IR_NAME_BUF_SZ];
 
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
 	{
@@ -3157,6 +3155,7 @@ bool uiSaveSavestate(void)
 		const char *button;
 		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
 		char *line = (char*)mbcPrvGetWramBuf();
+		char (*buttons)[IR_NAME_BUF_SZ] = (char (*)[IR_NAME_BUF_SZ])mbcPrvGetVramBuf();
 		struct IrBlastStats stats;
 		bool ret = false, overflow = false, lineTooLong = false, malformed = false, cancelled = false, isFlipper = false, irStarted = false;
 		uint32_t numButtons, listLineNo = 0;
@@ -3178,7 +3177,7 @@ bool uiSaveSavestate(void)
 		uiPrvIrDrawButtonListProgress(cnv, fileName, 0, 0);
 
 		stats.phase = "listing buttons";
-		numButtons = uiPrvIrListButtons(cnv, fil, line, fileName, mIrRemoteButtons, &overflow, &lineTooLong, &malformed, &cancelled, &listLineNo);
+		numButtons = uiPrvIrListButtons(cnv, fil, line, fileName, buttons, &overflow, &lineTooLong, &malformed, &cancelled, &listLineNo);
 		if (cancelled)
 			goto out_close;
 		if (lineTooLong) {
@@ -3199,7 +3198,7 @@ bool uiSaveSavestate(void)
 			goto out_close;
 		}
 
-		button = uiPrvChooseIrButton(cnv, mIrRemoteButtons, numButtons, fileName);
+		button = uiPrvChooseIrButton(cnv, buttons, numButtons, fileName);
 		if (!button)
 			goto out_close;
 		uiPrvCopyStr(buttonName, sizeof(buttonName), button);
@@ -3895,7 +3894,7 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".txt");
 	}
 
-	#define BADUSB_MAX_SCRIPTS		64
+	#define BADUSB_MAX_SCRIPTS		128
 	#define BADUSB_NAME_BUF_SZ		64
 
 	struct BadUsbScriptOption {
@@ -3903,9 +3902,7 @@ reload_dir:
 		char name[BADUSB_NAME_BUF_SZ];
 	};
 
-	static struct BadUsbScriptOption mBadUsbScripts[BADUSB_MAX_SCRIPTS];
-
-	static uint32_t uiPrvBadUsbListScripts(struct FatfsVol *vol, bool *overflowP)
+	static uint32_t uiPrvBadUsbListScripts(struct FatfsVol *vol, struct BadUsbScriptOption *scripts, bool *overflowP)
 	{
 		struct FatfsDir *dir;
 		char fname[FATFS_NAME_BUF_LEN];
@@ -3931,8 +3928,8 @@ reload_dir:
 				*overflowP = true;
 				break;
 			}
-			mBadUsbScripts[count].locator = locator;
-			uiPrvCopyStr(mBadUsbScripts[count].name, sizeof(mBadUsbScripts[count].name), fname);
+			scripts[count].locator = locator;
+			uiPrvCopyStr(scripts[count].name, sizeof(scripts[count].name), fname);
 			count++;
 		}
 
@@ -4023,6 +4020,7 @@ reload_dir:
 		struct FatfsVol *vol;
 		struct FatfsFil *fil = NULL;
 		const struct BadUsbScriptOption *script;
+		struct BadUsbScriptOption *scripts = (struct BadUsbScriptOption*)mbcPrvGetWramBuf();
 		struct BadUsbUiData data;
 		enum BadUsbResult ret;
 		char name[FATFS_NAME_BUF_LEN], shortName[64], msg[96];
@@ -4033,14 +4031,14 @@ reload_dir:
 		if (!vol)
 			return false;
 
-		numScripts = uiPrvBadUsbListScripts(vol, &overflow);
+		numScripts = uiPrvBadUsbListScripts(vol, scripts, &overflow);
 		if (overflow)
 			uiAlert(cnv, "BadUSB has too many scripts; showing what fits", DialogTypeOk);
 		if (!numScripts) {
 			uiAlert(cnv, "No .txt scripts found in /BADUSB", DialogTypeOk);
 			goto out_unmount;
 		}
-		script = uiPrvChooseBadUsbScript(cnv, mBadUsbScripts, numScripts);
+		script = uiPrvChooseBadUsbScript(cnv, scripts, numScripts);
 		if (!script)
 			goto out_unmount;
 		uiPrvCopyStr(name, sizeof(name), script->name);

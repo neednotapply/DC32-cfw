@@ -24,7 +24,6 @@ struct Settings {
 	uint8_t rotation	:	1;
 	uint8_t brightness	:	5;
 	uint8_t ledsEnabled	:	1;	//legacy v6 migration field
-	uint8_t screenFlipped	:	1;
 
 	uint8_t ledRed;
 	uint8_t ledGreen;

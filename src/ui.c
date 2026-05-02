@@ -3053,7 +3053,7 @@ bool uiSaveSavestate(void)
 
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
-					return uiPrvMusicOptionAt(head, 0, selectedItem);
+					return uiPrvFileOptionAt(head, 0, selectedItem);
 
 				case KEY_BIT_B:
 					return NULL;

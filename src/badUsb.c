@@ -658,6 +658,11 @@ bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info)
 	if (!badUsbPrvReadLine(fil, line, sizeof(line), &bytesRead, &truncated) || truncated)
 		return fatfsFileSeek(fil, 0);
 	trimmed = badUsbPrvTrim(line);
+
+	/* Flipper-style BadUSB scripts start with Filetype/Version headers and use default HID info. */
+	if (badUsbPrvStarts(trimmed, "Filetype:") || badUsbPrvStarts(trimmed, "Version:"))
+		return fatfsFileSeek(fil, 0);
+
 	if (!badUsbPrvStarts(trimmed, "ID "))
 		return fatfsFileSeek(fil, 0);
 	p = badUsbPrvTrim(trimmed + 2);
@@ -719,6 +724,10 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 
 		badUsbPrvCopy(execLine, sizeof(execLine), line);
 		trimmed = badUsbPrvTrim(execLine);
+		if (!*trimmed || *trimmed == ';' || *trimmed == '#')
+			continue;
+		if (badUsbPrvStarts(trimmed, "Filetype:") || badUsbPrvStarts(trimmed, "Version:"))
+			continue;
 		if (badUsbPrvStarts(trimmed, "ID "))
 			continue;
 		if (badUsbPrvStarts(trimmed, "REPEAT ")) {

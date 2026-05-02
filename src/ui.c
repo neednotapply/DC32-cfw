@@ -439,6 +439,19 @@ static uint_fast8_t uiPrvRecvKeypress(void)
 	while (!uiGetKeys());
 	while ((val = uiGetKeys()) != 0)
 		prevVal = val;
+
+	if (prevVal & KEY_BIT_A)
+		return KEY_BIT_A;
+	if (prevVal & KEY_BIT_B)
+		return KEY_BIT_B;
+	if (prevVal & KEY_BIT_UP)
+		return KEY_BIT_UP;
+	if (prevVal & KEY_BIT_DOWN)
+		return KEY_BIT_DOWN;
+	if (prevVal & KEY_BIT_LEFT)
+		return KEY_BIT_LEFT;
+	if (prevVal & KEY_BIT_RIGHT)
+		return KEY_BIT_RIGHT;
 	
 	return prevVal;
 }
@@ -587,10 +600,10 @@ static bool uiPrvGetSimpleAnswer(struct Canvas *cnv, enum DialogType dialogType)
 	while (1) {
 		key = uiPrvRecvKeypress();
 		
-		if (key == KEY_BIT_A)
+		if (key & KEY_BIT_A)
 			return true;
 		
-		if (key == KEY_BIT_B)
+		if (key & KEY_BIT_B)
 			return dialogType == DialogTypeOk;
 	}
 }
@@ -1008,7 +1021,8 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		char *fname;
 	};
 
-	#define UI_PICK_FILE_PATH_BUF_SZ		(sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 2)
+	#define UI_PICK_FILE_PATH_BUF_SZ		(sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 8)
+	#define UI_BROWSER_MAX_DEPTH		16
 	#define UI_PICK_FILE_NAME_BUF_SZ		64
 
 	static bool uiPrvIsDotDir(const char *name)
@@ -1144,8 +1158,8 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
 	{
 		struct MusicOption *head = NULL, *cur = NULL;
-		struct FatFileLocator dirStack[8];
-		uint16_t pathLenStack[8];
+		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
+		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
 		struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 		char *path = (char*)pathMem.ptr;
 		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
@@ -1241,7 +1255,7 @@ reload_dir:
 					if (cur && cur->isDir) {
 						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
 
-						if (depth < sizeof(dirStack) / sizeof(*dirStack)) {
+						if (depth < UI_BROWSER_MAX_DEPTH) {
 							pathLenStack[depth] = pathLen;
 							dirStack[depth++] = cur->locator;
 							haveDirLoc = true;
@@ -2524,15 +2538,31 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 
+
+	static char uiPrvUpper(char c)
+	{
+		if (c >= 'a' && c <= 'z')
+			return c - 'a' + 'A';
+		return c;
+	}
+
+	static bool uiPrvEqNoCase(const char *a, const char *b)
+	{
+		while (*a && *b) {
+			if (uiPrvUpper(*a++) != uiPrvUpper(*b++))
+				return false;
+		}
+		return !*a && !*b;
+	}
 	static bool uiPrvIrIsPowerName(const char *name)
 	{
-		return !strcmp(name, "Power") || !strcmp(name, "POWER") || !strcmp(name, "Pwr") || !strcmp(name, "POWER_OFF") || !strcmp(name, "Power_off");
+		return uiPrvEqNoCase(name, "Power") || uiPrvEqNoCase(name, "Pwr") || uiPrvEqNoCase(name, "POWER_OFF") || uiPrvEqNoCase(name, "Power_off");
 	}
 
 	static bool uiPrvIrNameMatches(const char *name, const char *wantedName)
 	{
 		if (wantedName)
-			return !strcmp(name, wantedName) || (!strcmp(wantedName, "Mute") && !strcmp(name, "MUTE"));
+			return uiPrvEqNoCase(name, wantedName) || (uiPrvEqNoCase(wantedName, "Mute") && uiPrvEqNoCase(name, "MUTE"));
 
 		return uiPrvIrIsPowerName(name);
 	}
@@ -3558,8 +3588,8 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol;
 		struct MusicOption *head = NULL, *tail = NULL, *cur = NULL;
-		struct FatFileLocator dirStack[8];
-		uint16_t pathLenStack[8];
+		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
+		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
 		char path[sizeof("/MUSIC/") + FATFS_NAME_BUF_LEN * 2];
 		struct Settings settings;
 		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
@@ -3665,7 +3695,7 @@ reload_dir:
 					if (cur && cur->isDir) {
 						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
 
-						if (depth < sizeof(dirStack) / sizeof(*dirStack)) {
+						if (depth < UI_BROWSER_MAX_DEPTH) {
 							pathLenStack[depth] = pathLen;
 							dirStack[depth++] = cur->locator;
 							haveDirLoc = true;
@@ -3812,18 +3842,18 @@ reload_dir:
 		while (1) {
 			uint8_t key = uiPrvRecvKeypress();
 
-			if (key == KEY_BIT_A) {
+			if (key & KEY_BIT_A) {
 				data->forceDraw = true;
 				return true;
 			}
-			if (key == KEY_BIT_B)
+			if (key & KEY_BIT_B)
 				return false;
 		}
 	}
 
 	static bool uiPrvBadUsbFileName(const char *fname)
 	{
-		return uiPrvStrEndsWithNoCase(fname, ".txt");
+		return uiPrvStrEndsWithNoCase(fname, ".txt") || uiPrvStrEndsWithNoCase(fname, ".badusb");
 	}
 
 	static bool uiPrvBadUsbTool(struct Canvas *cnv)
@@ -3839,7 +3869,7 @@ reload_dir:
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
-		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No .txt scripts found in /BADUSB", &locator, name, sizeof(name)))
+		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", &locator, name, sizeof(name)))
 			goto out_unmount;
 
 		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);

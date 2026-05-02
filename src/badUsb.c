@@ -5,8 +5,6 @@
 #define BADUSB_LINE_BUF_SZ			512
 #define BADUSB_KEY_DELAY_MS			12
 #define BADUSB_ENUM_WAIT_MS			5000
-#define BADUSB_MAX_DELAY_MS			300000
-#define BADUSB_MAX_REPEAT			1000
 
 struct BadUsbState {
 	struct BadUsbStatus status;
@@ -123,11 +121,7 @@ static bool badUsbPrvParseU32(const char **strP, uint32_t *valP)
 	if (*str < '0' || *str > '9')
 		return false;
 	while (*str >= '0' && *str <= '9') {
-		uint32_t digit = *str++ - '0';
-
-		if (val > (0xfffffffful - digit) / 10)
-			return false;
-		val = val * 10 + digit;
+		val = val * 10 + *str++ - '0';
 	}
 	*valP = val;
 	*strP = str;
@@ -172,9 +166,6 @@ static bool badUsbPrvPoll(struct BadUsbState *st, const char *msg)
 static bool badUsbPrvDelay(struct BadUsbState *st, uint32_t msec, const char *msg)
 {
 	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
-
-	if (msec > BADUSB_MAX_DELAY_MS)
-		return false;
 
 	while (getTime() < end) {
 		if (!badUsbPrvPoll(st, msg))
@@ -725,7 +716,7 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 			const char *p = badUsbPrvTrim(trimmed + 6);
 			uint32_t count;
 
-			if (!badUsbPrvParseU32(&p, &count) || count > BADUSB_MAX_REPEAT || !prevLine[0] || !badUsbPrvRepeat(&st, prevLine, count)) {
+			if (!badUsbPrvParseU32(&p, &count) || !prevLine[0] || !badUsbPrvRepeat(&st, prevLine, count)) {
 				usbHidReleaseAll();
 				usbHidEnd();
 				return BadUsbResultDecodeError;

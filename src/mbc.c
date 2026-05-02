@@ -59,11 +59,6 @@ void* mbcPrvGetWramBuf(void)
 	return mWRAM;
 }
 
-void* mbcPrvGetVramBuf(void)
-{
-	return mVRAM;
-}
-
 static void mbcPrvFillPtrs(uint8_t **arr, uint16_t base, uint16_t size, uint8_t *ptr)		//assumes perfectly valid input
 {
 	arr += base / MEMMAP_MAP_CHUNK_SZ;

@@ -40,6 +40,7 @@
 #define USB_USB_MUXING_SOFTCON			(1u << 3)
 #define USB_USB_PWR_VBUS_DETECT			(1u << 2)
 #define USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN	(1u << 3)
+#define USB_HID_HW_WAIT_MS				100
 
 struct UsbSetup {
 	uint8_t bmRequestType;
@@ -308,6 +309,19 @@ static void usbHidPrvSetup(void)
 	}
 }
 
+static bool usbHidPrvWaitBits(const volatile uint32_t *reg, uint32_t bits, bool set)
+{
+	uint64_t end = getTime() + (uint64_t)USB_HID_HW_WAIT_MS * (TICKS_PER_SECOND / 1000);
+
+	while (getTime() < end) {
+		uint32_t val = *reg & bits;
+
+		if (set ? val == bits : val == 0)
+			return true;
+	}
+	return false;
+}
+
 bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
 	uint32_t units;
@@ -325,13 +339,15 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 	units = RESETS_RESET_USBCTRL_BITS | RESETS_RESET_PLL_USB_BITS;
 	resets_hw->reset |= units;
 	resets_hw->reset &=~ units;
-	while ((resets_hw->reset_done & units) != units);
+	if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true))
+		return false;
 
 	pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
 	pll_usb_hw->fbdiv_int = (pll_usb_hw->fbdiv_int &~ PLL_FBDIV_INT_BITS) | (100 << PLL_FBDIV_INT_LSB);
 	pll_usb_hw->prim = (pll_usb_hw->prim &~ (PLL_PRIM_POSTDIV1_BITS | PLL_PRIM_POSTDIV2_BITS)) | (5 << PLL_PRIM_POSTDIV1_LSB) | (5 << PLL_PRIM_POSTDIV2_LSB);
 	pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
-	while (!(pll_usb_hw->cs & PLL_CS_LOCK_BITS));
+	if (!usbHidPrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true))
+		return false;
 	pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
 
 	clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;

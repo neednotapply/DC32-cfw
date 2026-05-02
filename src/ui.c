@@ -1648,6 +1648,7 @@ bool uiSaveSavestate(void)
 		uint32_t skipped;
 		uint32_t malformed;
 		uint32_t lineNo;
+		const char *phase;
 		bool cancelled;
 		bool lineTooLong;
 	};
@@ -1669,6 +1670,7 @@ bool uiSaveSavestate(void)
 		bool hasFrequency;
 		bool hasAddress;
 		bool hasCommand;
+		bool hasData;
 		bool sentRaw;
 	};
 
@@ -2042,6 +2044,31 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 
+	static char uiPrvLowerAscii(char c)
+	{
+		if (c >= 'A' && c <= 'Z')
+			return c + 'a' - 'A';
+		return c;
+	}
+
+	static bool uiPrvEqNoCase(const char *a, const char *b)
+	{
+		while (*a && *b) {
+			if (uiPrvLowerAscii(*a++) != uiPrvLowerAscii(*b++))
+				return false;
+		}
+		return !*a && !*b;
+	}
+
+	static bool uiPrvStartsWithNoCase(const char *str, const char *prefix)
+	{
+		while (*prefix) {
+			if (uiPrvLowerAscii(*str++) != uiPrvLowerAscii(*prefix++))
+				return false;
+		}
+		return true;
+	}
+
 	static void uiPrvCopyStr(char *dst, uint32_t dstLen, const char *src)
 	{
 		if (!dstLen)
@@ -2131,6 +2158,27 @@ bool uiSaveSavestate(void)
 		*valP = val;
 
 		return !*str;
+	}
+
+	static char *uiPrvIrFieldValue(char *line, const char *field)
+	{
+		char *sep = line;
+		uint32_t fieldLen = strlen(field), keyLen;
+
+		while (*sep && *sep != ':')
+			sep++;
+		if (*sep != ':')
+			return NULL;
+		keyLen = sep - line;
+		while (keyLen && (line[keyLen - 1] == ' ' || line[keyLen - 1] == '\t'))
+			keyLen--;
+		if (keyLen != fieldLen)
+			return NULL;
+		while (*field) {
+			if (uiPrvLowerAscii(*line++) != uiPrvLowerAscii(*field++))
+				return NULL;
+		}
+		return uiPrvTrim(sep + 1);
 	}
 
 	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, bool *truncatedP)
@@ -2251,23 +2299,34 @@ bool uiSaveSavestate(void)
 		irRemoteMarkUsec(carrier, 560);
 	}
 
+	static bool uiPrvIrProtocolSupported(const char *protocol)
+	{
+		return uiPrvEqNoCase(protocol, "NEC") || uiPrvEqNoCase(protocol, "NECext") ||
+			uiPrvEqNoCase(protocol, "NEC42") || uiPrvEqNoCase(protocol, "NEC42ext") ||
+			uiPrvEqNoCase(protocol, "Samsung32") || uiPrvEqNoCase(protocol, "SIRC") ||
+			uiPrvEqNoCase(protocol, "SIRC15") || uiPrvEqNoCase(protocol, "SIRC20") ||
+			uiPrvEqNoCase(protocol, "RCA") || uiPrvEqNoCase(protocol, "RC5") ||
+			uiPrvEqNoCase(protocol, "RC5X") || uiPrvEqNoCase(protocol, "RC6") ||
+			uiPrvEqNoCase(protocol, "Kaseikyo");
+	}
+
 	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command)
 	{
 		uint32_t carrier = IR_DEFAULT_CARRIER;
 
-		if (!strcmp(protocol, "NEC")) {
+		if (uiPrvEqNoCase(protocol, "NEC")) {
 			uiPrvIrSendNecLike(carrier, address, command, 8, 8, true);
 		}
-		else if (!strcmp(protocol, "NECext")) {
+		else if (uiPrvEqNoCase(protocol, "NECext")) {
 			uiPrvIrSendNecLike(carrier, address, command, 16, 16, false);
 		}
-		else if (!strcmp(protocol, "NEC42")) {
+		else if (uiPrvEqNoCase(protocol, "NEC42")) {
 			uiPrvIrSendNecLike(carrier, address, command, 13, 8, true);
 		}
-		else if (!strcmp(protocol, "NEC42ext")) {
+		else if (uiPrvEqNoCase(protocol, "NEC42ext")) {
 			uiPrvIrSendNecLike(carrier, address, command, 26, 16, false);
 		}
-		else if (!strcmp(protocol, "Samsung32")) {
+		else if (uiPrvEqNoCase(protocol, "Samsung32")) {
 			irRemoteMarkUsec(carrier, 4500);
 			irRemoteSpaceUsec(4500);
 			uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690);
@@ -2275,8 +2334,8 @@ bool uiSaveSavestate(void)
 			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690);
 			irRemoteMarkUsec(carrier, 560);
 		}
-		else if (!strcmp(protocol, "SIRC") || !strcmp(protocol, "SIRC15") || !strcmp(protocol, "SIRC20")) {
-			uint_fast8_t addrBits = !strcmp(protocol, "SIRC") ? 5 : (!strcmp(protocol, "SIRC15") ? 8 : 13), rep;
+		else if (uiPrvEqNoCase(protocol, "SIRC") || uiPrvEqNoCase(protocol, "SIRC15") || uiPrvEqNoCase(protocol, "SIRC20")) {
+			uint_fast8_t addrBits = uiPrvEqNoCase(protocol, "SIRC") ? 5 : (uiPrvEqNoCase(protocol, "SIRC15") ? 8 : 13), rep;
 
 			carrier = 40000;
 			for (rep = 0; rep < 3; rep++) {
@@ -2287,7 +2346,7 @@ bool uiSaveSavestate(void)
 				irRemoteSpaceUsec(25000);
 			}
 		}
-		else if (!strcmp(protocol, "RCA")) {
+		else if (uiPrvEqNoCase(protocol, "RCA")) {
 			irRemoteMarkUsec(carrier, 4000);
 			irRemoteSpaceUsec(4000);
 			uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000);
@@ -2296,8 +2355,8 @@ bool uiSaveSavestate(void)
 			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000);
 			irRemoteMarkUsec(carrier, 500);
 		}
-		else if (!strcmp(protocol, "RC5") || !strcmp(protocol, "RC5X")) {
-			uint32_t cmd = command & (!strcmp(protocol, "RC5X") ? 0x7f : 0x3f);
+		else if (uiPrvEqNoCase(protocol, "RC5") || uiPrvEqNoCase(protocol, "RC5X")) {
+			uint32_t cmd = command & (uiPrvEqNoCase(protocol, "RC5X") ? 0x7f : 0x3f);
 			uint_fast8_t i;
 
 			carrier = 36000;
@@ -2309,7 +2368,7 @@ bool uiSaveSavestate(void)
 			for (i = 0; i < 6; i++)
 				uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889);
 		}
-		else if (!strcmp(protocol, "RC6")) {
+		else if (uiPrvEqNoCase(protocol, "RC6")) {
 			uint_fast8_t i;
 
 			carrier = 36000;
@@ -2325,7 +2384,7 @@ bool uiSaveSavestate(void)
 			for (i = 0; i < 8; i++)
 				uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444);
 		}
-		else if (!strcmp(protocol, "Kaseikyo")) {
+		else if (uiPrvEqNoCase(protocol, "Kaseikyo")) {
 			uint32_t vendor = address & 0xffff;
 			uint32_t payload = ((address >> 16) & 0x03ff) | ((command & 0x03ff) << 10);
 			uint8_t parity = (vendor ^ (vendor >> 8)) & 0x0f;
@@ -2409,13 +2468,13 @@ bool uiSaveSavestate(void)
 
 	static bool uiPrvIrIsPowerName(const char *name)
 	{
-		return !strcmp(name, "Power") || !strcmp(name, "POWER") || !strcmp(name, "Pwr") || !strcmp(name, "POWER_OFF") || !strcmp(name, "Power_off");
+		return uiPrvEqNoCase(name, "Power") || uiPrvEqNoCase(name, "Pwr") || uiPrvEqNoCase(name, "POWER_OFF");
 	}
 
 	static bool uiPrvIrNameMatches(const char *name, const char *wantedName)
 	{
 		if (wantedName)
-			return !strcmp(name, wantedName) || (!strcmp(wantedName, "Mute") && !strcmp(name, "MUTE"));
+			return uiPrvEqNoCase(name, wantedName) || (uiPrvEqNoCase(wantedName, "Mute") && uiPrvEqNoCase(name, "MUTE"));
 
 		return uiPrvIrIsPowerName(name);
 	}
@@ -2424,6 +2483,17 @@ bool uiSaveSavestate(void)
 	{
 		memset(rec, 0, sizeof(*rec));
 		rec->frequency = IR_DEFAULT_CARRIER;
+	}
+
+	static bool uiPrvFlipperRecordSendable(const struct FlipperIrRecord *rec)
+	{
+		if (!rec->hasName)
+			return false;
+		if (rec->type == FlipperIrTypeRaw)
+			return rec->hasData;
+		if (rec->type == FlipperIrTypeParsed)
+			return rec->hasAddress && rec->hasCommand && uiPrvIrProtocolSupported(rec->protocol);
+		return false;
 	}
 
 	static void uiPrvFlipperRecordFinish(struct Canvas *cnv, struct FlipperIrRecord *rec, struct IrBlastStats *stats, const char *wantedName, const char *title)
@@ -2445,6 +2515,10 @@ bool uiSaveSavestate(void)
 
 		if (rec->type != FlipperIrTypeParsed || !rec->hasAddress || !rec->hasCommand) {
 			stats->malformed++;
+			return;
+		}
+		if (!uiPrvIrProtocolSupported(rec->protocol)) {
+			stats->skipped++;
 			return;
 		}
 
@@ -2497,7 +2571,12 @@ bool uiSaveSavestate(void)
 
 	static bool uiPrvIrFileIsFlipper(const char *trimmed)
 	{
-		return !strcmp(trimmed, "Filetype: IR signals file") || !strcmp(trimmed, "Filetype: IR library file");
+		char tmp[IR_NAME_BUF_SZ];
+		char *value;
+
+		uiPrvCopyStr(tmp, sizeof(tmp), trimmed);
+		value = uiPrvIrFieldValue(tmp, "Filetype");
+		return value && (uiPrvEqNoCase(value, "IR signals file") || uiPrvEqNoCase(value, "IR library file"));
 	}
 
 	static bool uiPrvIrDetectFormat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats, bool *isFlipperP)
@@ -2508,7 +2587,7 @@ bool uiSaveSavestate(void)
 			if (!*trimmed || *trimmed == '#')
 				continue;
 
-			if (!strcmp(trimmed, IR_FILE_MAGIC)) {
+			if (uiPrvEqNoCase(trimmed, IR_FILE_MAGIC)) {
 				*isFlipperP = false;
 				return fatfsFileSeek(fil, 0);
 			}
@@ -2540,7 +2619,7 @@ bool uiSaveSavestate(void)
 			if (!*trimmed || *trimmed == '#')
 				continue;
 
-			if (strcmp(trimmed, IR_FILE_MAGIC)) {
+			if (!uiPrvEqNoCase(trimmed, IR_FILE_MAGIC)) {
 				stats->malformed++;
 				return false;
 			}
@@ -2559,22 +2638,22 @@ bool uiSaveSavestate(void)
 			if (!*trimmed || *trimmed == '#')
 				continue;
 
-			if (uiPrvStartsWith(trimmed, "name=")) {
+			if (uiPrvStartsWithNoCase(trimmed, "name=")) {
 				uiPrvCopyStr(name, sizeof(name), uiPrvTrim(trimmed + 5));
 			}
-			else if (uiPrvStartsWith(trimmed, "carrier=")) {
+			else if (uiPrvStartsWithNoCase(trimmed, "carrier=")) {
 				const char *str = trimmed + 8;
 
 				if (!uiPrvParseU32(&str, &carrier) || *str)
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "repeat=")) {
+			else if (uiPrvStartsWithNoCase(trimmed, "repeat=")) {
 				const char *str = trimmed + 7;
 
 				if (!uiPrvParseU32(&str, &repeat) || *str)
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "code=")) {
+			else if (uiPrvStartsWithNoCase(trimmed, "code=")) {
 				bool malformed = false, cancelled = false;
 
 				codeIdx++;
@@ -2609,6 +2688,7 @@ bool uiSaveSavestate(void)
 
 		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled && (!maxSent || stats->sent < maxSent)) {
 			char *trimmed = uiPrvTrim(line);
+			char *value;
 
 			if (!*trimmed)
 				continue;
@@ -2619,7 +2699,8 @@ bool uiSaveSavestate(void)
 				continue;
 			}
 
-			if (uiPrvStartsWith(trimmed, "Filetype:")) {
+			value = uiPrvIrFieldValue(trimmed, "Filetype");
+			if (value) {
 				if (!uiPrvIrFileIsFlipper(trimmed))
 					stats->malformed++;
 				else
@@ -2627,8 +2708,9 @@ bool uiSaveSavestate(void)
 				continue;
 			}
 
-			if (uiPrvStartsWith(trimmed, "Version:")) {
-				const char *str = uiPrvTrim(trimmed + 8);
+			value = uiPrvIrFieldValue(trimmed, "Version");
+			if (value) {
+				const char *str = value;
 				uint32_t version;
 
 				if (!uiPrvParseU32(&str, &version) || version != 1)
@@ -2638,48 +2720,48 @@ bool uiSaveSavestate(void)
 				continue;
 			}
 
-			if (uiPrvStartsWith(trimmed, "name:")) {
-				uiPrvCopyStr(rec.name, sizeof(rec.name), uiPrvTrim(trimmed + 5));
+			value = uiPrvIrFieldValue(trimmed, "name");
+			if (value) {
+				uiPrvCopyStr(rec.name, sizeof(rec.name), value);
 				rec.hasName = true;
 			}
-			else if (uiPrvStartsWith(trimmed, "type:")) {
-				char *type = uiPrvTrim(trimmed + 5);
-
-				if (!strcmp(type, "raw"))
+			else if ((value = uiPrvIrFieldValue(trimmed, "type"))) {
+				if (uiPrvEqNoCase(value, "raw"))
 					rec.type = FlipperIrTypeRaw;
-				else if (!strcmp(type, "parsed"))
+				else if (uiPrvEqNoCase(value, "parsed"))
 					rec.type = FlipperIrTypeParsed;
 				else
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "protocol:")) {
-				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), uiPrvTrim(trimmed + 9));
+			else if ((value = uiPrvIrFieldValue(trimmed, "protocol"))) {
+				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), value);
 			}
-			else if (uiPrvStartsWith(trimmed, "address:")) {
-				rec.hasAddress = uiPrvParseFlipperU32Bytes(uiPrvTrim(trimmed + 8), &rec.address);
+			else if ((value = uiPrvIrFieldValue(trimmed, "address"))) {
+				rec.hasAddress = uiPrvParseFlipperU32Bytes(value, &rec.address);
 				if (!rec.hasAddress)
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "command:")) {
-				rec.hasCommand = uiPrvParseFlipperU32Bytes(uiPrvTrim(trimmed + 8), &rec.command);
+			else if ((value = uiPrvIrFieldValue(trimmed, "command"))) {
+				rec.hasCommand = uiPrvParseFlipperU32Bytes(value, &rec.command);
 				if (!rec.hasCommand)
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "frequency:")) {
-				const char *str = uiPrvTrim(trimmed + 10);
+			else if ((value = uiPrvIrFieldValue(trimmed, "frequency"))) {
+				const char *str = value;
 
 				rec.hasFrequency = uiPrvParseU32(&str, &rec.frequency) && !*str;
 				if (!rec.hasFrequency)
 					stats->malformed++;
 			}
-			else if (uiPrvStartsWith(trimmed, "duty_cycle:")) {
+			else if (uiPrvIrFieldValue(trimmed, "duty_cycle")) {
 				//ignored for now
 			}
-			else if (uiPrvStartsWith(trimmed, "data:")) {
+			else if ((value = uiPrvIrFieldValue(trimmed, "data"))) {
+				rec.hasData = true;
 				if (rec.hasName && uiPrvIrNameMatches(rec.name, wantedName) && rec.type == FlipperIrTypeRaw) {
 					bool malformed = false, cancelled = false;
 
-					if (uiPrvIrSendCodeLine(cnv, title, uiPrvTrim(trimmed + 5), rec.name, rec.frequency, 1, stats->sent + 1, &malformed, &cancelled)) {
+					if (uiPrvIrSendCodeLine(cnv, title, value, rec.name, rec.frequency, 1, stats->sent + 1, &malformed, &cancelled)) {
 						rec.sentRaw = true;
 						stats->sent++;
 					}
@@ -2838,33 +2920,91 @@ bool uiSaveSavestate(void)
 		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
 	}
 
-	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP)
+	static bool uiPrvIrButtonListRecord(struct UiFileListCtx *ctx, const struct FlipperIrRecord *rec)
+	{
+		if (!uiPrvFlipperRecordSendable(rec))
+			return true;
+		return uiPrvIrButtonListAppend(ctx, rec->name);
+	}
+
+	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP, bool *malformedP, uint32_t *lineNoP)
 	{
 		struct UiFileListCtx ctx;
 		struct IrBlastStats stats;
+		struct FlipperIrRecord rec;
 		bool isFlipper = false;
 
 		memset(&ctx, 0, sizeof(ctx));
 		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
 		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
 		memset(&stats, 0, sizeof(stats));
+		uiPrvFlipperRecordInit(&rec);
 
 		*lineTooLongP = false;
+		*malformedP = false;
+		*lineNoP = 0;
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out;
 
 		memset(&stats, 0, sizeof(stats));
 		while (uiPrvIrReadLineStat(fil, line, &stats)) {
 			char *trimmed = uiPrvTrim(line);
+			char *value;
 
-			if (uiPrvStartsWith(trimmed, "name:"))
-				if (!uiPrvIrButtonListAppend(&ctx, uiPrvTrim(trimmed + 5)))
+			if (!*trimmed)
+				continue;
+			if (*trimmed == '#') {
+				if (!uiPrvIrButtonListRecord(&ctx, &rec))
 					break;
-		}
+				uiPrvFlipperRecordInit(&rec);
+				continue;
+			}
+			if (uiPrvIrFieldValue(trimmed, "Filetype") || uiPrvIrFieldValue(trimmed, "Version") || uiPrvIrFieldValue(trimmed, "duty_cycle"))
+				continue;
+			if ((value = uiPrvIrFieldValue(trimmed, "name"))) {
+				uiPrvCopyStr(rec.name, sizeof(rec.name), value);
+				rec.hasName = true;
+			}
+			else if ((value = uiPrvIrFieldValue(trimmed, "type"))) {
+				if (uiPrvEqNoCase(value, "raw"))
+					rec.type = FlipperIrTypeRaw;
+				else if (uiPrvEqNoCase(value, "parsed"))
+					rec.type = FlipperIrTypeParsed;
+				else
+					stats.malformed++;
+			}
+			else if ((value = uiPrvIrFieldValue(trimmed, "protocol"))) {
+				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), value);
+			}
+			else if ((value = uiPrvIrFieldValue(trimmed, "address"))) {
+				rec.hasAddress = uiPrvParseFlipperU32Bytes(value, &rec.address);
+				if (!rec.hasAddress)
+					stats.malformed++;
+			}
+			else if ((value = uiPrvIrFieldValue(trimmed, "command"))) {
+				rec.hasCommand = uiPrvParseFlipperU32Bytes(value, &rec.command);
+				if (!rec.hasCommand)
+					stats.malformed++;
+			}
+			else if ((value = uiPrvIrFieldValue(trimmed, "frequency"))) {
+				const char *str = value;
 
-		*lineTooLongP = stats.lineTooLong;
+				rec.hasFrequency = uiPrvParseU32(&str, &rec.frequency) && !*str;
+				if (!rec.hasFrequency)
+					stats.malformed++;
+			}
+			else if (uiPrvIrFieldValue(trimmed, "data")) {
+				rec.hasData = true;
+			}
+			else
+				stats.malformed++;
+		}
+		(void)uiPrvIrButtonListRecord(&ctx, &rec);
 
 	out:
+		*lineTooLongP = stats.lineTooLong;
+		*malformedP = stats.malformed != 0;
+		*lineNoP = stats.lineNo;
 		*headP = ctx.head;
 		if (overflowP)
 			*overflowP = ctx.overflow;
@@ -2961,8 +3101,8 @@ bool uiSaveSavestate(void)
 		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
 		char *line = (char*)mbcPrvGetWramBuf();
 		struct IrBlastStats stats;
-		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;
-		uint32_t numButtons;
+		bool ret = false, overflow = false, lineTooLong = false, malformed = false, isFlipper = false, irStarted = false;
+		uint32_t numButtons, listLineNo = 0;
 
 		memset(&stats, 0, sizeof(stats));
 		vol = uiPrvMountCard(cnv, false);
@@ -2978,15 +3118,29 @@ bool uiSaveSavestate(void)
 			goto out_unmount;
 		}
 
-		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
+		uiPrvReset(cnv, false);
+		cnv->font = FontLarge;
+		uiPuts(cnv, uiPrvGlyphHeight(cnv) + 1, 10, "IR Remote", -1);
+		cnv->font = FontMedium;
+		uiPuts(cnv, 3 * (uiPrvGlyphHeight(cnv) + 1), 10, "Reading buttons...", -1);
+
+		stats.phase = "listing buttons";
+		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong, &malformed, &listLineNo);
 		if (lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+			goto out_close;
+		}
+		if (malformed) {
+			char msg[96];
+
+			(void)sprintf(msg, "Malformed Flipper IR while listing buttons near line %u", (unsigned)listLineNo);
+			uiAlert(cnv, msg, DialogTypeOk);
 			goto out_close;
 		}
 		if (overflow)
 			uiAlert(cnv, "Remote has too many buttons; showing what fits", DialogTypeOk);
 		if (!numButtons) {
-			uiAlert(cnv, "No Flipper buttons found in that IR file", DialogTypeOk);
+			uiAlert(cnv, "No sendable Flipper buttons found in that IR file", DialogTypeOk);
 			goto out_close;
 		}
 
@@ -2998,10 +3152,12 @@ bool uiSaveSavestate(void)
 		if (!fatfsFileSeek(fil, 0))
 			goto out_close;
 		memset(&stats, 0, sizeof(stats));
+		stats.phase = "detecting format";
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out_close;
 
 		memset(&stats, 0, sizeof(stats));
+		stats.phase = "sending";
 		irRemoteBegin();
 		irStarted = true;
 		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 1);
@@ -3017,6 +3173,12 @@ bool uiSaveSavestate(void)
 
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.malformed && !stats.sent) {
+			char msg[96];
+
+			(void)sprintf(msg, "Malformed IR while %s near line %u", stats.phase ? stats.phase : "reading", (unsigned)stats.lineNo);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
 			uiAlert(cnv, "IR remote cancelled", DialogTypeOk);

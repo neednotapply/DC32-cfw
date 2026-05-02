@@ -1642,6 +1642,7 @@ bool uiSaveSavestate(void)
 	#define IR_LINE_BUF_SZ			32768
 	#define IR_NAME_BUF_SZ			64
 	#define IR_PROTOCOL_BUF_SZ		12
+	#define IR_REMOTE_MAX_BUTTONS	512
 
 	struct IrBlastStats {
 		uint32_t sent;
@@ -1673,6 +1674,8 @@ bool uiSaveSavestate(void)
 		bool hasData;
 		bool sentRaw;
 	};
+
+	static char mIrRemoteButtons[IR_REMOTE_MAX_BUTTONS][IR_NAME_BUF_SZ];
 
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
 	{
@@ -2912,36 +2915,54 @@ bool uiSaveSavestate(void)
 		return uiPrvStrEndsWithNoCase(fname, ".ir");
 	}
 
-	static bool uiPrvIrButtonListAppend(struct UiFileListCtx *ctx, const char *name)
-	{
-		struct FatFileLocator loc;
-
-		memset(&loc, 0, sizeof(loc));
-		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
-	}
-
-	static bool uiPrvIrButtonListRecord(struct UiFileListCtx *ctx, const struct FlipperIrRecord *rec)
+	static bool uiPrvIrButtonListRecord(char buttons[][IR_NAME_BUF_SZ], uint32_t *countP, const struct FlipperIrRecord *rec)
 	{
 		if (!uiPrvFlipperRecordSendable(rec))
 			return true;
-		return uiPrvIrButtonListAppend(ctx, rec->name);
+		if (*countP >= IR_REMOTE_MAX_BUTTONS)
+			return false;
+		uiPrvCopyStr(buttons[*countP], IR_NAME_BUF_SZ, rec->name);
+		(*countP)++;
+		return true;
 	}
 
-	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP, bool *malformedP, uint32_t *lineNoP)
+	static void uiPrvIrDrawButtonListProgress(struct Canvas *cnv, const char *fileName, uint32_t lineNo, uint32_t numButtons)
 	{
-		struct UiFileListCtx ctx;
+		uint32_t row;
+
+		uiPrvReset(cnv, false);
+		cnv->font = FontLarge;
+		row = uiPrvGlyphHeight(cnv) + 1;
+		uiPuts(cnv, row, 10, "IR Remote", -1);
+		row += uiPrvGlyphHeight(cnv) + 2;
+		cnv->font = FontMedium;
+		cnv->foreColor = 11;
+		uiPrvDrawTruncText(cnv, row, 10, cnv->w - 10, fileName);
+		row += uiPrvGlyphHeight(cnv) + 1;
+		cnv->foreColor = 15;
+		uiPuts(cnv, row, 10, "Reading buttons...", -1);
+		row += uiPrvGlyphHeight(cnv) + 1;
+		uiPrintf(cnv, row, 10, "Buttons: %u", (unsigned)numButtons);
+		row += uiPrvGlyphHeight(cnv) + 1;
+		uiPrintf(cnv, row, 10, "Line: %u", (unsigned)lineNo);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
+	}
+
+	static uint32_t uiPrvIrListButtons(struct Canvas *cnv, struct FatfsFil *fil, char *line, const char *fileName, char buttons[][IR_NAME_BUF_SZ], bool *overflowP, bool *lineTooLongP, bool *malformedP, bool *cancelledP, uint32_t *lineNoP)
+	{
 		struct IrBlastStats stats;
 		struct FlipperIrRecord rec;
-		bool isFlipper = false;
+		bool isFlipper = false, haveHeader = false, haveVersion = false, listFull = false;
+		uint32_t lastDrawLine = 0, count = 0;
 
-		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
-		ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
 		memset(&stats, 0, sizeof(stats));
 		uiPrvFlipperRecordInit(&rec);
 
+		if (overflowP)
+			*overflowP = false;
 		*lineTooLongP = false;
 		*malformedP = false;
+		*cancelledP = false;
 		*lineNoP = 0;
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out;
@@ -2951,15 +2972,49 @@ bool uiSaveSavestate(void)
 			char *trimmed = uiPrvTrim(line);
 			char *value;
 
+			if (!(stats.lineNo & 0x0f))
+				badgeLedsTick();
+			if ((stats.lineNo - lastDrawLine) >= 32) {
+				uiPrvIrDrawButtonListProgress(cnv, fileName, stats.lineNo, count);
+				lastDrawLine = stats.lineNo;
+			}
+			if (uiGetKeys() & KEY_BIT_B) {
+				stats.cancelled = true;
+				break;
+			}
+
 			if (!*trimmed)
 				continue;
 			if (*trimmed == '#') {
-				if (!uiPrvIrButtonListRecord(&ctx, &rec))
+				if (!uiPrvIrButtonListRecord(buttons, &count, &rec)) {
+					if (overflowP)
+						*overflowP = true;
+					listFull = true;
 					break;
+				}
 				uiPrvFlipperRecordInit(&rec);
 				continue;
 			}
-			if (uiPrvIrFieldValue(trimmed, "Filetype") || uiPrvIrFieldValue(trimmed, "Version") || uiPrvIrFieldValue(trimmed, "duty_cycle"))
+			value = uiPrvIrFieldValue(trimmed, "Filetype");
+			if (value) {
+				if (!uiPrvIrFileIsFlipper(trimmed))
+					stats.malformed++;
+				else
+					haveHeader = true;
+				continue;
+			}
+			value = uiPrvIrFieldValue(trimmed, "Version");
+			if (value) {
+				const char *str = value;
+				uint32_t version;
+
+				if (!uiPrvParseU32(&str, &version) || version != 1)
+					stats.malformed++;
+				else
+					haveVersion = true;
+				continue;
+			}
+			if (uiPrvIrFieldValue(trimmed, "duty_cycle"))
 				continue;
 			if ((value = uiPrvIrFieldValue(trimmed, "name"))) {
 				uiPrvCopyStr(rec.name, sizeof(rec.name), value);
@@ -2999,19 +3054,24 @@ bool uiSaveSavestate(void)
 			else
 				stats.malformed++;
 		}
-		(void)uiPrvIrButtonListRecord(&ctx, &rec);
+		if (!stats.cancelled && !listFull) {
+			if (!uiPrvIrButtonListRecord(buttons, &count, &rec)) {
+				if (overflowP)
+					*overflowP = true;
+			}
+		}
+		if (!haveHeader || !haveVersion)
+			stats.malformed++;
 
 	out:
 		*lineTooLongP = stats.lineTooLong;
 		*malformedP = stats.malformed != 0;
+		*cancelledP = stats.cancelled;
 		*lineNoP = stats.lineNo;
-		*headP = ctx.head;
-		if (overflowP)
-			*overflowP = ctx.overflow;
-		return ctx.count;
+		return count;
 	}
 
-	static struct MusicOption *uiPrvChooseFlatOption(struct Canvas *cnv, struct MusicOption *head, uint32_t numItems, const char *title)
+	static const char *uiPrvChooseIrButton(struct Canvas *cnv, char buttons[][IR_NAME_BUF_SZ], uint32_t numItems, const char *title)
 	{
 		uint32_t topItem = 0, selectedItem = 0, prevTopItem, prevSelOnscreenItem;
 		uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1, pathTop, listTop, itemsOnscreen, itemLeft;
@@ -3030,7 +3090,6 @@ bool uiSaveSavestate(void)
 		prevSelOnscreenItem = selectedItem - topItem + 1;
 
 		while (1) {
-			struct MusicOption *draw = head;
 			uint32_t i, selectedOnscreenItem = selectedItem - topItem;
 
 			if (prevTopItem != topItem) {
@@ -3039,11 +3098,9 @@ bool uiSaveSavestate(void)
 				uiPrvReset(cnv, false);
 				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, title);
 				scrollWidth = numItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numItems, topItem, itemsOnscreen) : 0;
-				for (i = 0; i < topItem && draw; i++)
-					draw = draw->next;
 				cnv->foreColor = 12;
-				for (i = 0; i < itemsOnscreen && draw; i++, draw = draw->next)
-					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+				for (i = 0; i < itemsOnscreen && topItem + i < numItems; i++)
+					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, buttons[topItem + i]);
 				prevSelOnscreenItem = selectedOnscreenItem + 1;
 			}
 			prevTopItem = topItem;
@@ -3059,7 +3116,7 @@ bool uiSaveSavestate(void)
 
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
-					return uiPrvFileOptionAt(head, 0, selectedItem);
+					return buttons[selectedItem];
 
 				case KEY_BIT_B:
 					return NULL;
@@ -3097,11 +3154,11 @@ bool uiSaveSavestate(void)
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
 		struct FatFileLocator locator;
-		struct MusicOption *buttons = NULL, *button;
+		const char *button;
 		char fileName[FATFS_NAME_BUF_LEN], buttonName[IR_NAME_BUF_SZ];
 		char *line = (char*)mbcPrvGetWramBuf();
 		struct IrBlastStats stats;
-		bool ret = false, overflow = false, lineTooLong = false, malformed = false, isFlipper = false, irStarted = false;
+		bool ret = false, overflow = false, lineTooLong = false, malformed = false, cancelled = false, isFlipper = false, irStarted = false;
 		uint32_t numButtons, listLineNo = 0;
 
 		memset(&stats, 0, sizeof(stats));
@@ -3118,14 +3175,12 @@ bool uiSaveSavestate(void)
 			goto out_unmount;
 		}
 
-		uiPrvReset(cnv, false);
-		cnv->font = FontLarge;
-		uiPuts(cnv, uiPrvGlyphHeight(cnv) + 1, 10, "IR Remote", -1);
-		cnv->font = FontMedium;
-		uiPuts(cnv, 3 * (uiPrvGlyphHeight(cnv) + 1), 10, "Reading buttons...", -1);
+		uiPrvIrDrawButtonListProgress(cnv, fileName, 0, 0);
 
 		stats.phase = "listing buttons";
-		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong, &malformed, &listLineNo);
+		numButtons = uiPrvIrListButtons(cnv, fil, line, fileName, mIrRemoteButtons, &overflow, &lineTooLong, &malformed, &cancelled, &listLineNo);
+		if (cancelled)
+			goto out_close;
 		if (lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 			goto out_close;
@@ -3144,10 +3199,10 @@ bool uiSaveSavestate(void)
 			goto out_close;
 		}
 
-		button = uiPrvChooseFlatOption(cnv, buttons, numButtons, fileName);
+		button = uiPrvChooseIrButton(cnv, mIrRemoteButtons, numButtons, fileName);
 		if (!button)
 			goto out_close;
-		uiPrvCopyStr(buttonName, sizeof(buttonName), button->name);
+		uiPrvCopyStr(buttonName, sizeof(buttonName), button);
 
 		if (!fatfsFileSeek(fil, 0))
 			goto out_close;
@@ -3180,7 +3235,7 @@ bool uiSaveSavestate(void)
 			(void)sprintf(msg, "Malformed IR while %s near line %u", stats.phase ? stats.phase : "reading", (unsigned)stats.lineNo);
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
-		else if (stats.cancelled) {
+		else if (cancelled || stats.cancelled) {
 			uiAlert(cnv, "IR remote cancelled", DialogTypeOk);
 		}
 		else if (ret) {
@@ -3840,23 +3895,157 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".txt");
 	}
 
+	#define BADUSB_MAX_SCRIPTS		64
+	#define BADUSB_NAME_BUF_SZ		64
+
+	struct BadUsbScriptOption {
+		struct FatFileLocator locator;
+		char name[BADUSB_NAME_BUF_SZ];
+	};
+
+	static struct BadUsbScriptOption mBadUsbScripts[BADUSB_MAX_SCRIPTS];
+
+	static uint32_t uiPrvBadUsbListScripts(struct FatfsVol *vol, bool *overflowP)
+	{
+		struct FatfsDir *dir;
+		char fname[FATFS_NAME_BUF_LEN];
+		uint32_t count = 0;
+
+		*overflowP = false;
+		dir = fatfsDirOpen(vol, "/BADUSB");
+		if (!dir)
+			return 0;
+
+		while (1) {
+			struct FatFileLocator locator;
+			uint32_t fileSz;
+			uint8_t attrs;
+
+			if (!fatfsDirRead(dir, fname, &fileSz, &attrs, &locator))
+				break;
+			if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
+				continue;
+			if (!uiPrvBadUsbFileName(fname))
+				continue;
+			if (count >= BADUSB_MAX_SCRIPTS) {
+				*overflowP = true;
+				break;
+			}
+			mBadUsbScripts[count].locator = locator;
+			uiPrvCopyStr(mBadUsbScripts[count].name, sizeof(mBadUsbScripts[count].name), fname);
+			count++;
+		}
+
+		fatfsDirClose(dir);
+		return count;
+	}
+
+	static const struct BadUsbScriptOption *uiPrvChooseBadUsbScript(struct Canvas *cnv, const struct BadUsbScriptOption *scripts, uint32_t numItems)
+	{
+		uint32_t topItem = 0, selectedItem = 0, prevTopItem, prevSelOnscreenItem;
+		uint_fast8_t itemHeight = uiPrvGlyphHeight(cnv) + 1, pathTop, listTop, itemsOnscreen, itemLeft;
+		struct FontGlyphInfo gi;
+
+		if (!numItems)
+			return NULL;
+
+		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
+		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
+		listTop = pathTop + itemHeight;
+		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (itemsOnscreen > numItems)
+			itemsOnscreen = numItems;
+		prevTopItem = topItem + 1;
+		prevSelOnscreenItem = selectedItem - topItem + 1;
+
+		while (1) {
+			uint32_t i, selectedOnscreenItem = selectedItem - topItem;
+
+			if (prevTopItem != topItem) {
+				uint_fast8_t scrollWidth;
+
+				uiPrvReset(cnv, false);
+				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, "/BADUSB");
+				scrollWidth = numItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numItems, topItem, itemsOnscreen) : 0;
+				cnv->foreColor = 12;
+				for (i = 0; i < itemsOnscreen && topItem + i < numItems; i++)
+					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, scripts[topItem + i].name);
+				prevSelOnscreenItem = selectedOnscreenItem + 1;
+			}
+			prevTopItem = topItem;
+			if (prevSelOnscreenItem != selectedOnscreenItem) {
+				if (prevSelOnscreenItem < itemsOnscreen) {
+					cnv->foreColor = 0;
+					uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
+				}
+				cnv->foreColor = 15;
+				uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+			}
+			prevSelOnscreenItem = selectedOnscreenItem;
+
+			switch (uiPrvRecvKeypress()) {
+				case KEY_BIT_A:
+					return scripts + selectedItem;
+
+				case KEY_BIT_B:
+					return NULL;
+
+				case KEY_BIT_DOWN:
+					if (selectedItem + 1 < numItems) {
+						selectedItem++;
+						if (selectedItem >= topItem + itemsOnscreen) {
+							topItem += itemsOnscreen;
+							if (topItem + itemsOnscreen > numItems)
+								topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
+						}
+					}
+					break;
+
+				case KEY_BIT_UP:
+					if (selectedItem) {
+						selectedItem--;
+						if (selectedItem < topItem) {
+							if (topItem > itemsOnscreen)
+								topItem -= itemsOnscreen;
+							else
+								topItem = 0;
+							if (selectedItem < topItem)
+								topItem = selectedItem;
+						}
+					}
+					break;
+			}
+		}
+	}
+
 	static bool uiPrvBadUsbTool(struct Canvas *cnv)
 	{
 		struct FatfsVol *vol;
 		struct FatfsFil *fil = NULL;
-		struct FatFileLocator locator;
+		const struct BadUsbScriptOption *script;
 		struct BadUsbUiData data;
 		enum BadUsbResult ret;
 		char name[FATFS_NAME_BUF_LEN], shortName[64], msg[96];
-		bool ok = false;
+		bool ok = false, overflow = false;
+		uint32_t numScripts;
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
-		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No .txt scripts found in /BADUSB", &locator, name, sizeof(name)))
-			goto out_unmount;
 
-		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
+		numScripts = uiPrvBadUsbListScripts(vol, &overflow);
+		if (overflow)
+			uiAlert(cnv, "BadUSB has too many scripts; showing what fits", DialogTypeOk);
+		if (!numScripts) {
+			uiAlert(cnv, "No .txt scripts found in /BADUSB", DialogTypeOk);
+			goto out_unmount;
+		}
+		script = uiPrvChooseBadUsbScript(cnv, mBadUsbScripts, numScripts);
+		if (!script)
+			goto out_unmount;
+		uiPrvCopyStr(name, sizeof(name), script->name);
+
+		fil = fatfsFileOpenWithLocator(vol, &script->locator, OPEN_MODE_READ);
 		if (!fil) {
 			uiAlert(cnv, "Cannot open BadUSB script", DialogTypeOk);
 			goto out_unmount;

@@ -1083,11 +1083,11 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	{
 		struct UiFileListCtx ctx;
 		struct FatfsDir *dir;
-		struct ToolWorkspaceSpan nameMem = toolWorkspaceGet(ToolWorkspaceWram);
+		char fname[FATFS_NAME_BUF_LEN];
 		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		if (!nameMem.ptr || nameMem.size < FATFS_NAME_BUF_LEN || !listMem.ptr || listMem.size < sizeof(struct MusicOption)) {
+		if (!listMem.ptr || listMem.size < sizeof(struct MusicOption)) {
 			*headP = NULL;
 			if (overflowP)
 				*overflowP = false;
@@ -1096,7 +1096,7 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
 		ctx.spaceAvail = listMem.size;
 		ctx.filterF = filterF;
-		ctx.fname = (char*)nameMem.ptr;
+		ctx.fname = fname;
 
 		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
 		if (dir) {
@@ -1167,7 +1167,7 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		bool overflow = false, haveDirLoc = false;
 		struct FontGlyphInfo gi;
 
-		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || toolWorkspaceGet(ToolWorkspaceWram).size < FATFS_NAME_BUF_LEN || toolWorkspaceGet(ToolWorkspaceCartRamLower).size < sizeof(struct MusicOption)) {
+		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || toolWorkspaceGet(ToolWorkspaceCartRamLower).size < sizeof(struct MusicOption)) {
 			uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
 			return false;
 		}

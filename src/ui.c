@@ -1175,6 +1175,10 @@ reload_dir:
 		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
 		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (!itemsOnscreen) {
+			uiAlert(cnv, "Display area too small for file browser", DialogTypeOk);
+			return false;
+		}
 		if (itemsOnscreen > numItems + (depth ? 1 : 0))
 			itemsOnscreen = numItems + (depth ? 1 : 0);
 		prevTopItem = topItem + 1;
@@ -3010,6 +3014,10 @@ bool uiSaveSavestate(void)
 		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
 		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (!itemsOnscreen) {
+			uiAlert(cnv, "Display area too small for chooser", DialogTypeOk);
+			return NULL;
+		}
 		if (itemsOnscreen > numItems)
 			itemsOnscreen = numItems;
 		prevTopItem = topItem + 1;
@@ -3045,7 +3053,7 @@ bool uiSaveSavestate(void)
 
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
-					return uiPrvFileOptionAt(head, 0, selectedItem);
+					return uiPrvMusicOptionAt(head, 0, selectedItem);
 
 				case KEY_BIT_B:
 					return NULL;
@@ -3585,6 +3593,10 @@ reload_dir:
 		pathTop = uiPrvContentTop(cnv);
 		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
+		if (!itemsOnscreen) {
+			uiAlert(cnv, "Display area too small for music browser", DialogTypeOk);
+			goto out_unmount;
+		}
 		if (itemsOnscreen > numItems + (depth ? 1 : 0))
 			itemsOnscreen = numItems + (depth ? 1 : 0);
 		prevTopItem = topItem + 1;

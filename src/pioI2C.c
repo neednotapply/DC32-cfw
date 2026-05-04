@@ -473,3 +473,4 @@ bool i2cOneByteRegWrite(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t val)
 	return i2cSimpleWrite(sevenBitAddr, bytes, sizeof(bytes));
 }
 
+

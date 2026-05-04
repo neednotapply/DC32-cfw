@@ -48,6 +48,17 @@ static void *mTransactOverCbkD;
 
 
 
+
+static void i2cPrvDetachTransactCallback(void)
+{
+	uint32_t oldIrqSta;
+
+	asm volatile("mrs %0, primask\n cpsid i": "=r"(oldIrqSta));
+	mTransactOverCbkF = NULL;
+	mTransactOverCbkD = NULL;
+	asm volatile("msr primask, %0"::"r"(oldIrqSta));
+}
+
 static void i2cClockingInit(void)
 {
 	uint32_t fBase = TICKS_PER_SECOND / 26000, fClk = 400, fDiv = (fBase + fClk - 1) / fClk, fClkEff = fBase / fDiv;
@@ -404,8 +415,10 @@ bool i2cSimpleWrite(uint_fast8_t sevenBitAddr, const uint8_t *vals, uint32_t num
 		return false;
 
 	for (uint32_t i = 0; !results[0]; i++) {
-		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER)
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
 			return false;
+		}
 		asm volatile("":::"memory");		//data changed
 	}
 	
@@ -431,8 +444,10 @@ bool i2cSimpleRead(uint_fast8_t sevenBitAddr, uint8_t *vals, uint32_t numBytes)
 		return false;
 
 	for (uint32_t i = 0; !results[0]; i++) {
-		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER)
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
 			return false;
+		}
 		asm volatile("":::"memory");		//data changed
 	}
 	
@@ -458,8 +473,10 @@ bool i2cRegRead(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t *vals, uint32_t 
 		return false;
 
 	for (uint32_t i = 0; !results[0]; i++) {
-		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER)
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
 			return false;
+		}
 		asm volatile("":::"memory");		//data changed
 	}
 	

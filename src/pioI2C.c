@@ -445,7 +445,7 @@ bool i2cRegRead(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t *vals, uint32_t 
 		.rxAcks = NULL,
 		.rxLen = numBytes,
 	};
-	bool results[2] = {false};	//{done, success}
+	volatile bool results[2] = {false};	//{done, success}
 	
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
@@ -462,6 +462,5 @@ bool i2cOneByteRegWrite(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t val)
 
 	return i2cSimpleWrite(sevenBitAddr, bytes, sizeof(bytes));
 }
-
 
 

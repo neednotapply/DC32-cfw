@@ -2432,10 +2432,16 @@ bool uiSaveSavestate(void)
                                         return false;
                                 }
 
-                                if (mark)
+                                if (mark) {
                                         irRemoteMarkUsec(carrier, duration);
-                                else
+                                }
+                                else {
                                         irRemoteSpaceUsec(duration);
+                                        if (uiGetKeys() & KEY_BIT_B) {
+                                                *cancelledP = true;
+                                                return false;
+                                        }
+                                }
 
                                 numDurations++;
                                 mark = !mark;
@@ -2934,8 +2940,8 @@ bool uiSaveSavestate(void)
                 bool isFlipper = false;
 
                 memset(&ctx, 0, sizeof(ctx));
-                ctx.nextAvail = (struct MusicOption*)((uint8_t*)CART_RAM_ADDR_IN_RAM + IR_LINE_BUF_SZ);
-                ctx.spaceAvail = QSPI_RAM_SIZE_MAX - IR_LINE_BUF_SZ;
+                ctx.nextAvail = (struct MusicOption*)CART_RAM_ADDR_IN_RAM;
+                ctx.spaceAvail = QSPI_RAM_SIZE_MAX / 2;
                 memset(&stats, 0, sizeof(stats));
                 uiPrvFlipperRecordInit(&rec);
 
@@ -2946,57 +2952,63 @@ bool uiSaveSavestate(void)
                         goto out;
 
                 memset(&stats, 0, sizeof(stats));
-                while (uiPrvIrReadLineStat(fil, line, &stats)) {
-                        char *trimmed = uiPrvTrim(line);
-                        char *value;
+                {
+                        char listLine[256];
+                        bool listTruncated;
+                        while (uiPrvReadLine(fil, listLine, sizeof(listLine), &listTruncated)) {
+                                char *trimmed = uiPrvTrim(listLine);
+                                char *value;
 
-                        if (!*trimmed)
-                                continue;
-                        if (*trimmed == '#') {
-                                if (!uiPrvIrButtonListRecord(&ctx, &rec))
-                                        break;
-                                uiPrvFlipperRecordInit(&rec);
-                                continue;
-                        }
-                        if (uiPrvIrFieldValue(trimmed, "Filetype") || uiPrvIrFieldValue(trimmed, "Version") || uiPrvIrFieldValue(trimmed, "duty_cycle"))
-                                continue;
-                        if ((value = uiPrvIrFieldValue(trimmed, "name"))) {
-                                uiPrvCopyStr(rec.name, sizeof(rec.name), value);
-                                rec.hasName = true;
-                        }
-                        else if ((value = uiPrvIrFieldValue(trimmed, "type"))) {
-                                if (uiPrvEqNoCase(value, "raw"))
-                                        rec.type = FlipperIrTypeRaw;
-                                else if (uiPrvEqNoCase(value, "parsed"))
-                                        rec.type = FlipperIrTypeParsed;
+                                stats.lineNo++;
+
+                                if (!*trimmed)
+                                        continue;
+                                if (*trimmed == '#') {
+                                        if (!uiPrvIrButtonListRecord(&ctx, &rec))
+                                                break;
+                                        uiPrvFlipperRecordInit(&rec);
+                                        continue;
+                                }
+                                if (uiPrvIrFieldValue(trimmed, "Filetype") || uiPrvIrFieldValue(trimmed, "Version") || uiPrvIrFieldValue(trimmed, "duty_cycle"))
+                                        continue;
+                                if ((value = uiPrvIrFieldValue(trimmed, "name"))) {
+                                        uiPrvCopyStr(rec.name, sizeof(rec.name), value);
+                                        rec.hasName = true;
+                                }
+                                else if ((value = uiPrvIrFieldValue(trimmed, "type"))) {
+                                        if (uiPrvEqNoCase(value, "raw"))
+                                                rec.type = FlipperIrTypeRaw;
+                                        else if (uiPrvEqNoCase(value, "parsed"))
+                                                rec.type = FlipperIrTypeParsed;
+                                        else
+                                                stats.malformed++;
+                                }
+                                else if ((value = uiPrvIrFieldValue(trimmed, "protocol"))) {
+                                        uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), value);
+                                }
+                                else if ((value = uiPrvIrFieldValue(trimmed, "address"))) {
+                                        rec.hasAddress = uiPrvParseFlipperU32Bytes(value, &rec.address);
+                                        if (!rec.hasAddress)
+                                                stats.malformed++;
+                                }
+                                else if ((value = uiPrvIrFieldValue(trimmed, "command"))) {
+                                        rec.hasCommand = uiPrvParseFlipperU32Bytes(value, &rec.command);
+                                        if (!rec.hasCommand)
+                                                stats.malformed++;
+                                }
+                                else if ((value = uiPrvIrFieldValue(trimmed, "frequency"))) {
+                                        const char *str = value;
+
+                                        rec.hasFrequency = uiPrvParseU32(&str, &rec.frequency) && !*str;
+                                        if (!rec.hasFrequency)
+                                                stats.malformed++;
+                                }
+                                else if (uiPrvIrFieldValue(trimmed, "data")) {
+                                        rec.hasData = true;
+                                }
                                 else
                                         stats.malformed++;
                         }
-                        else if ((value = uiPrvIrFieldValue(trimmed, "protocol"))) {
-                                uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), value);
-                        }
-                        else if ((value = uiPrvIrFieldValue(trimmed, "address"))) {
-                                rec.hasAddress = uiPrvParseFlipperU32Bytes(value, &rec.address);
-                                if (!rec.hasAddress)
-                                        stats.malformed++;
-                        }
-                        else if ((value = uiPrvIrFieldValue(trimmed, "command"))) {
-                                rec.hasCommand = uiPrvParseFlipperU32Bytes(value, &rec.command);
-                                if (!rec.hasCommand)
-                                        stats.malformed++;
-                        }
-                        else if ((value = uiPrvIrFieldValue(trimmed, "frequency"))) {
-                                const char *str = value;
-
-                                rec.hasFrequency = uiPrvParseU32(&str, &rec.frequency) && !*str;
-                                if (!rec.hasFrequency)
-                                        stats.malformed++;
-                        }
-                        else if (uiPrvIrFieldValue(trimmed, "data")) {
-                                rec.hasData = true;
-                        }
-                        else
-                                stats.malformed++;
                 }
                 (void)uiPrvIrButtonListRecord(&ctx, &rec);
 
@@ -3380,7 +3392,6 @@ bool uiSaveSavestate(void)
         static void uiPrvMusicSaveSettings(struct MusicUiData *data)
         {
                 audioPwmSetVolume(data->settings->musicVolume);
-                settingsSet(data->settings);
                 data->forceDraw = true;
         }
 
@@ -3767,6 +3778,7 @@ reload_dir:
                 }
 
         out_unmount:
+                settingsSet(&settings);
                 (void)uiPrvCardPreUnmount();
                 fatfsUnmount(vol);
         }
@@ -4159,11 +4171,7 @@ void uiPreGame(void)
         uiPrvReset(cnv, false);
         uiPrvFwUpdate(cnv, true);
 
-
-        if (!uiPrvHaveValidRom(NULL, NULL, NULL))
-                (void)uiPrvCommon();
-        else
-                uiPrvLoadSavestate();
+        (void)uiPrvCommon();
 }
 
 void uiInGame(void)

@@ -61,6 +61,8 @@ ifeq ($(HQX), 1)
 	OBJS += hq3x.o
 endif
 
+ui.o badUsb.o: CCFLAGS += -Os
+
 $(APP): $(OBJS)
 	$(LD) -o $(APP) $(OBJS) $(LDFLAGS)
 	$(EXTRA)

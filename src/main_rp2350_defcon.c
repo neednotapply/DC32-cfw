@@ -15,6 +15,7 @@
 #include "printf.h"
 #include "sleep.h"
 #include "audioPwm.h"
+#include "bootGuard.h"
 #include "2350.h"
 #include "qspi.h"
 #include "mbc.h"
@@ -654,7 +655,9 @@ static void gb(void)
 				uiPrvUpscalerInit();
 			memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);	
 			gbSetFrameDithering(1);
+			bootGuardEnter(BootGuardModeGame);
 			gbRun(shouldActAsCgb());
+			bootGuardExit(BootGuardModeGame);
 			//if we are aborted by gbAbort, we'll return here and restart our run
 		}
 	}
@@ -1696,6 +1699,7 @@ void __attribute__((noreturn, used)) micromain(void)
 	
 	asm volatile("cpsie i");
 	timebaseInit();
+	bootGuardInit();
 	
 	pr("ready, time is 0x%016llx\n", getTime());
 	pr("ready, time is 0x%016llx\n", getTime());
@@ -1817,6 +1821,7 @@ void __attribute__((used)) report_hard_fault(uint32_t* regs, uint32_t ret_lr, ui
 	
 	
 	pr("\n\n");
+	bootGuardEnter(BootGuardModeHardFault);
 	
 	while(1);
 }
@@ -1837,5 +1842,4 @@ void __attribute__((naked, used)) HardFault_Handler(void)
 			"bl   report_hard_fault		\n\t"
 			:::"memory");
 }
-
 

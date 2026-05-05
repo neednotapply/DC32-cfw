@@ -14,6 +14,7 @@
 #include "mbc.h"
 #include "irRemote.h"
 #include "badUsb.h"
+#include "bootGuard.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
@@ -75,6 +76,7 @@ enum CurOp {
 
 static enum CurOp mCurCardOp = CurentlyIdle;
 static uint32_t mCurCardSec;
+static bool mRecoveredBootMenu;
 
 
 enum DialogType {
@@ -2802,6 +2804,7 @@ bool uiSaveSavestate(void)
                 vol = uiPrvMountCard(cnv, false);
                 if (!vol)
                         return false;
+                bootGuardEnter(BootGuardModeIr);
 
                 if (!uiPrvIrOpenPowerFile(vol, &path, &fil)) {
                         uiAlert(cnv, "Cannot find /IR/tv.ir or /IR/POWER.IR on the SD card", DialogTypeOk);
@@ -2847,6 +2850,7 @@ bool uiSaveSavestate(void)
                         uiAlert(cnv, "No power codes found in the IR file", DialogTypeOk);
                 }
 
+                bootGuardExit(BootGuardModeIr);
                 return ret;
         }
 
@@ -2863,6 +2867,7 @@ bool uiSaveSavestate(void)
                 vol = uiPrvMountCard(cnv, false);
                 if (!vol)
                         return false;
+                bootGuardEnter(BootGuardModeIr);
 
                 fil = fatfsFileOpen(vol, IR_FLIPPER_TV_FILE, OPEN_MODE_READ);
                 if (!fil) {
@@ -2909,6 +2914,7 @@ bool uiSaveSavestate(void)
                         uiAlert(cnv, "No mute codes found in /IR/tv.ir", DialogTypeOk);
                 }
 
+                bootGuardExit(BootGuardModeIr);
                 return ret;
         }
 
@@ -2953,13 +2959,16 @@ bool uiSaveSavestate(void)
 
                 memset(&stats, 0, sizeof(stats));
                 {
-                        char listLine[256];
                         bool listTruncated;
-                        while (uiPrvReadLine(fil, listLine, sizeof(listLine), &listTruncated)) {
-                                char *trimmed = uiPrvTrim(listLine);
+                        while (uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &listTruncated)) {
+                                char *trimmed = uiPrvTrim(line);
                                 char *value;
 
                                 stats.lineNo++;
+                                if (listTruncated) {
+                                        stats.lineTooLong = true;
+                                        break;
+                                }
 
                                 if (!*trimmed)
                                         continue;
@@ -3119,6 +3128,7 @@ bool uiSaveSavestate(void)
                 vol = uiPrvMountCard(cnv, false);
                 if (!vol)
                         return false;
+                bootGuardEnter(BootGuardModeIr);
 
                 if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName)))
                         goto out_unmount;
@@ -3201,6 +3211,7 @@ bool uiSaveSavestate(void)
                         uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
                 }
 
+                bootGuardExit(BootGuardModeIr);
                 return ret;
         }
 
@@ -3213,6 +3224,7 @@ bool uiSaveSavestate(void)
                         uint_fast8_t powerOption = 0, muteOption = 1, remoteOption = 2, backOption = 3;
                         uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
+                        bootGuardEnter(BootGuardModeTool);
                         uiPrvReset(cnv, false);
                         itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
@@ -3222,8 +3234,10 @@ bool uiSaveSavestate(void)
                         uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
                         selOption = uiPrvMenu(cnv, 0, 4, &button);
-                        if (button == KEY_BIT_B || selOption == backOption)
+                        if (button == KEY_BIT_B || selOption == backOption) {
+                                bootGuardExit(BootGuardModeTool);
                                 return borrowedGameRam;
+                        }
                         if (selOption == powerOption) {
                                 (void)uiPrvIrPowerBlast(cnv);
                                 borrowedGameRam = true;
@@ -3602,6 +3616,7 @@ bool uiSaveSavestate(void)
                 vol = uiPrvMountCard(cnv, false);
                 if (!vol)
                         return;
+                bootGuardEnter(BootGuardModeMusic);
 
                 strcpy(path, "/MUSIC");
 reload_dir:
@@ -3781,6 +3796,7 @@ reload_dir:
                 settingsSet(&settings);
                 (void)uiPrvCardPreUnmount();
                 fatfsUnmount(vol);
+                bootGuardExit(BootGuardModeMusic);
         }
 
         struct BadUsbUiData {
@@ -3864,6 +3880,7 @@ reload_dir:
                 vol = uiPrvMountCard(cnv, false);
                 if (!vol)
                         return false;
+                bootGuardEnter(BootGuardModeBadUsb);
                 if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No .txt scripts found in /BADUSB", &locator, name, sizeof(name)))
                         goto out_unmount;
 
@@ -3902,6 +3919,7 @@ reload_dir:
         out_unmount:
                 (void)uiPrvCardPreUnmount();
                 fatfsUnmount(vol);
+                bootGuardExit(BootGuardModeBadUsb);
                 return ok;
         }
 
@@ -3914,6 +3932,7 @@ reload_dir:
                         uint_fast8_t irOption = 0, musicOption = 1, badUsbOption = 2, backOption = 3;
                         uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
+                        bootGuardEnter(BootGuardModeTool);
                         uiPrvReset(cnv, false);
                         itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
@@ -3923,8 +3942,10 @@ reload_dir:
                         uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
                         selOption = uiPrvMenu(cnv, 0, 4, &button);
-                        if (button == KEY_BIT_B || selOption == backOption)
+                        if (button == KEY_BIT_B || selOption == backOption) {
+                                bootGuardExit(BootGuardModeTool);
                                 return borrowedGameRam;
+                        }
                         if (selOption == irOption) {
                                 if (uiPrvIrTools(cnv))
                                         borrowedGameRam = true;
@@ -4076,7 +4097,8 @@ static bool __attribute__((noinline)) uiPrvCommon(void)         //return true if
                 uiPrvReset(cnv, false);
                 itemHeight = uiPrvGlyphHeight(cnv) + 1;
                 
-                validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
+                validRom = !mRecoveredBootMenu && uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
+                mRecoveredBootMenu = false;
                 
                 if (validRom) {
                         
@@ -4167,9 +4189,16 @@ static bool __attribute__((noinline)) uiPrvCommon(void)         //return true if
 void uiPreGame(void)
 {
         struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
+        enum BootGuardMode recoveredMode;
 
         uiPrvReset(cnv, false);
         uiPrvFwUpdate(cnv, true);
+        recoveredMode = bootGuardRecoveredMode();
+        if (recoveredMode) {
+                mRecoveredBootMenu = true;
+                uiAlert(cnv, "Recovered from an abnormal reset. Staying in the menu.", DialogTypeOk);
+                bootGuardClear();
+        }
 
         (void)uiPrvCommon();
 }
@@ -4187,6 +4216,7 @@ void uiInGame(void)
 
         if (uiPrvCommon())
                 gbAbort();
+        bootGuardEnter(BootGuardModeGame);
         
         //we might have changed FPS - reset the counter
         dispPrvFrameCtrReset();

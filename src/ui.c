@@ -744,7 +744,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 			
 			if (!sdCardInit() || !sdGetNumSecs()) {
 				if (!quiet)
-					uiAlert(cnv, "Cannot initialize SD card", DialogTypeOk);
+					uiAlert(cnv, "Insert an SD card, or check that the card can be read", DialogTypeOk);
 				return NULL;	
 			}
 		}
@@ -1056,60 +1056,6 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		return true;
 	}
 
-	static void uiPrvFileListReadDir(struct UiFileListCtx *ctx, struct FatfsDir *dir)
-	{
-		uint32_t fileSz, seen = 0;
-		uint8_t attrs;
-		struct FatFileLocator locator;
-
-		while (fatfsDirRead(dir, ctx->fname, &fileSz, &attrs, &locator)) {
-			if (!(++seen & 0x0f))
-				badgeLedsTick();
-			if (attrs & FATFS_ATTR_VOL_LBL)
-				continue;
-			if (attrs & FATFS_ATTR_DIR) {
-				if (!uiPrvIsDotDir(ctx->fname))
-					if (!uiPrvFileListAppend(ctx, ctx->fname, fileSz, true, &locator))
-						break;
-				continue;
-			}
-			if (!ctx->filterF || ctx->filterF(ctx->fname))
-				if (!uiPrvFileListAppend(ctx, ctx->fname, fileSz, false, &locator))
-					break;
-		}
-	}
-
-	static uint32_t uiPrvListFiles(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, UiFileNameFilterF filterF, struct MusicOption **headP, bool *overflowP)
-	{
-		struct UiFileListCtx ctx;
-		struct FatfsDir *dir;
-		char fname[FATFS_NAME_BUF_LEN];
-		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
-
-		memset(&ctx, 0, sizeof(ctx));
-		if (!listMem.ptr || listMem.size < sizeof(struct MusicOption)) {
-			*headP = NULL;
-			if (overflowP)
-				*overflowP = false;
-			return 0;
-		}
-		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
-		ctx.spaceAvail = listMem.size;
-		ctx.filterF = filterF;
-		ctx.fname = fname;
-
-		dir = dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
-		if (dir) {
-			uiPrvFileListReadDir(&ctx, dir);
-			fatfsDirClose(dir);
-		}
-
-		*headP = ctx.head;
-		if (overflowP)
-			*overflowP = ctx.overflow;
-		return ctx.count;
-	}
-
 	static struct MusicOption *uiPrvFileOptionAt(struct MusicOption *head, uint32_t depth, uint32_t selectedItem)
 	{
 		uint32_t skip;
@@ -1155,32 +1101,102 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		uiPuts(cnv, r, c, close, sizeof(close) - 1);
 	}
 
+	struct UiPickEntry {
+		struct FatFileLocator locator;
+		uint32_t size;
+		bool isDir;
+		char name[FATFS_NAME_BUF_LEN];
+	};
+
+	static struct FatfsDir *uiPrvPickDirOpen(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc)
+	{
+		return dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
+	}
+
+	static bool uiPrvPickEntryRead(struct FatfsDir *dir, UiFileNameFilterF filterF, struct UiPickEntry *entry)
+	{
+		uint8_t attrs;
+
+		while (fatfsDirRead(dir, entry->name, &entry->size, &attrs, &entry->locator)) {
+			if (attrs & FATFS_ATTR_VOL_LBL)
+				continue;
+			if (attrs & FATFS_ATTR_DIR) {
+				if (!uiPrvIsDotDir(entry->name)) {
+					entry->isDir = true;
+					return true;
+				}
+				continue;
+			}
+			if (!filterF || filterF(entry->name)) {
+				entry->isDir = false;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static uint32_t uiPrvPickEntryCount(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, UiFileNameFilterF filterF, struct UiPickEntry *entry)
+	{
+		struct FatfsDir *dir = uiPrvPickDirOpen(vol, rootPath, dirLoc);
+		uint32_t count = 0;
+
+		if (!dir)
+			return 0;
+
+		while (uiPrvPickEntryRead(dir, filterF, entry)) {
+			if (!(++count & 0x0f))
+				badgeLedsTick();
+		}
+		fatfsDirClose(dir);
+		return count;
+	}
+
+	static bool uiPrvPickEntryAt(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, UiFileNameFilterF filterF, uint32_t wantedIdx, struct UiPickEntry *entry)
+	{
+		struct FatfsDir *dir = uiPrvPickDirOpen(vol, rootPath, dirLoc);
+		bool found = false;
+
+		if (!dir)
+			return false;
+
+		while (uiPrvPickEntryRead(dir, filterF, entry)) {
+			if (!wantedIdx--) {
+				found = true;
+				break;
+			}
+			if (!(wantedIdx & 0x0f))
+				badgeLedsTick();
+		}
+		fatfsDirClose(dir);
+		return found;
+	}
+
 	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
 	{
-		struct MusicOption *head = NULL, *cur = NULL;
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
 		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
 		struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
+		struct ToolWorkspaceSpan entryMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 		char *path = (char*)pathMem.ptr;
+		struct UiPickEntry *entry = (struct UiPickEntry*)entryMem.ptr;
 		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
 		uint_fast8_t itemHeight, itemsOnscreen, pathTop, listTop, itemLeft;
-		bool overflow = false, haveDirLoc = false;
+		bool haveDirLoc = false;
 		struct FontGlyphInfo gi;
 
-		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || toolWorkspaceGet(ToolWorkspaceCartRamLower).size < sizeof(struct MusicOption)) {
+		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || !entry || entryMem.size < sizeof(*entry)) {
 			uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
 			return false;
 		}
 
 		uiPrvCopyStr(path, UI_PICK_FILE_PATH_BUF_SZ, rootPath);
 reload_dir:
-		numItems = uiPrvListFiles(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, &head, &overflow);
+		numItems = uiPrvPickEntryCount(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, entry);
 		if (!numItems && !depth) {
 			uiAlert(cnv, emptyMsg, DialogTypeOk);
 			return false;
 		}
-		if (overflow)
-			uiAlert(cnv, "Folder has too many entries; showing what fits", DialogTypeOk);
 
 		topItem = 0;
 		selectedItem = 0;
@@ -1199,10 +1215,8 @@ reload_dir:
 		prevSelOnscreenItem = selectedItem - topItem + 1;
 
 		while (1) {
-			struct MusicOption *draw = head;
 			uint32_t i, totalItems = numItems + (depth ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
 
-			cur = uiPrvFileOptionAt(head, depth, selectedItem);
 			if (prevTopItem != topItem) {
 				uint_fast8_t firstRow = 0, scrollWidth;
 				uint32_t skipItems;
@@ -1220,15 +1234,21 @@ reload_dir:
 				else
 					skipItems = topItem - (depth ? 1 : 0);
 
-				for (i = 0; i < skipItems && draw; i++)
-					draw = draw->next;
-
 				cnv->foreColor = 12;
-				for (i = firstRow; i < itemsOnscreen && draw; i++, draw = draw->next) {
-					if (draw->isDir)
-						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
-					else
-						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+				{
+					struct FatfsDir *drawDir = uiPrvPickDirOpen(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL);
+
+					if (drawDir) {
+						for (i = 0; i < skipItems && uiPrvPickEntryRead(drawDir, filterF, entry); i++) {
+						}
+						for (i = firstRow; i < itemsOnscreen && uiPrvPickEntryRead(drawDir, filterF, entry); i++) {
+							if (entry->isDir)
+								uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, entry->name);
+							else
+								uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, entry->name);
+						}
+						fatfsDirClose(drawDir);
+					}
 				}
 
 				prevSelOnscreenItem = selectedOnscreenItem + 1;
@@ -1252,17 +1272,19 @@ reload_dir:
 						path[pathLenStack[depth]] = 0;
 						goto reload_dir;
 					}
-					if (cur && cur->isDir) {
-						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
+					if (!uiPrvPickEntryAt(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, selectedItem - (depth ? 1 : 0), entry))
+						break;
+					if (entry->isDir) {
+						uint32_t pathLen = strlen(path), nameLen = strlen(entry->name);
 
 						if (depth < UI_BROWSER_MAX_DEPTH) {
 							pathLenStack[depth] = pathLen;
-							dirStack[depth++] = cur->locator;
+							dirStack[depth++] = entry->locator;
 							haveDirLoc = true;
 							if (pathLen + 1 < UI_PICK_FILE_PATH_BUF_SZ) {
 								path[pathLen++] = '/';
 								if (pathLen + nameLen < UI_PICK_FILE_PATH_BUF_SZ)
-									memcpy(path + pathLen, cur->name, nameLen + 1);
+									memcpy(path + pathLen, entry->name, nameLen + 1);
 								else if (pathLen + 4 <= UI_PICK_FILE_PATH_BUF_SZ)
 									strcpy(path + pathLen, "...");
 								else
@@ -1273,10 +1295,10 @@ reload_dir:
 						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
 						prevTopItem = topItem + 1;
 					}
-					else if (cur) {
-						*locatorOut = cur->locator;
+					else {
+						*locatorOut = entry->locator;
 						if (nameOut && nameOutSz)
-							uiPrvCopyStr(nameOut, nameOutSz, cur->name);
+							uiPrvCopyStr(nameOut, nameOutSz, entry->name);
 						if (parentPathOut && parentPathOutSz)
 							uiPrvCopyStr(parentPathOut, parentPathOutSz, path);
 						return true;
@@ -4095,7 +4117,6 @@ struct UiFileRef {
 	bool isDir;
 	const char *name;
 	const char *parentPath;
-	const char *fullPath;
 };
 
 static bool uiPrvPathIsFolderNoCase(const char *path, const char *folder)
@@ -4182,16 +4203,24 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	struct FatfsVol *vol;
 	enum UiToolId nextTool = UiToolBrowser;
 	struct FatFileLocator locator;
-	char name[UI_PICK_FILE_NAME_BUF_SZ], parentPath[UI_PICK_FILE_PATH_BUF_SZ], fullPath[UI_PICK_FILE_PATH_BUF_SZ];
-	char browserPath[UI_PICK_FILE_PATH_BUF_SZ] = "/";
+	char name[UI_PICK_FILE_NAME_BUF_SZ];
+	struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
+	char *browserPath = (char*)pathMem.ptr;
 	struct UiFileRef ref;
+
+	if (!browserPath || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ) {
+		uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
+		return uiPrvToolSwitcher(cnv, UiToolBrowser);
+	}
+	browserPath[0] = '/';
+	browserPath[1] = 0;
 
 	vol = uiPrvMountCard(cnv, false);
 	if (!vol)
 		return uiPrvToolSwitcher(cnv, UiToolBrowser);
 
 	while (1) {
-		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", &locator, name, sizeof(name), parentPath, sizeof(parentPath))) {
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
 			nextTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
 			if (nextTool != UiToolBrowser)
 				break;
@@ -4200,25 +4229,12 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 		memset(&ref, 0, sizeof(ref));
 		ref.locator = locator;
 		ref.name = name;
-		ref.parentPath = parentPath;
-		ref.fullPath = fullPath;
-		{
-			uint32_t parentLen = strlen(parentPath), nameLen = strlen(name), pos = parentLen;
-
-			if (parentLen + nameLen + 2 > sizeof(fullPath)) {
-				uiAlert(cnv, "File path is too long", DialogTypeOk);
-				continue;
-			}
-			memcpy(fullPath, parentPath, parentLen);
-			if (pos && fullPath[pos - 1] != '/')
-				fullPath[pos++] = '/';
-			memcpy(fullPath + pos, name, nameLen + 1);
-		}
+		ref.parentPath = browserPath;
 		nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref, runGameF, userData);
-		if (parentPath[0])
-			uiPrvCopyStr(browserPath, sizeof(browserPath), parentPath);
 		if (nextTool != UiToolBrowser)
 			break;
+		browserPath[0] = '/';
+		browserPath[1] = 0;
 	}
 
 	(void)uiPrvCardPreUnmount();

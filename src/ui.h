@@ -26,13 +26,21 @@ struct Canvas {
         #include "dispDefcon.h"
 #endif
 
-void uiPreGame(void);
-void uiInGame(void);
+enum UiGameAction {
+	UiGameActionResume,
+	UiGameActionRestart,
+	UiGameActionSwitchTool,
+};
+
+typedef void (*UiRunGameF)(void *userData);
+
+void uiRunToolShell(UiRunGameF runGameF, void *userData);
+enum UiGameAction uiGameMenu(void);
 
 
 bool uiSaveSavestate(void);
 
-//lower level, externally provided. just like gb key getting, except no call to uiInGame()
+//lower level, externally provided. debounced Game Boy key state for menu flows
 uint_fast8_t uiGetKeys(void);
 
 //single-sample non-debounced read — safe to call inside tight timing loops

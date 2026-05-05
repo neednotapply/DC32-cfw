@@ -1155,7 +1155,7 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		uiPuts(cnv, r, c, close, sizeof(close) - 1);
 	}
 
-	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
+	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
 	{
 		struct MusicOption *head = NULL, *cur = NULL;
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
@@ -1277,6 +1277,8 @@ reload_dir:
 						*locatorOut = cur->locator;
 						if (nameOut && nameOutSz)
 							uiPrvCopyStr(nameOut, nameOutSz, cur->name);
+						if (parentPathOut && parentPathOutSz)
+							uiPrvCopyStr(parentPathOut, parentPathOutSz, path);
 						return true;
 					}
 					break;
@@ -1843,7 +1845,7 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 	
-	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, struct RomOption *rom)
+	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
 		char internalName[ROM_NAME_LEN + 1];
@@ -1863,7 +1865,7 @@ bool uiSaveSavestate(void)
 		dir = fatfsDirOpen(vol, "/ROM");
 		if (!dir)
 			goto out;
-		filR = fatfsFileOpenAt(dir, rom->name, OPEN_MODE_READ);
+		filR = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
 		fatfsDirClose(dir);
 		dir = NULL;
 		if (!filR) {
@@ -1873,7 +1875,7 @@ bool uiSaveSavestate(void)
 		
 		dir = fatfsDirOpen(vol, "/SAVE");
 		if (dir) {
-			filS = fatfsFileOpenAt(dir, rom->name, OPEN_MODE_READ);
+			filS = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
 			fatfsDirClose(dir);
 		}
 		
@@ -1917,7 +1919,7 @@ bool uiSaveSavestate(void)
 		cnv->foreColor = 10;
 		uiPuts(cnv, row, col, "ROM:", -1);
 		cnv->foreColor = 15;
-		row += 1 + uiPrvGlyphHeight(cnv) * uiPrvDrawWrappedString(cnv, rom->name, row, col + 55);
+		row += 1 + uiPrvGlyphHeight(cnv) * uiPrvDrawWrappedString(cnv, romName, row, col + 55);
 		
 		cnv->foreColor = 10;
 		uiPuts(cnv, row, col, "SIZE:", -1);
@@ -1957,7 +1959,7 @@ bool uiSaveSavestate(void)
 			}
 			
 			//ROM is loaded
-			(void)uiPrvSetGamePath(rom->name);
+			(void)uiPrvSetGamePath(romName);
 			
 			if (filS)
 				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE") && ret;
@@ -1975,7 +1977,7 @@ bool uiSaveSavestate(void)
 	out:
 		return ret;
 	}
-	
+
 	static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz)
 	{
 		struct FatfsDir *saveDir = fatfsDirOpen(vol, "/SAVE");
@@ -2073,7 +2075,7 @@ bool uiSaveSavestate(void)
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
 					for (cur = head, i = 0; i < curGlobalIdx; i++, cur = cur->next);
-					if (uiPrvConfirmRomSelection(cnv, vol, cur)) {
+					if (uiPrvConfirmRomSelection(cnv, vol, cur->name)) {
 						ret = true;
 						goto out;
 					}
@@ -2307,13 +2309,42 @@ bool uiSaveSavestate(void)
 		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
 	}
 
-	static void uiPrvIrSendBitPulseDistance(uint32_t carrier, bool bit, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace)
+	static bool uiPrvIrCancelRequested(void)
 	{
-		irRemoteMarkUsec(carrier, mark);
-		irRemoteSpaceUsec(bit ? oneSpace : zeroSpace);
+		return !!(uiGetKeysRaw() & KEY_BIT_B);
 	}
 
-	static void uiPrvIrSendBitsPulseDistance(uint32_t carrier, uint32_t data, uint_fast8_t nBits, bool msbFirst, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace)
+	static bool uiPrvIrSpaceCancellable(uint32_t usec, bool *cancelledP)
+	{
+		while (usec) {
+			uint32_t now = usec > 5000 ? 5000 : usec;
+
+			if (uiPrvIrCancelRequested()) {
+				*cancelledP = true;
+				return false;
+			}
+			irRemoteSpaceUsec(now);
+			usec -= now;
+		}
+		return true;
+	}
+
+	static bool uiPrvIrMarkCancellable(uint32_t carrier, uint32_t usec, bool *cancelledP)
+	{
+		if (uiPrvIrCancelRequested()) {
+			*cancelledP = true;
+			return false;
+		}
+		irRemoteMarkUsec(carrier, usec);
+		return true;
+	}
+
+	static bool uiPrvIrSendBitPulseDistance(uint32_t carrier, bool bit, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, bool *cancelledP)
+	{
+		return uiPrvIrMarkCancellable(carrier, mark, cancelledP) && uiPrvIrSpaceCancellable(bit ? oneSpace : zeroSpace, cancelledP);
+	}
+
+	static bool uiPrvIrSendBitsPulseDistance(uint32_t carrier, uint32_t data, uint_fast8_t nBits, bool msbFirst, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, bool *cancelledP)
 	{
 		uint_fast8_t i;
 
@@ -2325,144 +2356,158 @@ bool uiSaveSavestate(void)
 			else
 				bit = !!(data & (1ul << i));
 
-			uiPrvIrSendBitPulseDistance(carrier, bit, mark, zeroSpace, oneSpace);
+			if (!uiPrvIrSendBitPulseDistance(carrier, bit, mark, zeroSpace, oneSpace, cancelledP))
+				return false;
 		}
+		return true;
 	}
 
-	static void uiPrvIrSendBitMarkEncoded(uint32_t carrier, bool bit, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space)
+	static bool uiPrvIrSendBitMarkEncoded(uint32_t carrier, bool bit, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, bool *cancelledP)
 	{
-		irRemoteMarkUsec(carrier, bit ? oneMark : zeroMark);
-		irRemoteSpaceUsec(space);
+		(void)bitMark;
+		return uiPrvIrMarkCancellable(carrier, bit ? oneMark : zeroMark, cancelledP) && uiPrvIrSpaceCancellable(space, cancelledP);
 	}
 
-	static void uiPrvIrSendBitsMarkEncoded(uint32_t carrier, uint32_t data, uint_fast8_t nBits, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space)
+	static bool uiPrvIrSendBitsMarkEncoded(uint32_t carrier, uint32_t data, uint_fast8_t nBits, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, bool *cancelledP)
 	{
 		uint_fast8_t i;
 
 		for (i = 0; i < nBits; i++)
-			uiPrvIrSendBitMarkEncoded(carrier, !!(data & (1ul << i)), bitMark, zeroMark, oneMark, space);
+			if (!uiPrvIrSendBitMarkEncoded(carrier, !!(data & (1ul << i)), bitMark, zeroMark, oneMark, space, cancelledP))
+				return false;
+		return true;
 	}
 
-	static void uiPrvIrManchesterHalf(uint32_t carrier, bool mark, uint32_t usec)
+	static bool uiPrvIrManchesterHalf(uint32_t carrier, bool mark, uint32_t usec, bool *cancelledP)
 	{
 		if (mark)
-			irRemoteMarkUsec(carrier, usec);
-		else
-			irRemoteSpaceUsec(usec);
+			return uiPrvIrMarkCancellable(carrier, usec, cancelledP);
+		return uiPrvIrSpaceCancellable(usec, cancelledP);
 	}
 
-	static void uiPrvIrSendManchesterBit(uint32_t carrier, bool bit, uint32_t halfUsec)
+	static bool uiPrvIrSendManchesterBit(uint32_t carrier, bool bit, uint32_t halfUsec, bool *cancelledP)
 	{
-		uiPrvIrManchesterHalf(carrier, !bit, halfUsec);
-		uiPrvIrManchesterHalf(carrier, bit, halfUsec);
+		return uiPrvIrManchesterHalf(carrier, !bit, halfUsec, cancelledP) && uiPrvIrManchesterHalf(carrier, bit, halfUsec, cancelledP);
 	}
 
-	static void uiPrvIrSendNecLike(uint32_t carrier, uint32_t address, uint32_t command, uint_fast8_t addrBits, uint_fast8_t cmdBits, bool useComplements)
+	static bool uiPrvIrSendNecLike(uint32_t carrier, uint32_t address, uint32_t command, uint_fast8_t addrBits, uint_fast8_t cmdBits, bool useComplements, bool *cancelledP)
 	{
-		irRemoteMarkUsec(carrier, 9000);
-		irRemoteSpaceUsec(4500);
-		uiPrvIrSendBitsPulseDistance(carrier, address, addrBits, false, 560, 560, 1690);
+		if (!uiPrvIrMarkCancellable(carrier, 9000, cancelledP) || !uiPrvIrSpaceCancellable(4500, cancelledP))
+			return false;
+		if (!uiPrvIrSendBitsPulseDistance(carrier, address, addrBits, false, 560, 560, 1690, cancelledP))
+			return false;
 		if (useComplements)
-			uiPrvIrSendBitsPulseDistance(carrier, ~address, addrBits, false, 560, 560, 1690);
-		uiPrvIrSendBitsPulseDistance(carrier, command, cmdBits, false, 560, 560, 1690);
+			if (!uiPrvIrSendBitsPulseDistance(carrier, ~address, addrBits, false, 560, 560, 1690, cancelledP))
+				return false;
+		if (!uiPrvIrSendBitsPulseDistance(carrier, command, cmdBits, false, 560, 560, 1690, cancelledP))
+			return false;
 		if (useComplements)
-			uiPrvIrSendBitsPulseDistance(carrier, ~command, cmdBits, false, 560, 560, 1690);
-		irRemoteMarkUsec(carrier, 560);
+			if (!uiPrvIrSendBitsPulseDistance(carrier, ~command, cmdBits, false, 560, 560, 1690, cancelledP))
+				return false;
+		return uiPrvIrMarkCancellable(carrier, 560, cancelledP);
 	}
 
-	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command)
+	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command, bool *cancelledP)
 	{
 		uint32_t carrier = IR_DEFAULT_CARRIER;
 
 		if (!strcmp(protocol, "NEC")) {
-			uiPrvIrSendNecLike(carrier, address, command, 8, 8, true);
+			if (!uiPrvIrSendNecLike(carrier, address, command, 8, 8, true, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "NECext")) {
-			uiPrvIrSendNecLike(carrier, address, command, 16, 16, false);
+			if (!uiPrvIrSendNecLike(carrier, address, command, 16, 16, false, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "NEC42")) {
-			uiPrvIrSendNecLike(carrier, address, command, 13, 8, true);
+			if (!uiPrvIrSendNecLike(carrier, address, command, 13, 8, true, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "NEC42ext")) {
-			uiPrvIrSendNecLike(carrier, address, command, 26, 16, false);
+			if (!uiPrvIrSendNecLike(carrier, address, command, 26, 16, false, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "Samsung32")) {
-			irRemoteMarkUsec(carrier, 4500);
-			irRemoteSpaceUsec(4500);
-			uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690);
-			uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 560, 560, 1690);
-			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690);
-			irRemoteMarkUsec(carrier, 560);
+			if (!uiPrvIrMarkCancellable(carrier, 4500, cancelledP) || !uiPrvIrSpaceCancellable(4500, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 560, 560, 1690, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690, cancelledP) ||
+				!uiPrvIrMarkCancellable(carrier, 560, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "SIRC") || !strcmp(protocol, "SIRC15") || !strcmp(protocol, "SIRC20")) {
 			uint_fast8_t addrBits = !strcmp(protocol, "SIRC") ? 5 : (!strcmp(protocol, "SIRC15") ? 8 : 13), rep;
 
 			carrier = 40000;
 			for (rep = 0; rep < 3; rep++) {
-				irRemoteMarkUsec(carrier, 2400);
-				irRemoteSpaceUsec(600);
-				uiPrvIrSendBitsMarkEncoded(carrier, command, 7, 600, 600, 1200, 600);
-				uiPrvIrSendBitsMarkEncoded(carrier, address, addrBits, 600, 600, 1200, 600);
-				irRemoteSpaceUsec(25000);
+				if (!uiPrvIrMarkCancellable(carrier, 2400, cancelledP) || !uiPrvIrSpaceCancellable(600, cancelledP) ||
+					!uiPrvIrSendBitsMarkEncoded(carrier, command, 7, 600, 600, 1200, 600, cancelledP) ||
+					!uiPrvIrSendBitsMarkEncoded(carrier, address, addrBits, 600, 600, 1200, 600, cancelledP) ||
+					!uiPrvIrSpaceCancellable(25000, cancelledP))
+					return false;
 			}
 		}
 		else if (!strcmp(protocol, "RCA")) {
-			irRemoteMarkUsec(carrier, 4000);
-			irRemoteSpaceUsec(4000);
-			uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000);
-			uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 500, 1000, 2000);
-			uiPrvIrSendBitsPulseDistance(carrier, ~address, 4, false, 500, 1000, 2000);
-			uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000);
-			irRemoteMarkUsec(carrier, 500);
+			if (!uiPrvIrMarkCancellable(carrier, 4000, cancelledP) || !uiPrvIrSpaceCancellable(4000, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 500, 1000, 2000, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~address, 4, false, 500, 1000, 2000, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000, cancelledP) ||
+				!uiPrvIrMarkCancellable(carrier, 500, cancelledP))
+				return false;
 		}
 		else if (!strcmp(protocol, "RC5") || !strcmp(protocol, "RC5X")) {
 			uint32_t cmd = command & (!strcmp(protocol, "RC5X") ? 0x7f : 0x3f);
 			uint_fast8_t i;
 
 			carrier = 36000;
-			uiPrvIrSendManchesterBit(carrier, true, 889);
-			uiPrvIrSendManchesterBit(carrier, !(cmd & 0x40), 889);
-			uiPrvIrSendManchesterBit(carrier, false, 889);
+			if (!uiPrvIrSendManchesterBit(carrier, true, 889, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, !(cmd & 0x40), 889, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 889, cancelledP))
+				return false;
 			for (i = 0; i < 5; i++)
-				uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (4 - i))), 889);
+				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (4 - i))), 889, cancelledP))
+					return false;
 			for (i = 0; i < 6; i++)
-				uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889);
+				if (!uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889, cancelledP))
+					return false;
 		}
 		else if (!strcmp(protocol, "RC6")) {
 			uint_fast8_t i;
 
 			carrier = 36000;
-			irRemoteMarkUsec(carrier, 2666);
-			irRemoteSpaceUsec(889);
-			uiPrvIrSendManchesterBit(carrier, true, 444);
-			uiPrvIrSendManchesterBit(carrier, false, 444);
-			uiPrvIrSendManchesterBit(carrier, false, 444);
-			uiPrvIrSendManchesterBit(carrier, false, 444);
-			uiPrvIrSendManchesterBit(carrier, false, 889);
+			if (!uiPrvIrMarkCancellable(carrier, 2666, cancelledP) || !uiPrvIrSpaceCancellable(889, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, true, 444, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 889, cancelledP))
+				return false;
 			for (i = 0; i < 8; i++)
-				uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (7 - i))), 444);
+				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (7 - i))), 444, cancelledP))
+					return false;
 			for (i = 0; i < 8; i++)
-				uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444);
+				if (!uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444, cancelledP))
+					return false;
 		}
 		else if (!strcmp(protocol, "Kaseikyo")) {
 			uint32_t vendor = address & 0xffff;
 			uint32_t payload = ((address >> 16) & 0x03ff) | ((command & 0x03ff) << 10);
 			uint8_t parity = (vendor ^ (vendor >> 8)) & 0x0f;
 
-			irRemoteMarkUsec(carrier, 3360);
-			irRemoteSpaceUsec(1650);
-			uiPrvIrSendBitsPulseDistance(carrier, vendor, 16, false, 432, 432, 1296);
-			uiPrvIrSendBitsPulseDistance(carrier, parity, 4, false, 432, 432, 1296);
-			uiPrvIrSendBitsPulseDistance(carrier, payload, 20, false, 432, 432, 1296);
-			uiPrvIrSendBitsPulseDistance(carrier, (payload ^ (payload >> 8) ^ (payload >> 16)) & 0xff, 8, false, 432, 432, 1296);
-			irRemoteMarkUsec(carrier, 432);
+			if (!uiPrvIrMarkCancellable(carrier, 3360, cancelledP) || !uiPrvIrSpaceCancellable(1650, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, vendor, 16, false, 432, 432, 1296, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, parity, 4, false, 432, 432, 1296, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, payload, 20, false, 432, 432, 1296, cancelledP) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, (payload ^ (payload >> 8) ^ (payload >> 16)) & 0xff, 8, false, 432, 432, 1296, cancelledP) ||
+				!uiPrvIrMarkCancellable(carrier, 432, cancelledP))
+				return false;
 		}
 		else {
 			return false;
 		}
 
-		irRemoteSpaceUsec(45000);
-		return true;
+		return uiPrvIrSpaceCancellable(45000, cancelledP);
 	}
 
 	static bool uiPrvIrSendCodeLine(struct Canvas *cnv, const char *title, const char *codeStr, const char *name, uint32_t carrier, uint32_t repeat, uint32_t codeIdx, bool *malformedP, bool *cancelledP)
@@ -2504,10 +2549,12 @@ bool uiSaveSavestate(void)
 					return false;
 				}
 
-				if (mark)
-					irRemoteMarkUsec(carrier, duration);
-				else
-					irRemoteSpaceUsec(duration);
+				if (mark) {
+					if (!uiPrvIrMarkCancellable(carrier, duration, cancelledP))
+						return false;
+				}
+				else if (!uiPrvIrSpaceCancellable(duration, cancelledP))
+					return false;
 
 				numDurations++;
 				mark = !mark;
@@ -2527,12 +2574,8 @@ bool uiSaveSavestate(void)
 				return false;
 			}
 
-			irRemoteSpaceUsec(45000);
-
-			if (uiGetKeys() & KEY_BIT_B) {
-				*cancelledP = true;
+			if (!uiPrvIrSpaceCancellable(45000, cancelledP))
 				return false;
-			}
 		}
 
 		return true;
@@ -2596,13 +2639,10 @@ bool uiSaveSavestate(void)
 		}
 
 		uiPrvIrDrawProgress(cnv, title, rec->name, stats->sent + 1, 1, 1);
-		if (uiPrvIrSendParsed(rec->protocol, rec->address, rec->command))
+		if (uiPrvIrSendParsed(rec->protocol, rec->address, rec->command, &stats->cancelled))
 			stats->sent++;
 		else
 			stats->skipped++;
-
-		if (uiGetKeys() & KEY_BIT_B)
-			stats->cancelled = true;
 	}
 
 	static bool uiPrvIrReadLineStat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats)
@@ -3116,13 +3156,11 @@ bool uiSaveSavestate(void)
 		}
 	}
 
-	static bool uiPrvIrRemote(struct Canvas *cnv)
+	static bool uiPrvIrRemoteLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *fileName)
 	{
-		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
-		struct FatFileLocator locator;
 		struct MusicOption *buttons = NULL, *button;
-		char fileName[UI_PICK_FILE_NAME_BUF_SZ], buttonName[IR_NAME_BUF_SZ];
+		char buttonName[IR_NAME_BUF_SZ];
 		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 		char *line = (char*)lineMem.ptr;
 		struct IrBlastStats stats;
@@ -3135,17 +3173,10 @@ bool uiSaveSavestate(void)
 			return false;
 		}
 
-		vol = uiPrvMountCard(cnv, false);
-		if (!vol)
-			return false;
-
-		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName)))
-			goto out_unmount;
-
-		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
+		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
 			uiAlert(cnv, "Cannot open IR remote file", DialogTypeOk);
-			goto out_unmount;
+			goto out_report;
 		}
 
 		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
@@ -3181,10 +3212,7 @@ bool uiSaveSavestate(void)
 			irRemoteEnd();
 		if (fil)
 			fatfsFileClose(fil);
-	out_unmount:
-		(void)uiPrvCardPreUnmount();
-		fatfsUnmount(vol);
-
+	out_report:
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
@@ -3201,38 +3229,46 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
+	static bool uiPrvIrRemote(struct Canvas *cnv)
+	{
+		struct FatfsVol *vol = NULL;
+		struct FatFileLocator locator;
+		char fileName[UI_PICK_FILE_NAME_BUF_SZ];
+		bool ret = false;
+
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+
+		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName), NULL, 0))
+			goto out_unmount;
+
+		ret = uiPrvIrRemoteLocator(cnv, vol, &locator, fileName);
+
+	out_unmount:
+		(void)uiPrvCardPreUnmount();
+		fatfsUnmount(vol);
+		return ret;
+	}
+
 	static bool uiPrvIrTools(struct Canvas *cnv)
 	{
-		bool borrowedGameRam = false;
-
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t powerOption = 0, muteOption = 1, remoteOption = 2, backOption = 3;
+			uint_fast8_t remoteOption = 0, backOption = 1;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Power Spam", -1);
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Mute Spam", -1);
 			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Remote", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
-			selOption = uiPrvMenu(cnv, 0, 4, &button);
+			selOption = uiPrvMenu(cnv, 0, 2, &button);
 			if (button == KEY_BIT_B || selOption == backOption)
-				return borrowedGameRam;
-			if (selOption == powerOption) {
-				(void)uiPrvIrPowerBlast(cnv);
-				borrowedGameRam = true;
-			}
-			else if (selOption == muteOption) {
-				(void)uiPrvIrMuteBlast(cnv);
-				borrowedGameRam = true;
-			}
-			else if (selOption == remoteOption) {
+				return false;
+			if (selOption == remoteOption)
 				(void)uiPrvIrRemote(cnv);
-				borrowedGameRam = true;
-			}
 		}
 	}
 
@@ -3555,14 +3591,14 @@ bool uiSaveSavestate(void)
 		return MusicPlayerControlNone;
 	}
 
-	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings)
+	static enum MusicPlayerResult uiPrvPlayMusicLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, struct Settings *settings)
 	{
 		struct FatfsFil *fil;
-		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = song->name, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
+		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = name, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
 		enum MusicPlayerResult ret;
 
 		audioPwmSetVolume(settings->musicVolume);
-		fil = fatfsFileOpenWithLocator(vol, &song->locator, OPEN_MODE_READ);
+		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
 			uiAlert(cnv, "Cannot open music file", DialogTypeOk);
 			return MusicPlayerResultStopped;
@@ -3582,6 +3618,11 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "Bad RTTTL file", DialogTypeOk);
 
 		return ret;
+	}
+
+	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings)
+	{
+		return uiPrvPlayMusicLocator(cnv, vol, &song->locator, song->name, settings);
 	}
 
 	static void uiPrvMusicPlayer(struct Canvas *cnv)
@@ -3802,7 +3843,7 @@ reload_dir:
 		struct Canvas *cnv = data->cnv;
 		uint64_t now = getTime();
 
-		if (uiGetKeys() & KEY_BIT_B)
+		if (uiGetKeysRaw() & KEY_BIT_B)
 			return false;
 
 		if (data->forceDraw || status->lineNo != data->lastLine || now - data->lastDraw > TICKS_PER_SECOND / 4) {
@@ -3856,26 +3897,18 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".txt") || uiPrvStrEndsWithNoCase(fname, ".badusb");
 	}
 
-	static bool uiPrvBadUsbTool(struct Canvas *cnv)
+	static bool uiPrvRunBadUsbLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name)
 	{
-		struct FatfsVol *vol;
 		struct FatfsFil *fil = NULL;
-		struct FatFileLocator locator;
 		struct BadUsbUiData data;
 		enum BadUsbResult ret;
-		char name[UI_PICK_FILE_NAME_BUF_SZ], msg[96];
+		char msg[96];
 		bool ok = false;
 
-		vol = uiPrvMountCard(cnv, false);
-		if (!vol)
-			return false;
-		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", &locator, name, sizeof(name)))
-			goto out_unmount;
-
-		fil = fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
+		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
 			uiAlert(cnv, "Cannot open BadUSB script", DialogTypeOk);
-			goto out_unmount;
+			return false;
 		}
 
 		(void)sprintf(msg, "Run BadUSB script?\n%s", name);
@@ -3903,48 +3936,28 @@ reload_dir:
 	out_close:
 		if (fil)
 			fatfsFileClose(fil);
+		return ok;
+	}
+
+	static bool uiPrvBadUsbTool(struct Canvas *cnv)
+	{
+		struct FatfsVol *vol;
+		struct FatFileLocator locator;
+		char name[UI_PICK_FILE_NAME_BUF_SZ];
+		bool ok = false;
+
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", &locator, name, sizeof(name), NULL, 0))
+			goto out_unmount;
+
+		ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name);
+
 	out_unmount:
 		(void)uiPrvCardPreUnmount();
 		fatfsUnmount(vol);
 		return ok;
-	}
-
-	static bool uiPrvTools(struct Canvas *cnv)
-	{
-		bool borrowedGameRam = false;
-
-		toolWorkspaceBegin();
-		while (1) {
-			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t irOption = 0, musicOption = 1, badUsbOption = 2, backOption = 3;
-			uint8_t button = KEY_BIT_A | KEY_BIT_B;
-
-			uiPrvReset(cnv, false);
-			itemHeight = uiPrvGlyphHeight(cnv) + 1;
-
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "IR", -1);
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Music", -1);
-			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "BadUSB", -1);
-			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
-
-			selOption = uiPrvMenu(cnv, 0, 4, &button);
-			if (button == KEY_BIT_B || selOption == backOption) {
-				toolWorkspaceEnd();
-				return borrowedGameRam;
-			}
-			if (selOption == irOption) {
-				if (uiPrvIrTools(cnv))
-					borrowedGameRam = true;
-			}
-			else if (selOption == musicOption) {
-				uiPrvMusicPlayer(cnv);
-				borrowedGameRam = true;
-			}
-			else if (selOption == badUsbOption) {
-				(void)uiPrvBadUsbTool(cnv);
-				borrowedGameRam = true;
-			}
-		}
 	}
 
 	static void uiPrvFwUpdate(struct Canvas *cnv, bool tryZDU)
@@ -4063,141 +4076,302 @@ static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorS
 	return true;
 }
 
-static bool __attribute__((noinline)) uiPrvCommon(void)		//return true if emulator needs to restart
+enum UiToolId {
+	UiToolBrowser,
+	UiToolIr,
+	UiToolBadUsb,
+	UiToolMusic,
+	UiToolGame,
+	UiToolSettings,
+	UiToolFwUpdate,
+	UiToolPowerOff,
+	UiToolNum,
+};
+
+#ifndef NO_SD_CARD
+struct UiFileRef {
+	struct FatFileLocator locator;
+	uint32_t size;
+	bool isDir;
+	const char *name;
+	const char *parentPath;
+	const char *fullPath;
+};
+
+static bool uiPrvPathIsFolderNoCase(const char *path, const char *folder)
 {
-	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	bool ret = false;
-	
+	uint32_t pathLen = strlen(path), folderLen = strlen(folder);
+
+	if (pathLen < folderLen)
+		return false;
+	if (strsCaselesslyCompareUtf(path, folder, folderLen))
+		return false;
+	return !path[folderLen] || path[folderLen] == '/';
+}
+
+static bool uiPrvRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc");
+}
+
+static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool)
+{
+	static const char *names[UiToolNum] = {
+		[UiToolBrowser] = "Browser",
+		[UiToolIr] = "IR",
+		[UiToolBadUsb] = "BadUSB",
+		[UiToolMusic] = "Music",
+		[UiToolGame] = "Game",
+		[UiToolSettings] = "Settings",
+		[UiToolFwUpdate] = "Firmware Update",
+		[UiToolPowerOff] = "Power Off",
+	};
+	uint_fast8_t itemHeight, i, selOption;
+	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 	uiPrvReset(cnv, false);
-	uiPrvFwUpdate(cnv, true);
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+	for (i = 0; i < UiToolNum; i++)
+		uiPuts(cnv, cnv->h - (UiToolNum - i) * itemHeight, 10, names[i], -1);
+
+	selOption = uiPrvMenu(cnv, curTool, UiToolNum, &button);
+	if (button == KEY_BIT_B)
+		return curTool;
+	return (enum UiToolId)selOption;
+}
+
+static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref, UiRunGameF runGameF, void *userData)
+{
+	(void)runGameF;
+	(void)userData;
+
+	if (uiPrvIrRemoteFileName(ref->name)) {
+		(void)uiPrvIrRemoteLocator(cnv, vol, &ref->locator, ref->name);
+		return UiToolBrowser;
+	}
+	if (uiPrvStrEndsWithNoCase(ref->name, ".badusb") ||
+		(uiPrvStrEndsWithNoCase(ref->name, ".txt") && uiPrvPathIsFolderNoCase(ref->parentPath, "/BADUSB"))) {
+		(void)uiPrvRunBadUsbLocator(cnv, vol, &ref->locator, ref->name);
+		return UiToolBrowser;
+	}
+	if (uiPrvStrEndsWithNoCase(ref->name, ".rtttl")) {
+		struct Settings settings;
+
+		settingsGet(&settings);
+		uiPrvMusicSanitizeSettings(&settings);
+		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings);
+		settingsSet(&settings);
+		return UiToolBrowser;
+	}
+	if (uiPrvRomFileName(ref->name)) {
+		if (!uiPrvPathIsFolderNoCase(ref->parentPath, "/ROM")) {
+			uiAlert(cnv, "Game files must be launched from /ROM", DialogTypeOk);
+			return UiToolBrowser;
+		}
+		if (uiPrvConfirmRomSelection(cnv, vol, ref->name))
+			return UiToolGame;
+		return UiToolBrowser;
+	}
+
+	uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
+	return UiToolBrowser;
+}
+
+static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	struct FatfsVol *vol;
+	enum UiToolId nextTool = UiToolBrowser;
+	struct FatFileLocator locator;
+	char name[UI_PICK_FILE_NAME_BUF_SZ], parentPath[UI_PICK_FILE_PATH_BUF_SZ], fullPath[UI_PICK_FILE_PATH_BUF_SZ];
+	char browserPath[UI_PICK_FILE_PATH_BUF_SZ] = "/";
+	struct UiFileRef ref;
+
+	vol = uiPrvMountCard(cnv, false);
+	if (!vol)
+		return uiPrvToolSwitcher(cnv, UiToolBrowser);
 
 	while (1) {
-		
-		int_fast8_t playOption = -1, selectGameOption = -1, aboutOption, settingsOption, fwUpdateOption, toolsOption, powerOffOption, numOptions = 0, selOption, itemHeight;
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", &locator, name, sizeof(name), parentPath, sizeof(parentPath))) {
+			nextTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
+			if (nextTool != UiToolBrowser)
+				break;
+			continue;
+		}
+		memset(&ref, 0, sizeof(ref));
+		ref.locator = locator;
+		ref.name = name;
+		ref.parentPath = parentPath;
+		ref.fullPath = fullPath;
+		{
+			uint32_t parentLen = strlen(parentPath), nameLen = strlen(name), pos = parentLen;
+
+			if (parentLen + nameLen + 2 > sizeof(fullPath)) {
+				uiAlert(cnv, "File path is too long", DialogTypeOk);
+				continue;
+			}
+			memcpy(fullPath, parentPath, parentLen);
+			if (pos && fullPath[pos - 1] != '/')
+				fullPath[pos++] = '/';
+			memcpy(fullPath + pos, name, nameLen + 1);
+		}
+		nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref, runGameF, userData);
+		if (parentPath[0])
+			uiPrvCopyStr(browserPath, sizeof(browserPath), parentPath);
+		if (nextTool != UiToolBrowser)
+			break;
+	}
+
+	(void)uiPrvCardPreUnmount();
+	fatfsUnmount(vol);
+	return nextTool;
+}
+#endif
+
+static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	while (1) {
+		int_fast8_t runOption = -1, selectOption = -1, switchOption, numOptions = 0, selOption;
+		uint_fast8_t itemHeight;
 		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
 		uint32_t ramSz = 0;
-		bool validRom;
-				
+		bool validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
+		uint8_t button = KEY_BIT_A | KEY_BIT_B;
+
 		uiPrvReset(cnv, false);
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
-		
-		validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
-		
-		if (validRom) {
-			
-			uint_fast8_t height;
-			
-		#ifdef NO_SD_CARD
-				height = 4;
-		#else
-				height = 7;
-		#endif
-			
-			static const char colorTypes[][5] = {
-				[RomNoColor] = "DMG ",
-				[RomColorEnhanced] = "",
-				[RomColorRequired] = "CGB ",
-			};
-			
-			uiPrintf(cnv, cnv->h - height * itemHeight, 10, "Play %sgame '%s'?", colorTypes[romColorSupport], name);
-			playOption = numOptions++;
-		}
-		#ifndef NO_SD_CARD
-			selectGameOption = numOptions++;
-			uiPuts(cnv, cnv->h - 6 * itemHeight, 10, validRom ? "Select Another Game" : "Select a Game", -1);
-			fwUpdateOption = numOptions++;
-			uiPuts(cnv, cnv->h - 5 * itemHeight, 10, "Firmware Update", -1);
-			toolsOption = numOptions++;
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Tools", -1);
-		#endif
-		settingsOption = numOptions++;
-		uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Settings", -1);
-		aboutOption = numOptions++;
-		uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "About...", -1);
-		powerOffOption = numOptions++;
-		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Power Off", -1);
 
-		selOption = uiPrvMenu(cnv, 0, numOptions, NULL);
-		if (selOption == playOption) {
-			
-			uiPrvLoadSavestate();
-			uiPrvReset(cnv, false);
-			break;
+		if (validRom) {
+			uiPrintf(cnv, cnv->h - 3 * itemHeight, 10, "Run game '%s'", name);
+			runOption = numOptions++;
 		}
 	#ifndef NO_SD_CARD
-		else if (selOption == selectGameOption) {
-			
-				if (uiPrvSelectRom(cnv, validRom ? ramSz : 0))
-					ret = true;
-		}
-		else if (selOption == fwUpdateOption) {
-			
-			uiPrvReset(cnv, false);
-			uiPrvFwUpdate(cnv, false);
-		}
-		else if (selOption == toolsOption) {
+		selectOption = numOptions++;
+		uiPuts(cnv, cnv->h - (validRom ? 2 : 2) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
+	#endif
+		switchOption = numOptions++;
+		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Switch Tool", -1);
 
-			if (!validRom || uiSaveSavestate()) {
-				if (uiPrvTools(cnv) && validRom)
-					ret = true;
+		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
+		if (button == KEY_BIT_B || selOption == switchOption)
+			return uiPrvToolSwitcher(cnv, UiToolGame);
+		if (selOption == runOption) {
+			toolWorkspaceEnd();
+			uiPrvLoadSavestate();
+			runGameF(userData);
+			if (!uiSaveSavestate())
+				uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
+			toolWorkspaceBegin();
+		}
+	#ifndef NO_SD_CARD
+		else if (selOption == selectOption) {
+			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0)) {
+				toolWorkspaceEnd();
+				uiPrvLoadSavestate();
+				runGameF(userData);
+				if (!uiSaveSavestate())
+					uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
+				toolWorkspaceBegin();
 			}
-			else
-				uiAlert(cnv, "Failed to save state to flash. Tools will not borrow game RAM.", DialogTypeOk);
 		}
 	#endif
-		else if (selOption == aboutOption) {
-			
-			uiAlert(cnv, 
-					"uGB/TWISTED NEMATIC WITH MONULAR BEEPS\n"
-					"HW: Rachel, MP, George, Matt, Louis\n"
-					"SW: dmitryGR\n"
-					"\n"
-					"\xC2\xA9 2024\0""2024"
-				, DialogTypeOk);
-		}
-		else if (selOption == settingsOption) {
-			
-			if (uiPrvSettings(cnv))
-				ret = true;
-		}
-		else if (selOption == powerOffOption) {
-			
-			doSleep();
-		}
 	}
-	
-	return ret;
 }
 
-void uiPreGame(void)
+enum UiGameAction uiGameMenu(void)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-
-	uiPrvReset(cnv, false);
-	uiPrvFwUpdate(cnv, true);
-
-
-	if (!uiPrvHaveValidRom(NULL, NULL, NULL))
-		(void)uiPrvCommon();
-	else
-		uiPrvLoadSavestate();
-}
-
-void uiInGame(void)
-{
-	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	uint32_t romSzExpected, ramSzExpected;
+	uint_fast8_t itemHeight, selOption;
+	uint_fast8_t resumeOption = 0, settingsOption = 1, switchOption = 2, powerOffOption = 3;
+	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 	
 	uiPrvReset(cnv, false);
 
-	//we do not expect issues with analyzing rom here... we were just playing it...
 	if (!uiSaveSavestate())
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 
-	if (uiPrvCommon())
-		gbAbort();
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+	uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Resume Game", -1);
+	uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Settings", -1);
+	uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Switch Tool", -1);
+	uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Power Off", -1);
+
+	selOption = uiPrvMenu(cnv, 0, 4, &button);
+	if (button == KEY_BIT_B || selOption == resumeOption)
+		return UiGameActionResume;
+	if (selOption == settingsOption)
+		return uiPrvSettings(cnv) ? UiGameActionRestart : UiGameActionResume;
+	if (selOption == switchOption)
+		return UiGameActionSwitchTool;
+	if (selOption == powerOffOption)
+		doSleep();
+
+	return UiGameActionResume;
+}
+
+void uiRunToolShell(UiRunGameF runGameF, void *userData)
+{
+	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
+	enum UiToolId activeTool = UiToolBrowser;
+
+	uiPrvReset(cnv, false);
+#ifndef NO_SD_CARD
+	uiPrvFwUpdate(cnv, true);
+#endif
+	toolWorkspaceBegin();
+
+	while (1) {
+		switch (activeTool) {
+			case UiToolBrowser:
+			#ifndef NO_SD_CARD
+				activeTool = uiPrvBrowserTool(cnv, runGameF, userData);
+			#else
+				activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
+			#endif
+				continue;
+
+			case UiToolIr:
+			#ifndef NO_SD_CARD
+				(void)uiPrvIrTools(cnv);
+			#endif
+				break;
+
+			case UiToolBadUsb:
+			#ifndef NO_SD_CARD
+				(void)uiPrvBadUsbTool(cnv);
+			#endif
+				break;
+
+			case UiToolMusic:
+			#ifndef NO_SD_CARD
+				uiPrvMusicPlayer(cnv);
+			#endif
+				break;
+
+			case UiToolGame:
+				activeTool = uiPrvGameTool(cnv, runGameF, userData);
+				continue;
+
+			case UiToolSettings:
+				(void)uiPrvSettings(cnv);
+				break;
+
+			case UiToolFwUpdate:
+			#ifndef NO_SD_CARD
+				uiPrvFwUpdate(cnv, false);
+			#endif
+				break;
+
+			case UiToolPowerOff:
+				doSleep();
+				break;
+
+			default:
+				activeTool = UiToolBrowser;
+				continue;
+		}
+		activeTool = uiPrvToolSwitcher(cnv, activeTool);
+	}
 	
 	//we might have changed FPS - reset the counter
 	dispPrvFrameCtrReset();

@@ -27,6 +27,7 @@ static bool shouldUpscale(void);
 static bool shouldRotateGame(void);
 static bool mUpscaling;
 static bool mRotateGame;
+static bool mGameToolExitRequested;
 
 static uint64_t mRtcTickOffset;         //ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
@@ -177,9 +178,19 @@ uint_fast8_t uiGetKeysRaw(void)
 
 static void exitGame(void)
 {
+        enum UiGameAction action;
+
         if (mUpscaling)
                         uiPrvUpscalerDeinit();
-        uiInGame();
+
+        action = uiGameMenu();
+        if (action == UiGameActionSwitchTool)
+                mGameToolExitRequested = true;
+        if (action != UiGameActionResume) {
+                gbAbort();
+                return;
+        }
+
         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
         mUpscaling = shouldUpscale();
         mRotateGame = shouldRotateGame();
@@ -640,16 +651,23 @@ static void applySavedLeds(void)
         badgeLedsApplySettings(&settings, true);
 }
 
-static void gb(void)
+static void runGameTool(void *userData)
 {
         uint32_t romSzExpected, ramSzExpected;
+
+        (void)userData;
+        mGameToolExitRequested = false;
         
-        while(1) {
+        while(!mGameToolExitRequested) {
                 
-                if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected))
+                if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
                         pr("Failed to init the MBC\n");
-                else if (ramSzExpected > QSPI_RAM_SIZE_MAX)
+                        mGameToolExitRequested = true;
+                }
+                else if (ramSzExpected > QSPI_RAM_SIZE_MAX) {
                         pr("too much ram needed\n");
+                        mGameToolExitRequested = true;
+                }
                 else {
                         
                         dispPrvFrameCtrReset();
@@ -660,7 +678,7 @@ static void gb(void)
                         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);        
                         gbSetFrameDithering(1);
                         gbRun(shouldActAsCgb());
-                        //if we are aborted by gbAbort, we'll return here and restart our run
+                        //if we are aborted by gbAbort, we'll return here and restart or leave the game tool
                 }
         }
 }
@@ -1789,8 +1807,7 @@ void __attribute__((noreturn, used)) micromain(void)
         uiPrvSelfTestsIfNeeded();
 
         pr("UI...\n");
-        uiPreGame();
-        gb();
+        uiRunToolShell(runGameTool, NULL);
 
         while(1);
 }

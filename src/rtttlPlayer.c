@@ -49,6 +49,7 @@ static bool rtttlPrvHandleControl(MusicPlayerControlF controlF, void *userData, 
 		status->paused = true;
 		audioPwmStop();
 		while (1) {
+			uint64_t stepEnd = getTime() + TICKS_PER_SECOND / 100;
 			ctl = controlF ? controlF(userData, status) : MusicPlayerControlNone;
 			if (ctl == MusicPlayerControlPause) {
 				status->paused = false;
@@ -66,6 +67,7 @@ static bool rtttlPrvHandleControl(MusicPlayerControlF controlF, void *userData, 
 				*retP = MusicPlayerResultNext;
 				return true;
 			}
+			while (getTime() < stepEnd);
 		}
 	}
 	if (ctl == MusicPlayerControlStop) {

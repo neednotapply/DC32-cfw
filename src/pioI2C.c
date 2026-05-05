@@ -44,8 +44,20 @@ static void *mTransactOverCbkD;
 
 
 #define VERBOSE									0
+#define I2C_SIMPLE_WAIT_TIMEOUT_ITER				5000000u
 
 
+
+
+static void i2cPrvDetachTransactCallback(void)
+{
+	uint32_t oldIrqSta;
+
+	asm volatile("mrs %0, primask\n cpsid i": "=r"(oldIrqSta));
+	mTransactOverCbkF = NULL;
+	mTransactOverCbkD = NULL;
+	asm volatile("msr primask, %0"::"r"(oldIrqSta));
+}
 
 static void i2cClockingInit(void)
 {
@@ -402,8 +414,13 @@ bool i2cSimpleWrite(uint_fast8_t sevenBitAddr, const uint8_t *vals, uint32_t num
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
+	for (uint32_t i = 0; !results[0]; i++) {
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
+			return false;
+		}
 		asm volatile("":::"memory");		//data changed
+	}
 	
 	return results[1];
 }
@@ -426,8 +443,13 @@ bool i2cSimpleRead(uint_fast8_t sevenBitAddr, uint8_t *vals, uint32_t numBytes)
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
+	for (uint32_t i = 0; !results[0]; i++) {
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
+			return false;
+		}
 		asm volatile("":::"memory");		//data changed
+	}
 	
 	return results[1];
 }
@@ -445,13 +467,18 @@ bool i2cRegRead(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t *vals, uint32_t 
 		.rxAcks = NULL,
 		.rxLen = numBytes,
 	};
-	bool results[2] = {false};	//{done, success}
+	volatile bool results[2] = {false};	//{done, success}
 	
 	if (!i2cTransact(&mWriteReq, i2cSimpleTransOver, (void*)results))
 		return false;
 
-	while (!results[0])
+	for (uint32_t i = 0; !results[0]; i++) {
+		if (i >= I2C_SIMPLE_WAIT_TIMEOUT_ITER) {
+			i2cPrvDetachTransactCallback();
+			return false;
+		}
 		asm volatile("":::"memory");		//data changed
+	}
 	
 	return results[1];
 }
@@ -462,6 +489,5 @@ bool i2cOneByteRegWrite(uint_fast8_t sevenBitAddr, uint8_t reg, uint8_t val)
 
 	return i2cSimpleWrite(sevenBitAddr, bytes, sizeof(bytes));
 }
-
 
 

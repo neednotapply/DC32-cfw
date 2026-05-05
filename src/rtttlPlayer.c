@@ -1,17 +1,11 @@
 #include <string.h>
 #include "audioPwm.h"
+#include "memMap.h"
 #include "rtttlPlayer.h"
 #include "timebase.h"
-#include "toolWorkspace.h"
 
 #define RTTTL_BUF_SZ	4096
-
-static char *rtttlPrvBuf(void)
-{
-	struct ToolWorkspaceSpan span = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
-
-	return (char*)span.ptr;
-}
+#define RTTTL_BUF		((char*)(((uint8_t*)CART_RAM_ADDR_IN_RAM) + QSPI_RAM_SIZE_MAX / 2))
 
 static bool rtttlPrvIsSpace(char c)
 {
@@ -145,7 +139,7 @@ static int_fast8_t rtttlPrvNoteIdx(char note)
 enum MusicPlayerResult rtttlPlayerPlayFile(struct FatfsFil *fil, MusicPlayerControlF controlF, void *userData)
 {
 	struct MusicPlayerStatus status;
-	char *buf = rtttlPrvBuf();
+	char *buf = RTTTL_BUF;
 	const char *p;
 	uint32_t nRead, defaultDur = 4, defaultOct = 6, bpm = 63, wholeNoteMsec;
 

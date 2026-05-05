@@ -199,3 +199,21 @@ __entry:
 
 
 
+
+/* Minimal newlib syscall stubs required by newer toolchains */
+.section .text
+.weak _exit
+.thumb_func
+_exit:
+        b _exit
+
+.weak _kill
+.thumb_func
+_kill:
+        bx lr
+
+.weak _getpid
+.thumb_func
+_getpid:
+        movs r0, #1
+        bx lr

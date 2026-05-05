@@ -2437,7 +2437,7 @@ bool uiSaveSavestate(void)
                                 }
                                 else {
                                         irRemoteSpaceUsec(duration);
-                                        if (uiGetKeys() & KEY_BIT_B) {
+                                        if (uiGetKeysRaw() & KEY_BIT_B) {
                                                 *cancelledP = true;
                                                 return false;
                                         }
@@ -2460,7 +2460,7 @@ bool uiSaveSavestate(void)
 
                         irRemoteSpaceUsec(45000);
 
-                        if (uiGetKeys() & KEY_BIT_B) {
+                        if (uiGetKeysRaw() & KEY_BIT_B) {
                                 *cancelledP = true;
                                 return false;
                         }
@@ -2531,7 +2531,7 @@ bool uiSaveSavestate(void)
                 else
                         stats->skipped++;
 
-                if (uiGetKeys() & KEY_BIT_B)
+                if (uiGetKeysRaw() & KEY_BIT_B)
                         stats->cancelled = true;
         }
 
@@ -3797,7 +3797,7 @@ reload_dir:
                 struct Canvas *cnv = data->cnv;
                 uint64_t now = getTime();
 
-                if (uiGetKeys() & KEY_BIT_B)
+                if (uiGetKeysRaw() & KEY_BIT_B)
                         return false;
 
                 if (data->forceDraw || status->lineNo != data->lastLine || now - data->lastDraw > TICKS_PER_SECOND / 4) {
@@ -4166,11 +4166,7 @@ static bool __attribute__((noinline)) uiPrvCommon(void)         //return true if
 
 void uiPreGame(void)
 {
-        struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-
-        uiPrvReset(cnv, false);
-        uiPrvFwUpdate(cnv, true);
-
+        uiPrvLoadSavestate();
         (void)uiPrvCommon();
 }
 

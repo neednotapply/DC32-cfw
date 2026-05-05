@@ -48,6 +48,19 @@ Produces `src/FIRMWARE.BIN` — copy to SD card root for on-device update.
 3. **CRT** (`src/crt_rp2350.S`): Added minimal `_exit`, `_kill`, `_getpid` newlib syscall stubs required by newer toolchain.
 4. **System dependency**: `gcc-arm-embedded` and `gnumake` installed via Nix.
 
+## Firmware Bug Fixes Applied
+
+### Round 1 (previous session)
+- **IR Remote freeze**: `irRemoteMarkUsec`/`irRemoteSpaceUsec` are busy-waits; IR listing used a 256-byte stack buffer to avoid corrupting CART_RAM.
+- **BadUSB freeze on exit**: `usbHidEnd()` now skips `releaseAll()` when USB is not configured (avoids 0.5s timeout loop per held key on teardown).
+- **IR Spam end-of-list freeze**: B-key check added inside the duration loop of `uiPrvIrSendCodeLine`; IR listing reverted `ctx.nextAvail` to `CART_RAM_ADDR_IN_RAM`.
+- **Architecture change**: `uiPreGame` now always shows the main menu (via `uiPrvCommon`) instead of jumping straight into any loaded game.
+
+### Round 2 (this session)
+- **IR Spam visual freeze / hang** (`src/ui.c`, `src/main_rp2350_defcon.c`, `src/ui.h`): The previous B-key check inside the IR duration loop used `uiGetKeys()` which requires 10,000 stable GPIO samples via `badgeLedsTick()`, adding 10–100ms per space and potentially looping forever if IR EMI disturbs the button GPIO lines. Added `uiGetKeysRaw()` — a single non-debounced GPIO snapshot — and used it in all four timing-sensitive cancel checks (IR duration loop ×2, `uiPrvFlipperRecordFinish`, `uiPrvBadUsbStatus`).
+- **BadUSB freeze near 99% during parsing** (`src/ui.c`): Same root cause — `uiPrvBadUsbStatus` called `uiGetKeys()` on every poll, causing the validate-only pass to be extremely slow for long scripts. Fixed by the same `uiGetKeysRaw()` change.
+- **Game selection freeze from main menu** (`src/ui.c`): `uiPreGame` now calls `uiPrvLoadSavestate()` before `uiPrvCommon()`. Without this, selecting "Select Another Game" from the boot menu would trigger `uiPrvExportSavestate()` reading uninitialised CART_RAM and writing garbage to the SD card — a multi-second SD write with a blank screen that appears as a freeze. Also removed the redundant `uiPrvFwUpdate` call from `uiPreGame` (it is already called at the top of `uiPrvCommon`).
+
 ## Workflow
 
 - **Build Firmware**: Runs `cd src && make clean && make app` in the console — compiles and links the full firmware, outputs `src/uGB.bin`.

@@ -179,7 +179,6 @@ bool settingsSet(const struct Settings *settings)
 	msp.magic = SETTINGS_MAGIC;
 	msp.version = SETTINGS_CUR_VER;
 	msp.settings = *settings;
-	settingsPrvNormalize(&msp.settings);
 	
 	if (!sp) {
 		msp.generation = 0;

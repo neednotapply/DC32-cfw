@@ -10,6 +10,16 @@ enum ToolWorkspaceSpanId {
 	ToolWorkspaceCartRamUpper,
 	ToolWorkspaceWram,
 	ToolWorkspaceVram,
+	ToolWorkspaceSpanNum,
+};
+
+enum ToolWorkspaceOwner {
+	ToolWorkspaceOwnerNone = 0,
+	ToolWorkspaceOwnerFileBrowser,
+	ToolWorkspaceOwnerMusic,
+	ToolWorkspaceOwnerIr,
+	ToolWorkspaceOwnerBadUsb,
+	ToolWorkspaceOwnerTransfer,
 };
 
 struct ToolWorkspaceSpan {
@@ -20,6 +30,9 @@ struct ToolWorkspaceSpan {
 void toolWorkspaceBegin(void);
 void toolWorkspaceEnd(void);
 bool toolWorkspaceActive(void);
+void toolWorkspaceReleaseAll(void);
+bool toolWorkspaceAcquire(enum ToolWorkspaceSpanId spanId, enum ToolWorkspaceOwner owner, struct ToolWorkspaceSpan *spanP);
+void toolWorkspaceRelease(enum ToolWorkspaceSpanId spanId, enum ToolWorkspaceOwner owner);
 struct ToolWorkspaceSpan toolWorkspaceGet(enum ToolWorkspaceSpanId spanId);
 
 #endif

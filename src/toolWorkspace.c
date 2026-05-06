@@ -1,16 +1,29 @@
+#include <string.h>
 #include "toolWorkspace.h"
 #include "memMap.h"
 #include "mbc.h"
 
 static bool mToolWorkspaceActive;
+static enum ToolWorkspaceOwner mToolWorkspaceOwners[ToolWorkspaceSpanNum];
+static uint8_t mToolWorkspaceCounts[ToolWorkspaceSpanNum];
+
+static bool toolWorkspacePrvSpansOverlap(struct ToolWorkspaceSpan a, struct ToolWorkspaceSpan b)
+{
+	uintptr_t aStart = (uintptr_t)a.ptr, bStart = (uintptr_t)b.ptr;
+	uintptr_t aEnd = aStart + a.size, bEnd = bStart + b.size;
+
+	return aStart < bEnd && bStart < aEnd;
+}
 
 void toolWorkspaceBegin(void)
 {
 	mToolWorkspaceActive = true;
+	toolWorkspaceReleaseAll();
 }
 
 void toolWorkspaceEnd(void)
 {
+	toolWorkspaceReleaseAll();
 	mToolWorkspaceActive = false;
 }
 
@@ -48,7 +61,56 @@ struct ToolWorkspaceSpan toolWorkspaceGet(enum ToolWorkspaceSpanId spanId)
 			span.ptr = mbcPrvGetVramBuf();
 			span.size = mbcPrvGetVramBufSize();
 			break;
+
+		case ToolWorkspaceSpanNum:
+			break;
 	}
 
 	return span;
+}
+
+void toolWorkspaceReleaseAll(void)
+{
+	memset(mToolWorkspaceOwners, 0, sizeof(mToolWorkspaceOwners));
+	memset(mToolWorkspaceCounts, 0, sizeof(mToolWorkspaceCounts));
+}
+
+bool toolWorkspaceAcquire(enum ToolWorkspaceSpanId spanId, enum ToolWorkspaceOwner owner, struct ToolWorkspaceSpan *spanP)
+{
+	struct ToolWorkspaceSpan span;
+	uint_fast8_t i;
+
+	if (!mToolWorkspaceActive || spanId >= ToolWorkspaceSpanNum || owner == ToolWorkspaceOwnerNone)
+		return false;
+
+	span = toolWorkspaceGet(spanId);
+	if (!span.ptr || !span.size)
+		return false;
+
+	for (i = 0; i < ToolWorkspaceSpanNum; i++) {
+		struct ToolWorkspaceSpan other;
+
+		if (!mToolWorkspaceCounts[i] || mToolWorkspaceOwners[i] == owner)
+			continue;
+		other = toolWorkspaceGet((enum ToolWorkspaceSpanId)i);
+		if (other.ptr && other.size && toolWorkspacePrvSpansOverlap(span, other))
+			return false;
+	}
+
+	mToolWorkspaceOwners[spanId] = owner;
+	if (mToolWorkspaceCounts[spanId] != 0xff)
+		mToolWorkspaceCounts[spanId]++;
+	if (spanP)
+		*spanP = span;
+	return true;
+}
+
+void toolWorkspaceRelease(enum ToolWorkspaceSpanId spanId, enum ToolWorkspaceOwner owner)
+{
+	if (spanId >= ToolWorkspaceSpanNum)
+		return;
+	if (!mToolWorkspaceCounts[spanId] || mToolWorkspaceOwners[spanId] != owner)
+		return;
+	if (!--mToolWorkspaceCounts[spanId])
+		mToolWorkspaceOwners[spanId] = ToolWorkspaceOwnerNone;
 }

@@ -38,12 +38,45 @@ static uint16_t mIrRxBuf[64];
 static uint8_t mIrRxWritePos, mIrRxBytesUsed, mIrRxHadOverrun;
 static bool mPrevIrdaModeWasTx;
 
+extern uint32_t __data_start, __data_end, __bss_start, __bss_end, __stack_limit, __stack_top;
+
+#define STACK_WATERMARK_WORD	0xC0DEC0DEul
+#define STACK_WATERMARK_GUARD	256
+
 #define ACCEL_I2C_ADDR                  0x18
 #define TOUCH_I2C_ADDR                  0x48
 #define RTC_I2C_ADDR                    0x51
 
 
+static void stackWatermarkInit(void)
+{
+	uint32_t *p = &__stack_limit, *end;
+	uintptr_t sp;
 
+	asm volatile("mov %0, sp" : "=r"(sp));
+	end = (uint32_t*)((sp - STACK_WATERMARK_GUARD) &~ 3ul);
+	while (p < end)
+		*p++ = STACK_WATERMARK_WORD;
+}
+
+static uint32_t stackWatermarkUnused(void)
+{
+	uint32_t *p = &__stack_limit;
+
+	while (p < &__stack_top && *p == STACK_WATERMARK_WORD)
+		p++;
+	return (uint32_t)((uintptr_t)p - (uintptr_t)&__stack_limit);
+}
+
+static void memoryReport(void)
+{
+	uint32_t dataSz = (uint32_t)((uintptr_t)&__data_end - (uintptr_t)&__data_start);
+	uint32_t bssSz = (uint32_t)((uintptr_t)&__bss_end - (uintptr_t)&__bss_start);
+	uint32_t stackSz = (uint32_t)((uintptr_t)&__stack_top - (uintptr_t)&__stack_limit);
+
+	pr("mem: data=%u bss=%u ramvec=512 stack=%u stack_free_now=%u\n",
+		dataSz, bssSz, stackSz, stackWatermarkUnused());
+}
 
 static void doFreq(uint32_t freq)
 {
@@ -1721,9 +1754,11 @@ void __attribute__((noreturn, used)) micromain(void)
         asm volatile("cpsie i");
         bootGuardInit();
         timebaseInit();
+        stackWatermarkInit();
         
         pr("ready, time is 0x%016llx\n", getTime());
         pr("ready, time is 0x%016llx\n", getTime());
+        memoryReport();
         
         //tell refclock to use ROSC
         clocks_hw->clk[clk_ref].ctrl = (clocks_hw->clk[clk_ref].ctrl &~ CLOCKS_CLK_REF_CTRL_SRC_BITS) | (CLOCKS_CLK_REF_CTRL_SRC_VALUE_ROSC_CLKSRC_PH << CLOCKS_CLK_REF_CTRL_SRC_LSB);
@@ -1858,7 +1893,7 @@ void __attribute__((naked, used)) HardFault_Handler(void)
                         "mov  r0, sp                            \n\t"
                         "mov  r1, lr                            \n\t"
                         "mrs  r2, PSP                           \n\t"
-                        "bl   report_hard_fault         \n\t"
+                        "bl   bootGuardCaptureHardFault          \n\t"
                         :::"memory");
 }
 

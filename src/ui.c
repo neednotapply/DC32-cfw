@@ -15,6 +15,7 @@
 #include "mbc.h"
 #include "irRemote.h"
 #include "badUsb.h"
+#include "usbHid.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
@@ -1919,8 +1920,15 @@ bool uiSaveSavestate(void)
 	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr)
 	{
 		uint32_t row, now, nowDone, pos, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
-		struct ToolWorkspaceSpan bufMem = toolWorkspaceGet(ToolWorkspaceWram);
-		uint8_t *buf = bufMem.ptr;
+		struct ToolWorkspaceSpan bufMem;
+		uint8_t *buf;
+		bool ret = false;
+
+		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &bufMem)) {
+			uiAlert(cnv, "Tool workspace is busy; cannot load file", DialogTypeOk);
+			return false;
+		}
+		buf = bufMem.ptr;
 
 		if (bufSz > bufMem.size)
 			bufSz = bufMem.size;
@@ -1947,19 +1955,22 @@ bool uiSaveSavestate(void)
 
 			if (!fatfsFileRead(fil, buf, now, &nowDone) || now != nowDone) {
 				uiAlert(cnv, "File reading failure", DialogTypeOk);
-				return false;
+				goto out_release;
 			}
 	
 			//over-erasing up to boundary is safe, same for writing
 			if (!flashWrite(flashAddr, (now + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY, buf, (now + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY)) {
 				uiAlert(cnv, "Flash writing failure", DialogTypeOk);
-				return false;
+				goto out_release;
 			}
 	
 			uiPrvFillRect(cnv, row + 10, 52, 30 + pos * 100 / totalSz, 58);
 		}
 		
-		return true;
+		ret = true;
+	out_release:
+		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
+		return ret;
 	}
 	
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
@@ -2928,20 +2939,21 @@ bool uiSaveSavestate(void)
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
 		const char *path = NULL;
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
-		char *line = (char*)lineMem.ptr;
+		struct ToolWorkspaceSpan lineMem;
+		char *line;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
 			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
 			return false;
 		}
+		line = (char*)lineMem.ptr;
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
-			return false;
+			goto out_release;
 
 		if (!uiPrvIrOpenPowerFile(vol, &path, &fil)) {
 			uiAlert(cnv, "Cannot find /IR/tv.ir or /IR/POWER.IR on the SD card", DialogTypeOk);
@@ -2986,6 +2998,8 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "No power codes found in the IR file", DialogTypeOk);
 		}
 
+	out_release:
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;
 	}
 
@@ -2993,20 +3007,21 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
-		char *line = (char*)lineMem.ptr;
+		struct ToolWorkspaceSpan lineMem;
+		char *line;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
 			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
 			return false;
 		}
+		line = (char*)lineMem.ptr;
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
-			return false;
+			goto out_release;
 
 		fil = fatfsFileOpen(vol, IR_FLIPPER_TV_FILE, OPEN_MODE_READ);
 		if (!fil) {
@@ -3052,22 +3067,25 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "No mute codes found in /IR/tv.ir", DialogTypeOk);
 		}
 
+	out_release:
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;
 	}
 
 	static bool uiPrvIrBlastLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *wantedName, const char *title)
 	{
 		struct FatfsFil *fil = NULL;
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
-		char *line = (char*)lineMem.ptr;
+		struct ToolWorkspaceSpan lineMem;
+		char *line;
 		struct IrBlastStats stats;
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
 			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
 			return false;
 		}
+		line = (char*)lineMem.ptr;
 
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
@@ -3115,6 +3133,7 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "No matching IR codes found in the selected file", DialogTypeOk);
 		}
 
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;
 	}
 
@@ -3270,17 +3289,20 @@ bool uiSaveSavestate(void)
 	{
 		struct MusicOption *buttons = NULL, *button;
 		char buttonName[IR_NAME_BUF_SZ];
-		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
-		char *line = (char*)lineMem.ptr;
+		struct ToolWorkspaceSpan lineMem, listMem;
+		char *line;
 		struct IrBlastStats stats;
 		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;
 		uint32_t numButtons;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ ||
+			!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr, &listMem)) {
 			uiAlert(cnv, "Tool workspace is too small for IR remote", DialogTypeOk);
+			toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 			return false;
 		}
+		line = (char*)lineMem.ptr;
 
 		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
 		if (lineTooLong) {
@@ -3329,6 +3351,8 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
 		}
 
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;
 	}
 
@@ -3793,6 +3817,10 @@ bool uiSaveSavestate(void)
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return;
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerMusic, NULL)) {
+			uiAlert(cnv, "Tool workspace is busy; cannot list music", DialogTypeOk);
+			goto out_unmount;
+		}
 
 		strcpy(path, "/MUSIC");
 reload_dir:
@@ -3973,6 +4001,7 @@ reload_dir:
 		}
 
 	out_unmount:
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerMusic);
 		(void)uiPrvCardPreUnmount();
 		fatfsUnmount(vol);
 	}
@@ -4113,6 +4142,66 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".bin");
 	}
 
+	static bool uiPrvPickFirmwareRoot(struct Canvas *cnv, struct FatfsVol *vol, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
+	{
+		struct ToolWorkspaceSpan listMem;
+		struct UiFileListCtx ctx;
+		struct FatfsDir *dir;
+		struct MusicOption *picked;
+		char fname[FATFS_NAME_BUF_LEN], shortName[UI_PICK_FILE_NAME_BUF_SZ];
+		uint32_t fileSz;
+		uint8_t attrs;
+		struct FatFileLocator locator;
+		bool ret = false;
+
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerTransfer, &listMem)) {
+			uiAlert(cnv, "Tool workspace is busy; cannot list firmware", DialogTypeOk);
+			return false;
+		}
+
+		memset(&ctx, 0, sizeof(ctx));
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
+		ctx.filterF = uiPrvFirmwareFileName;
+		ctx.fname = fname;
+
+		dir = fatfsRootDirOpen(vol);
+		if (!dir) {
+			uiAlert(cnv, "Cannot open SD card root", DialogTypeOk);
+			goto out_release;
+		}
+
+		while (fatfsDirRead(dir, fname, &fileSz, &attrs, &locator)) {
+			if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
+				continue;
+			if (!uiPrvFirmwareFileName(fname))
+				continue;
+			uiPrvCopyStr(shortName, sizeof(shortName), fname);
+			if (!uiPrvFileListAppend(&ctx, shortName, fileSz, false, &locator))
+				break;
+		}
+		fatfsDirClose(dir);
+
+		if (!ctx.count) {
+			uiAlert(cnv, "No root .bin firmware files found on the SD card", DialogTypeOk);
+			goto out_release;
+		}
+		if (ctx.overflow)
+			uiAlert(cnv, "Too many firmware files; showing what fits", DialogTypeOk);
+
+		picked = uiPrvChooseFlatOption(cnv, ctx.head, ctx.count, "Firmware Update");
+		if (!picked)
+			goto out_release;
+
+		*locatorOut = picked->locator;
+		uiPrvCopyStr(nameOut, nameOutSz, picked->name);
+		ret = true;
+
+	out_release:
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerTransfer);
+		return ret;
+	}
+
 	static bool uiPrvFwReadWord(struct FatfsFil *fil, uint32_t pos, uint32_t *wordP)
 	{
 		uint8_t bytes[4];
@@ -4244,7 +4333,7 @@ reload_dir:
 			const char *displayName = tryZDU ? "/UPDATE_OR_WE_ARE.FUCKED" : name;
 			struct FatfsFil *fil;
 
-			if (!tryZDU && !uiPrvPickFile(cnv, vol, "/", uiPrvFirmwareFileName, "No .bin firmware files found on the SD card", &locator, name, sizeof(name), NULL, 0))
+			if (!tryZDU && !uiPrvPickFirmwareRoot(cnv, vol, &locator, name, sizeof(name)))
 				goto out_unmount;
 
 			fil = tryZDU ? fatfsFileOpen(vol, displayName, OPEN_MODE_READ) : fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
@@ -4342,7 +4431,50 @@ static void uiPrvEnterTool(enum UiToolId tool)
 
 static void uiPrvExitTool(enum UiToolId tool)
 {
+	audioPwmStop();
+	usbHidEnd();
+	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));
+}
+
+static const char *uiPrvBootGuardModeName(enum BootGuardMode mode)
+{
+	switch (mode) {
+		case BootGuardModeGame: return "Game";
+		case BootGuardModeIr: return "IR";
+		case BootGuardModeBadUsb: return "BadUSB";
+		case BootGuardModeMusic: return "Music";
+		case BootGuardModeTool: return "Tool";
+		case BootGuardModeHardFault: return "HardFault";
+		case BootGuardModeNone:
+		default:
+			return "None";
+	}
+}
+
+static void uiPrvShowBootRecovery(struct Canvas *cnv)
+{
+	enum BootGuardMode mode = bootGuardRecoveredMode();
+	char msg[192];
+
+	if (mode == BootGuardModeNone)
+		return;
+
+	if (mode == BootGuardModeHardFault) {
+		struct BootGuardCrashInfo info;
+
+		bootGuardRecoveredCrashInfo(&info);
+		(void)sprintf(msg, "Recovered from a crash.\nMode %s\nPC %08x SP %08x\nCFSR %08x HFSR %08x",
+			uiPrvBootGuardModeName((enum BootGuardMode)info.mode),
+			(unsigned)info.pc, (unsigned)info.sp, (unsigned)info.cfsr, (unsigned)info.hfsr);
+	}
+	else {
+		(void)sprintf(msg, "Recovered after reset in %s.\nStarting safe tool shell.",
+			uiPrvBootGuardModeName(mode));
+	}
+
+	uiAlert(cnv, msg, DialogTypeOk);
+	bootGuardClear();
 }
 
 #ifndef NO_SD_CARD
@@ -4634,7 +4766,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 	toolWorkspaceBegin();
 	if (bootGuardRecoveredMode() != BootGuardModeNone) {
 		pr("boot guard recovered mode %u; starting tool shell\n", bootGuardRecoveredMode());
-		bootGuardClear();
+		uiPrvShowBootRecovery(cnv);
 	}
 	activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
 

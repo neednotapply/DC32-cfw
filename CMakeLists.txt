@@ -1,0 +1,120 @@
+cmake_minimum_required(VERSION 3.20)
+
+set(PICO_BOARD "defcon32_badge" CACHE STRING "Badge board name for SDK-compatible build metadata")
+project(dc32_badge_firmware C ASM)
+
+set(APP DC32-cfw)
+set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
+
+add_executable(${APP}
+    ${SRC_DIR}/audioPwm.c
+    ${SRC_DIR}/badgeLeds.c
+    ${SRC_DIR}/badUsb.c
+    ${SRC_DIR}/bootGuard.c
+    ${SRC_DIR}/crt_rp2350.S
+    ${SRC_DIR}/dispDefcon.c
+    ${SRC_DIR}/fatfs.c
+    ${SRC_DIR}/fonts.c
+    ${SRC_DIR}/gb.c
+    ${SRC_DIR}/gbC.c
+    ${SRC_DIR}/irRemote.c
+    ${SRC_DIR}/main_rp2350_defcon.c
+    ${SRC_DIR}/mappersC.c
+    ${SRC_DIR}/mbc.c
+    ${SRC_DIR}/pioI2C.c
+    ${SRC_DIR}/pioIrdaSIR.c
+    ${SRC_DIR}/pioWS2812.c
+    ${SRC_DIR}/printf.c
+    ${SRC_DIR}/qspi2350.c
+    ${SRC_DIR}/rtttlPlayer.c
+    ${SRC_DIR}/sd.c
+    ${SRC_DIR}/sdHwRP2350.c
+    ${SRC_DIR}/settings.c
+    ${SRC_DIR}/sleepDefcon.c
+    ${SRC_DIR}/timebase.c
+    ${SRC_DIR}/toolWorkspace.c
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/usbHid.c
+    ${SRC_DIR}/utf.c
+    ${SRC_DIR}/videoC.c
+)
+
+target_include_directories(${APP} PRIVATE
+    ${SRC_DIR}
+    ${SRC_DIR}/inc_RP2350
+)
+
+target_compile_definitions(${APP} PRIVATE
+    EMBEDDED
+    NO_SUPPORT_DEBUG_PRINTF
+    QUIET_MAPPERS
+    FATFS_USE_LFN_SUPPORT=1
+    USE_WIN_1252_CODE_PAGE
+    QSPI_RAM_SIZE_MAX=65536
+    DISP_LCD_DEFCON
+    UNSCALED_IMG_ROTATED
+    UPSCALER_ROTATES
+    UI_ROTATED
+    GB_HAVE_EXTRA_IO_REGS
+    TICKS_PER_SECOND=125000000U
+    ZWT_ADDR=0x20081ff8
+    PICO_BOARD="${PICO_BOARD}"
+)
+
+target_compile_options(${APP} PRIVATE
+    -Ofast
+    -Wall
+    -Wextra
+    -Werror
+    -mthumb
+    -fsingle-precision-constant
+    -ffast-math
+    -mcpu=cortex-m33
+    -mfloat-abi=soft
+    -ffixed-r11
+    -fstack-reuse=all
+    -ffunction-sections
+    -fdata-sections
+    -fomit-frame-pointer
+    -Wno-array-bounds
+    -Wno-clobbered
+    -Wno-unused-parameter
+    -Wno-unused-function
+    -Wno-unused-but-set-variable
+    -Wno-unused-variable
+    -Wno-maybe-uninitialized
+    -Wno-unused-label
+    -Wno-missing-field-initializers
+)
+
+set_source_files_properties(
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/badUsb.c
+    ${SRC_DIR}/settings.c
+    ${SRC_DIR}/badgeLeds.c
+    PROPERTIES COMPILE_OPTIONS "-Os"
+)
+
+target_link_options(${APP} PRIVATE
+    -Wall
+    -Wextra
+    -Wl,--gc-sections
+    -Wl,-T${LINKER_SCRIPT}
+    -mthumb
+    -mcpu=cortex-m33
+    -mfloat-abi=soft
+)
+target_link_libraries(${APP} PRIVATE m)
+
+add_custom_command(TARGET ${APP} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${APP}> ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin -j.text -j.rodata -j.data -j.vectors
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin ${CMAKE_CURRENT_BINARY_DIR}/FIRMWARE.BIN
+    COMMAND ${CMAKE_SIZE} -A $<TARGET_FILE:${APP}>
+    COMMAND ${CMAKE_COMMAND}
+        -D SIZE_TOOL=${CMAKE_SIZE}
+        -D ELF_FILE=$<TARGET_FILE:${APP}>
+        -D RAM_BUDGET=307200
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_size.cmake
+    VERBATIM
+)

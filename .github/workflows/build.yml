@@ -29,10 +29,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            cmake \
             curl \
             gcc-arm-none-eabi \
             libusb-1.0-0 \
-            libnewlib-arm-none-eabi
+            libnewlib-arm-none-eabi \
+            ninja-build
+
+      - name: Build firmware with CMake
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DPICO_BOARD=defcon32_badge
+          cmake --build build
 
       - name: Install picotool
         run: |

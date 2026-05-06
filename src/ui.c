@@ -1172,6 +1172,50 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 		return found;
 	}
 
+	static void uiPrvAppendPathComponent(char *path, uint32_t pathBufSz, const char *name)
+	{
+		uint32_t pathLen = strlen(path), nameLen = strlen(name);
+
+		if (pathLen + 1 >= pathBufSz)
+			return;
+		if (pathLen > 1)
+			path[pathLen++] = '/';
+		if (pathLen + nameLen < pathBufSz)
+			memcpy(path + pathLen, name, nameLen + 1);
+		else if (pathLen + 4 <= pathBufSz)
+			strcpy(path + pathLen, "...");
+		else if (pathLen)
+			path[pathLen - 1] = 0;
+	}
+
+	static void uiPrvPageSelection(uint32_t *selectedItemP, uint32_t *topItemP, uint32_t totalItems, uint32_t itemsOnscreen, bool forward)
+	{
+		uint32_t selectedItem = *selectedItemP, topItem = *topItemP, selectedOffset;
+
+		if (!totalItems || !itemsOnscreen)
+			return;
+
+		selectedOffset = selectedItem > topItem ? selectedItem - topItem : 0;
+		if (forward) {
+			if (topItem + itemsOnscreen < totalItems)
+				topItem += itemsOnscreen;
+		}
+		else {
+			if (topItem > itemsOnscreen)
+				topItem -= itemsOnscreen;
+			else
+				topItem = 0;
+		}
+		if (topItem + itemsOnscreen > totalItems)
+			topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
+		selectedItem = topItem + selectedOffset;
+		if (selectedItem >= totalItems)
+			selectedItem = totalItems - 1;
+
+		*selectedItemP = selectedItem;
+		*topItemP = topItem;
+	}
+
 	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
 	{
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
@@ -1275,21 +1319,11 @@ reload_dir:
 					if (!uiPrvPickEntryAt(vol, rootPath, haveDirLoc ? &dirStack[depth - 1] : NULL, filterF, selectedItem - (depth ? 1 : 0), entry))
 						break;
 					if (entry->isDir) {
-						uint32_t pathLen = strlen(path), nameLen = strlen(entry->name);
-
 						if (depth < UI_BROWSER_MAX_DEPTH) {
-							pathLenStack[depth] = pathLen;
+							pathLenStack[depth] = strlen(path);
 							dirStack[depth++] = entry->locator;
 							haveDirLoc = true;
-							if (pathLen + 1 < UI_PICK_FILE_PATH_BUF_SZ) {
-								path[pathLen++] = '/';
-								if (pathLen + nameLen < UI_PICK_FILE_PATH_BUF_SZ)
-									memcpy(path + pathLen, entry->name, nameLen + 1);
-								else if (pathLen + 4 <= UI_PICK_FILE_PATH_BUF_SZ)
-									strcpy(path + pathLen, "...");
-								else
-									path[pathLen - 1] = 0;
-							}
+							uiPrvAppendPathComponent(path, UI_PICK_FILE_PATH_BUF_SZ, entry->name);
 							goto reload_dir;
 						}
 						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
@@ -1337,6 +1371,14 @@ reload_dir:
 								topItem = selectedItem;
 						}
 					}
+					break;
+
+				case KEY_BIT_RIGHT:
+					uiPrvPageSelection(&selectedItem, &topItem, totalItems, itemsOnscreen, true);
+					break;
+
+				case KEY_BIT_LEFT:
+					uiPrvPageSelection(&selectedItem, &topItem, totalItems, itemsOnscreen, false);
 					break;
 			}
 		}
@@ -1882,7 +1924,7 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 	
-	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const char *romName)
+	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
 		char internalName[ROM_NAME_LEN + 1];
@@ -1898,13 +1940,16 @@ bool uiSaveSavestate(void)
 			[RomColorRequired] = "Required",
 		};
 			
-		
-		dir = fatfsDirOpen(vol, "/ROM");
-		if (!dir)
-			goto out;
-		filR = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
-		fatfsDirClose(dir);
-		dir = NULL;
+		if (romLocator)
+			filR = fatfsFileOpenWithLocator(vol, romLocator, OPEN_MODE_READ);
+		else {
+			dir = fatfsDirOpen(vol, "/ROM");
+			if (!dir)
+				goto out;
+			filR = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
+			fatfsDirClose(dir);
+			dir = NULL;
+		}
 		if (!filR) {
 			uiAlert(cnv, "Cannot open ROM file", DialogTypeOk);
 			goto out;
@@ -2112,7 +2157,7 @@ bool uiSaveSavestate(void)
 			switch (uiPrvRecvKeypress()) {
 				case KEY_BIT_A:
 					for (cur = head, i = 0; i < curGlobalIdx; i++, cur = cur->next);
-					if (uiPrvConfirmRomSelection(cnv, vol, cur->name)) {
+					if (uiPrvConfirmRomSelection(cnv, vol, NULL, cur->name)) {
 						ret = true;
 						goto out;
 					}
@@ -2149,6 +2194,22 @@ bool uiSaveSavestate(void)
 						}
 					}
 					break;
+
+				case KEY_BIT_RIGHT: {
+					uint32_t selectedItem = curGlobalIdx;
+
+					uiPrvPageSelection(&selectedItem, &topItem, numRoms, itemsOnscreen, true);
+					selectedOnscreenItem = selectedItem - topItem;
+					break;
+				}
+
+				case KEY_BIT_LEFT: {
+					uint32_t selectedItem = curGlobalIdx;
+
+					uiPrvPageSelection(&selectedItem, &topItem, numRoms, itemsOnscreen, false);
+					selectedOnscreenItem = selectedItem - topItem;
+					break;
+				}
 			}
 		}
 	
@@ -3884,21 +3945,11 @@ reload_dir:
 						goto reload_dir;
 					}
 					if (cur && cur->isDir) {
-						uint32_t pathLen = strlen(path), nameLen = strlen(cur->name);
-
 						if (depth < UI_BROWSER_MAX_DEPTH) {
-							pathLenStack[depth] = pathLen;
+							pathLenStack[depth] = strlen(path);
 							dirStack[depth++] = cur->locator;
 							haveDirLoc = true;
-							if (pathLen + 1 < sizeof(path)) {
-								path[pathLen++] = '/';
-								if (pathLen + nameLen < sizeof(path))
-									memcpy(path + pathLen, cur->name, nameLen + 1);
-								else if (pathLen + 4 <= sizeof(path))
-									strcpy(path + pathLen, "...");
-								else
-									path[pathLen - 1] = 0;
-							}
+							uiPrvAppendPathComponent(path, sizeof(path), cur->name);
 							goto reload_dir;
 						}
 						uiAlert(cnv, "Folder nesting too deep", DialogTypeOk);
@@ -3970,6 +4021,16 @@ reload_dir:
 						}
 						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					}
+					break;
+
+				case KEY_BIT_RIGHT:
+					uiPrvPageSelection(&selectedItem, &topItem, totalItems, itemsOnscreen, true);
+					cur = uiPrvMusicOptionAt(head, depth, selectedItem);
+					break;
+
+				case KEY_BIT_LEFT:
+					uiPrvPageSelection(&selectedItem, &topItem, totalItems, itemsOnscreen, false);
+					cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					break;
 			}
 		}
@@ -4259,24 +4320,6 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenGame,
 };
 
-static bool uiPrvPathIsFolderNoCase(const char *path, const char *folder)
-{
-	uint32_t pathLen = strlen(path), folderLen = strlen(folder);
-
-	if (pathLen < folderLen)
-		return false;
-	if (strsCaselesslyCompareUtf(path, folder, folderLen))
-		return false;
-	return !path[folderLen] || path[folderLen] == '/';
-}
-
-static bool uiPrvPathEqNoCase(const char *a, const char *b)
-{
-	uint32_t aLen = strlen(a), bLen = strlen(b);
-
-	return aLen == bLen && !strsCaselesslyCompareUtf(a, b, aLen);
-}
-
 static bool uiPrvRomFileName(const char *fname)
 {
 	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc");
@@ -4323,13 +4366,11 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 		ids[numOptions] = UiBrowserOpenIrMuteSpam;
 		labels[numOptions++] = "IR Mute Spam";
 	}
-	if (uiPrvStrEndsWithNoCase(ref->name, ".badusb") ||
-		(uiPrvStrEndsWithNoCase(ref->name, ".txt") && uiPrvPathIsFolderNoCase(ref->parentPath, "/BADUSB"))) {
+	if (uiPrvStrEndsWithNoCase(ref->name, ".txt") || uiPrvStrEndsWithNoCase(ref->name, ".badusb")) {
 		ids[numOptions] = UiBrowserOpenBadUsb;
 		labels[numOptions++] = "BadUSB";
 	}
-	if (uiPrvStrEndsWithNoCase(ref->name, ".rtttl") ||
-		(uiPrvStrEndsWithNoCase(ref->name, ".txt") && uiPrvPathIsFolderNoCase(ref->parentPath, "/MUSIC"))) {
+	if (uiPrvStrEndsWithNoCase(ref->name, ".txt") || uiPrvStrEndsWithNoCase(ref->name, ".rtttl")) {
 		ids[numOptions] = UiBrowserOpenMusic;
 		labels[numOptions++] = "Music";
 	}
@@ -4385,11 +4426,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	}
 
 	case UiBrowserOpenGame:
-		if (!uiPrvPathEqNoCase(ref->parentPath, "/ROM")) {
-			uiAlert(cnv, "Game files must be launched from /ROM", DialogTypeOk);
-			return UiToolBrowser;
-		}
-		if (uiPrvConfirmRomSelection(cnv, vol, ref->name))
+		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
 		return UiToolBrowser;
 

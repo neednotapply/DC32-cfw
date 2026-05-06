@@ -217,13 +217,13 @@ enum SdHwCmdResult sdHwCmd(uint_fast8_t cmd, uint32_t param, bool cmdCrcRequired
 	if (cmd & 0x40) {		//cmd is usually 0..0x3f, we use 0x40 bit to signal that init failed, and we need to bit-resync. try that by injecting a bit
 		
 		//send an extra clock pulse some cards get into a weird state on boot, this will resync with them
-		iobank0_hw->io[18].ctrl = (iobank0_hw->io[18].ctrl &~ IO_BANK0_GPIO18_CTRL_FUNCSEL_BITS) | IO_BANK0_GPIO18_CTRL_FUNCSEL_VALUE_SIO_18;
+		iobank0_hw->io[PIN_SD_SCK].ctrl = (iobank0_hw->io[PIN_SD_SCK].ctrl &~ IO_BANK0_GPIO14_CTRL_FUNCSEL_BITS) | IO_BANK0_GPIO14_CTRL_FUNCSEL_VALUE_SIO_14;
 		delayMsec(1);
-		sio_hw->gpio_set = 1 << 18;
+		sio_hw->gpio_set = 1 << PIN_SD_SCK;
 		delayMsec(1);
-		sio_hw->gpio_clr = 1 << 18;
+		sio_hw->gpio_clr = 1 << PIN_SD_SCK;
 		delayMsec(1);
-		iobank0_hw->io[18].ctrl = (iobank0_hw->io[18].ctrl &~ IO_BANK0_GPIO18_CTRL_FUNCSEL_BITS) | IO_BANK0_GPIO18_CTRL_FUNCSEL_VALUE_SPI0_SCLK;
+		iobank0_hw->io[PIN_SD_SCK].ctrl = (iobank0_hw->io[PIN_SD_SCK].ctrl &~ IO_BANK0_GPIO14_CTRL_FUNCSEL_BITS) | IO_BANK0_GPIO14_CTRL_FUNCSEL_VALUE_SPI1_SCLK;
 	}
 	
 	sdPrvSendCmd(cmd, param, cmdCrcRequired);
@@ -480,4 +480,3 @@ bool sdHwMultiBlockReadSignalEnd(void)
 	
 	return true;
 }
-

@@ -6,6 +6,7 @@
 #define AUDIO_PWM_IDX			((PIN_SPQR >> 1) & 7)
 #define AUDIO_PWM_IS_B			(PIN_SPQR & 1)
 #define AUDIO_TONE_CLK_DIV		32
+#define AUDIO_PWM_DISABLE_WAIT_MAX	100000
 
 enum AudioPwmMode {
 	AudioPwmModeStopped,
@@ -33,8 +34,10 @@ static void audioPwmPrvPinLow(void)
 
 static void audioPwmPrvDisable(void)
 {
+	uint32_t waits = 0;
+
 	pwm_hw->slice[AUDIO_PWM_IDX].csr &=~ PWM_CH0_CSR_EN_BITS;
-	while (pwm_hw->slice[AUDIO_PWM_IDX].csr & PWM_CH0_CSR_EN_BITS);
+	while ((pwm_hw->slice[AUDIO_PWM_IDX].csr & PWM_CH0_CSR_EN_BITS) && waits++ < AUDIO_PWM_DISABLE_WAIT_MAX);
 }
 
 static uint32_t audioPwmPrvInvertBit(void)

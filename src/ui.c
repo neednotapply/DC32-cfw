@@ -3373,7 +3373,7 @@ bool uiSaveSavestate(void)
 		memset(&stats, 0, sizeof(stats));
 		irRemoteBegin();
 		irStarted = true;
-		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 0);
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 1);
 
 	out_close:
 		if (irStarted)
@@ -3736,7 +3736,7 @@ bool uiSaveSavestate(void)
 	static enum MusicPlayerControl uiPrvMusicControl(void *userData, const struct MusicPlayerStatus *status)
 	{
 		struct MusicUiData *data = (struct MusicUiData*)userData;
-		uint8_t keys = uiGetKeys(), pressed = keys &~ data->prevKeys;
+		uint8_t keys = uiGetKeysRaw(), pressed = keys &~ data->prevKeys;
 		uint64_t now = getTime();
 
 		data->prevKeys = keys;
@@ -3811,13 +3811,15 @@ bool uiSaveSavestate(void)
 		audioPwmSetVolume(settings->musicVolume);
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
+			audioPwmStop();
 			uiAlert(cnv, "Cannot open music file", DialogTypeOk);
 			return MusicPlayerResultStopped;
 		}
 
-		data.prevKeys = uiGetKeys();
+		data.prevKeys = uiGetKeysRaw();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
 		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
+		audioPwmStop();
 		fatfsFileClose(fil);
 		if (data.settingsDirty)
 			settingsSet(settings);

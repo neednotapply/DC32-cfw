@@ -26,6 +26,11 @@
 
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
+#define UI_FIRMWARE_FLASH_BASE			0x10000000UL
+#define UI_FIRMWARE_MAX_SIZE			(QSPI_SETTINGS_START - UI_FIRMWARE_FLASH_BASE)
+#define UI_FIRMWARE_MIN_SIZE			1024
+#define UI_FIRMWARE_SRAM_START			0x20000000UL
+#define UI_FIRMWARE_SRAM_END			0x20082000UL
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -4203,14 +4208,44 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".bin");
 	}
 
+	static bool uiPrvFwReadWord(struct FatfsFil *fil, uint32_t pos, uint32_t *wordP)
+	{
+		uint8_t bytes[4];
+		uint32_t nBytesRead;
+
+		if (!fatfsFileSeek(fil, pos) || !fatfsFileRead(fil, bytes, sizeof(bytes), &nBytesRead) || nBytesRead != sizeof(bytes))
+			return false;
+
+		*wordP = ((uint32_t)bytes[0]) | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+		return true;
+	}
+
+	static bool uiPrvFwFilePlausible(struct FatfsFil *fil, uint32_t fileSz)
+	{
+		uint32_t stackTop, resetVector, resetAddr;
+
+		if (fileSz < UI_FIRMWARE_MIN_SIZE || fileSz > UI_FIRMWARE_MAX_SIZE)
+			return false;
+		if (!uiPrvFwReadWord(fil, 0, &stackTop) || !uiPrvFwReadWord(fil, 4, &resetVector))
+			return false;
+
+		resetAddr = resetVector &~ 1UL;
+		if ((stackTop & 3) || stackTop < UI_FIRMWARE_SRAM_START || stackTop > UI_FIRMWARE_SRAM_END)
+			return false;
+		if (!(resetVector & 1) || resetAddr < UI_FIRMWARE_FLASH_BASE || resetAddr >= UI_FIRMWARE_FLASH_BASE + fileSz)
+			return false;
+
+		return fatfsFileSeek(fil, 0);
+	}
+
 	static void uiPrvFwUpdateFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name, bool tryZDU)
 	{
 		uint32_t fileSz = fatfsFileGetSize(fil);
 
-		if (fileSz < 1024) {
+		if (!uiPrvFwFilePlausible(fil, fileSz)) {
 
 			if (!tryZDU)
-				uiAlert(cnv, "Selected firmware file is too small to be believable. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
+				uiAlert(cnv, "Selected firmware file does not look like a valid DC32 firmware image. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
 		}
 		else {
 
@@ -4239,7 +4274,7 @@ reload_dir:
 				itemHeight = uiPrvGlyphHeight(cnv) + 1;
 				uiPrvReset(cnv, false);
 				uiPrintf(cnv, 32, 10, "Firmware: %s", name);
-				uiPrvDrawWrappedString(cnv, "This option will replace the current firmware with the selected .bin file. No checks are made. GL HF", 48, 10);
+				uiPrvDrawWrappedString(cnv, "This option will replace the current firmware with the selected .bin file after basic image checks. GL HF", 48, 10);
 
 				updateOption = numOptions++;
 				uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Proceed", -1);
@@ -4651,6 +4686,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 	uiPrvReset(cnv, false);
 #ifndef NO_SD_CARD
 	uiPrvFwUpdate(cnv, true);
+	uiPrvReset(cnv, false);
 #endif
 	toolWorkspaceBegin();
 

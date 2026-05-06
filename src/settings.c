@@ -8,6 +8,11 @@
 
 #define SETTINGS_MAGIC				0x4447687a
 #define SETTINGS_CUR_VER			13
+#define SETTINGS_NUM_SPEEDS			4
+#define SETTINGS_LED_MIN_SPEED		1
+#define SETTINGS_LED_MAX_SPEED		10
+#define SETTINGS_LED_MIN_BRIGHTNESS	15
+#define SETTINGS_MUSIC_VOLUME_MAX	15
 
 
 union SettingsPage {
@@ -53,6 +58,22 @@ static const union SettingsPage* settingsLocate(void)
 	}
 	
 	return best;
+}
+
+static void settingsPrvNormalize(struct Settings *settings)
+{
+	if (settings->speed >= SETTINGS_NUM_SPEEDS)
+		settings->speed = 1;
+	if (settings->ledMode >= LedModeNumModes)
+		settings->ledMode = LedModeOff;
+	if (settings->ledColor >= LedColorNumColors)
+		settings->ledColor = LedColorCustom;
+	if (settings->ledSpeed < SETTINGS_LED_MIN_SPEED || settings->ledSpeed > SETTINGS_LED_MAX_SPEED)
+		settings->ledSpeed = 4;
+	if (settings->ledBrightness < SETTINGS_LED_MIN_BRIGHTNESS)
+		settings->ledBrightness = SETTINGS_LED_MIN_BRIGHTNESS;
+	if (settings->musicVolume > SETTINGS_MUSIC_VOLUME_MAX)
+		settings->musicVolume = 7;
 }
 
 void settingsGet(struct Settings *settings)
@@ -145,6 +166,8 @@ void settingsGet(struct Settings *settings)
 
 		//other cases here, in increasing order
 	}
+
+	settingsPrvNormalize(settings);
 }
 
 bool settingsSet(const struct Settings *settings)
@@ -156,6 +179,7 @@ bool settingsSet(const struct Settings *settings)
 	msp.magic = SETTINGS_MAGIC;
 	msp.version = SETTINGS_CUR_VER;
 	msp.settings = *settings;
+	settingsPrvNormalize(&msp.settings);
 	
 	if (!sp) {
 		msp.generation = 0;

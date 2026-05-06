@@ -51,14 +51,18 @@ jobs:
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
           cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
-          picotool uf2 convert "$ARTIFACT_DIR/FIRMWARE.BIN" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
+          cp src/DC32-cfw.bin "$ARTIFACT_DIR/DC32-cfw.bin"
+          picotool uf2 convert "$ARTIFACT_DIR/FIRMWARE.BIN" "$ARTIFACT_DIR/DC32-cfw.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
+          cp "$ARTIFACT_DIR/DC32-cfw.uf2" "$ARTIFACT_DIR/uGB.uf2"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: |
+            ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/DC32-cfw.bin
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
 
       - name: Attach firmware to release
@@ -66,6 +70,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/DC32-cfw.bin
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
           overwrite_files: true

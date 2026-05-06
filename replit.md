@@ -4,7 +4,7 @@
 
 Embedded C firmware for the DEF CON 32 badge, targeting the Raspberry Pi RP2350 microcontroller. Includes the uGB Game Boy emulator, badge-specific LCD display driver, audio, touch input, IR, WS2812 LEDs, SD card storage, and USB HID support.
 
-This is **not a web application** — it produces a binary firmware image (`DC32-cfw.bin` / `DC32-cfw.uf2`) that runs on physical badge hardware.
+This is **not a web application** — it produces a raw binary firmware image (`DC32-cfw.bin`) that runs on physical badge hardware. Release packaging converts that raw image into `DC32-cfw.uf2` for the RP2350 USB bootloader.
 
 ## Architecture
 
@@ -67,6 +67,6 @@ Produces `src/FIRMWARE.BIN` — legacy updater filename. The badge updater can b
 
 ## Flashing to Hardware
 
-- **UF2 bootloader**: Use `DC32-cfw.uf2` (generated separately or from GitHub releases)
-- **SD card update**: Copy a `.bin` firmware image to the SD card and select it from the badge updater or browser
-- **Direct flash**: `sudo make flash` (requires CortexProg)
+- **UF2 bootloader**: Use `DC32-cfw.uf2` from GitHub releases. Do not copy raw `.bin` files to the UF2 drive.
+- **SD card update**: Copy a raw `.bin` firmware image to the SD card and select it from the badge updater or browser.
+- **Direct flash**: `sudo make flash` writes raw `DC32-cfw.bin` with CortexProg.

@@ -22,6 +22,11 @@ static uint_fast8_t badgeLedsPrvSanitizeMode(uint_fast8_t mode)
 	return mode < LedModeNumModes ? mode : LedModeOff;
 }
 
+static uint_fast8_t badgeLedsPrvSanitizeColor(uint_fast8_t color)
+{
+	return color < LedColorNumColors ? color : LedColorCustom;
+}
+
 static uint_fast8_t badgeLedsPrvSanitizeSpeed(uint_fast8_t speed)
 {
 	return speed >= LED_MIN_SPEED && speed <= LED_MAX_SPEED ? speed : 4;
@@ -39,16 +44,31 @@ static uint_fast8_t badgeLedsPrvSanitizeBrightness(uint_fast8_t brightness)
 
 const char* badgeLedsModeName(uint_fast8_t mode)
 {
-	static const char names[][8] = {
+	static const char names[][11] = {
 		[LedModeOff] = "OFF",
 		[LedModeSolid] = "SOLID",
 		[LedModeRainbow] = "RAINBOW",
-		[LedModeFlame] = "PULSE",
+		[LedModePulse] = "PULSE",
 		[LedModeTravelingDot] = "DOT",
+		[LedModeRandom] = "RANDOM",
+		[LedModeFlashlight] = "FLASHLIGHT",
 	};
 
 	mode = badgeLedsPrvSanitizeMode(mode);
 	return names[mode];
+}
+
+const char* badgeLedsColorName(uint_fast8_t color)
+{
+	static const char names[][8] = {
+		[LedColorCustom] = "CUSTOM",
+		[LedColorRainbow] = "RAINBOW",
+		[LedColorFlame] = "FLAME",
+		[LedColorRandom] = "RANDOM",
+	};
+
+	color = badgeLedsPrvSanitizeColor(color);
+	return names[color];
 }
 
 static uint_fast8_t badgeLedsPrvScale(uint_fast8_t val, uint_fast8_t scale)
@@ -84,6 +104,61 @@ static void badgeLedsPrvWheel(uint_fast8_t pos, uint8_t *rP, uint8_t *gP, uint8_
 	}
 }
 
+static uint32_t badgeLedsPrvRand(uint32_t seed)
+{
+	seed ^= seed >> 16;
+	seed *= 0x7feb352dUL;
+	seed ^= seed >> 15;
+	seed *= 0x846ca68bUL;
+	seed ^= seed >> 16;
+	return seed;
+}
+
+static void badgeLedsPrvCustomColor(uint8_t *rP, uint8_t *gP, uint8_t *bP, bool useDefault)
+{
+	*rP = mLedSettings.ledRed;
+	*gP = mLedSettings.ledGreen;
+	*bP = mLedSettings.ledBlue;
+
+	if (useDefault && !*rP && !*gP && !*bP)
+		*rP = *gP = *bP = LED_DEFAULT_TINT;
+}
+
+static void badgeLedsPrvColor(uint_fast8_t ledIdx, uint_fast8_t phase, uint8_t *rP, uint8_t *gP, uint8_t *bP, bool useDefault)
+{
+	switch (badgeLedsPrvSanitizeColor(mLedSettings.ledColor)) {
+		case LedColorRainbow:
+			badgeLedsPrvWheel(phase, rP, gP, bP);
+			*rP /= 2;
+			*gP /= 2;
+			*bP /= 2;
+			break;
+
+		case LedColorFlame: {
+			uint_fast8_t flicker = badgeLedsPrvRand(((uint32_t)mLedFrame << 8) ^ ledIdx ^ phase) & 0x3f;
+
+			*rP = 180 + flicker;
+			*gP = 24 + flicker;
+			*bP = flicker > 48 ? (flicker - 48) / 3 : 0;
+			break;
+		}
+
+		case LedColorRandom: {
+			uint32_t rnd = badgeLedsPrvRand(((uint32_t)(mLedFrame / 4) << 12) ^ ((uint32_t)ledIdx << 4) ^ phase);
+
+			*rP = 32 + (rnd & 0x7f);
+			*gP = 32 + ((rnd >> 8) & 0x7f);
+			*bP = 32 + ((rnd >> 16) & 0x7f);
+			break;
+		}
+
+		case LedColorCustom:
+		default:
+			badgeLedsPrvCustomColor(rP, gP, bP, useDefault);
+			break;
+	}
+}
+
 static uint_fast8_t badgeLedsPrvFrameIntervalIdx(uint_fast8_t speed)
 {
 	static const uint8_t intervals[] = {0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24};
@@ -100,6 +175,14 @@ static void badgeLedsPrvRenderSolid(uint_fast8_t red, uint_fast8_t green, uint_f
 	ws2812refresh();
 }
 
+static void badgeLedsPrvRenderSolidColor(void)
+{
+	uint8_t r, g, b;
+
+	badgeLedsPrvColor(0, mLedFrame * 5, &r, &g, &b, false);
+	badgeLedsPrvRenderSolid(r, g, b);
+}
+
 static void badgeLedsPrvRenderRainbow(void)
 {
 	uint_fast8_t i;
@@ -107,8 +190,8 @@ static void badgeLedsPrvRenderRainbow(void)
 	for (i = 0; i < NUM_WS2812s; i++) {
 		uint8_t r, g, b;
 
-		badgeLedsPrvWheel((uint8_t)(mLedFrame * 5 + i * 28), &r, &g, &b);
-		badgeLedsPrvSetRgb(i, r / 2, g / 2, b / 2);
+		badgeLedsPrvColor(i, (uint8_t)(mLedFrame * 5 + i * 28), &r, &g, &b, true);
+		badgeLedsPrvSetRgb(i, r, g, b);
 	}
 	ws2812refresh();
 }
@@ -116,12 +199,11 @@ static void badgeLedsPrvRenderRainbow(void)
 static void badgeLedsPrvRenderPulse(void)
 {
 	uint_fast8_t i;
-	uint_fast8_t red = mLedSettings.ledRed, green = mLedSettings.ledGreen, blue = mLedSettings.ledBlue;
+	uint8_t red, green, blue;
 	uint_fast8_t pulse = (mLedFrame & 0x1f) <= 15 ? (mLedFrame & 0x0f) : (31 - (mLedFrame & 0x1f));
 	uint_fast8_t scale = 48 + pulse * 13;
 
-	if (!red && !green && !blue)
-		red = green = blue = LED_DEFAULT_TINT;
+	badgeLedsPrvColor(0, mLedFrame * 5, &red, &green, &blue, true);
 
 	for (i = 0; i < NUM_WS2812s; i++) {
 		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
@@ -132,12 +214,9 @@ static void badgeLedsPrvRenderPulse(void)
 static void badgeLedsPrvRenderTravelingDot(void)
 {
 	uint_fast8_t i, pos = mLedFrame % NUM_WS2812s;
-	uint_fast8_t red = mLedSettings.ledRed, green = mLedSettings.ledGreen, blue = mLedSettings.ledBlue;
-
-	if (!red && !green && !blue)
-		red = green = blue = LED_DEFAULT_TINT;
 
 	for (i = 0; i < NUM_WS2812s; i++) {
+		uint8_t red, green, blue;
 		uint_fast8_t dist = i > pos ? i - pos : pos - i;
 		uint_fast8_t scale;
 
@@ -145,7 +224,38 @@ static void badgeLedsPrvRenderTravelingDot(void)
 			dist = NUM_WS2812s - dist;
 
 		scale = dist == 0 ? 255 : (dist == 1 ? 96 : (dist == 2 ? 32 : 0));
+		badgeLedsPrvColor(i, (uint8_t)(mLedFrame * 5 + i * 13), &red, &green, &blue, true);
 		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
+	}
+	ws2812refresh();
+}
+
+static void badgeLedsPrvRenderRandom(void)
+{
+	uint_fast8_t i;
+
+	for (i = 0; i < NUM_WS2812s; i++) {
+		uint8_t red, green, blue;
+		uint32_t rnd = badgeLedsPrvRand(((uint32_t)mLedFrame << 12) ^ ((uint32_t)i << 5));
+		uint_fast8_t scale = rnd & 1 ? 255 : ((rnd & 2) ? 96 : 0);
+
+		badgeLedsPrvColor(i, rnd & 0xff, &red, &green, &blue, true);
+		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
+	}
+	ws2812refresh();
+}
+
+static void badgeLedsPrvRenderFlashlight(void)
+{
+	static const uint8_t activeLeds[] = {0, 2, 8, 7};	//PCB labels LED2, LED4, LED10, LED9
+	uint_fast8_t i;
+
+	ws2812SetAllRgb(0, 0, 0);
+	for (i = 0; i < sizeof(activeLeds) / sizeof(*activeLeds); i++) {
+		uint8_t red, green, blue;
+
+		badgeLedsPrvColor(activeLeds[i], (uint8_t)(mLedFrame * 5 + activeLeds[i] * 28), &red, &green, &blue, true);
+		badgeLedsPrvSetRgb(activeLeds[i], red, green, blue);
 	}
 	ws2812refresh();
 }
@@ -154,19 +264,27 @@ static void badgeLedsPrvRenderCurrent(void)
 {
 	switch (badgeLedsPrvSanitizeMode(mLedSettings.ledMode)) {
 		case LedModeSolid:
-			badgeLedsPrvRenderSolid(mLedSettings.ledRed, mLedSettings.ledGreen, mLedSettings.ledBlue);
+			badgeLedsPrvRenderSolidColor();
 			break;
 
 		case LedModeRainbow:
 			badgeLedsPrvRenderRainbow();
 			break;
 
-		case LedModeFlame:
+		case LedModePulse:
 			badgeLedsPrvRenderPulse();
 			break;
 
 		case LedModeTravelingDot:
 			badgeLedsPrvRenderTravelingDot();
+			break;
+
+		case LedModeRandom:
+			badgeLedsPrvRenderRandom();
+			break;
+
+		case LedModeFlashlight:
+			badgeLedsPrvRenderFlashlight();
 			break;
 
 		case LedModeOff:
@@ -182,6 +300,7 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force)
 	bool changed;
 
 	newSettings.ledMode = badgeLedsPrvSanitizeMode(newSettings.ledMode);
+	newSettings.ledColor = badgeLedsPrvSanitizeColor(newSettings.ledColor);
 	newSettings.ledSpeed = badgeLedsPrvSanitizeSpeed(newSettings.ledSpeed);
 	newSettings.ledBrightness = badgeLedsPrvSanitizeBrightness(newSettings.ledBrightness);
 	changed = !mHaveLedSettings || memcmp(&mLedSettings, &newSettings, sizeof(mLedSettings));

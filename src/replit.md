@@ -8,7 +8,7 @@ Embedded C firmware for the DEF CON 32 badge (RP2350 / Raspberry Pi Pico 2).
 cd src && make
 ```
 
-Produces `uGB.bin` (flash to badge via UF2 or SWD). Requires `gcc-arm-embedded` and `gnumake` (provided via Nix).
+Produces `DC32-cfw.bin` (flash to badge via UF2 or SWD). Requires `gcc-arm-embedded` and `gnumake` (provided via Nix).
 
 ## Architecture
 

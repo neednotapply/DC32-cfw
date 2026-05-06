@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			12
+#define SETTINGS_CUR_VER			13
 
 
 union SettingsPage {
@@ -132,6 +132,17 @@ void settingsGet(struct Settings *settings)
 				settings->ledSpeed = 10;
 			//fallthrough
 
+		case 12:			//split LED pattern from LED color
+			if (settings->ledMode == LedModeRainbow)
+				settings->ledColor = LedColorRainbow;
+			else if (settings->ledMode == LedModeFlame) {
+				settings->ledMode = LedModePulse;
+				settings->ledColor = LedColorFlame;
+			}
+			else
+				settings->ledColor = LedColorCustom;
+			//fallthrough
+
 		//other cases here, in increasing order
 	}
 }
@@ -178,4 +189,3 @@ bool settingsSet(const struct Settings *settings)
 		return true;
 	}
 }
-

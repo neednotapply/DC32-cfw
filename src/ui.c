@@ -499,7 +499,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 
 static void uiPrvReset(struct Canvas *cnv, bool invert)
 {
-	static const char windowTitle[] = "uGB v1.5.0";
+	static const char windowTitle[] = "DC32-cfw v1.5.0";
 	memset(cnv->framebuffer, invert ? 0xff : 0, cnv->w * cnv->h * DISP_BPP / 8);
 	
 	//draw title
@@ -1446,7 +1446,7 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 
 	while (1) {
 
-		int_fast8_t numOptions = 0, doneOption, ledsOption, ledRedOption, ledGreenOption, ledBlueOption, ledSpeedOption, ledBrightnessOption;
+		int_fast8_t numOptions = 0, doneOption, ledPatternOption, ledColorOption, ledRedOption = -1, ledGreenOption = -1, ledBlueOption = -1, ledSpeedOption, ledBrightnessOption;
 		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 
 		uiPrvReset(cnv, false);
@@ -1455,29 +1455,37 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		cnv->foreColor = 11;
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
 
-		ledsOption = numOptions++;
+		ledPatternOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LEDS:", -1);
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "PATTERN:", -1);
 		cnv->foreColor = 15;
 		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%s        ", badgeLedsModeName(settings->ledMode));
 
-		ledRedOption = numOptions++;
+		ledColorOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED RED:", -1);
+		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "COLOR:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledRed));
+		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%s        ", badgeLedsColorName(settings->ledColor));
 
-		ledGreenOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED GREEN:", -1);
-		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledGreen));
+		if (settings->ledColor == LedColorCustom) {
+			ledRedOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED RED:", -1);
+			cnv->foreColor = 15;
+			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledRed));
 
-		ledBlueOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BLUE:", -1);
-		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
+			ledGreenOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED GREEN:", -1);
+			cnv->foreColor = 15;
+			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledGreen));
+
+			ledBlueOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BLUE:", -1);
+			cnv->foreColor = 15;
+			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
+		}
 
 		ledSpeedOption = numOptions++;
 		cnv->foreColor = 11;
@@ -1495,7 +1503,7 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		if (button == KEY_BIT_B || selOption == doneOption)
 			return;
 
-		if (selOption == ledsOption) {
+		if (selOption == ledPatternOption) {
 
 			if (button == KEY_BIT_LEFT) {
 				if (settings->ledMode)
@@ -1508,6 +1516,23 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 					settings->ledMode++;
 				else
 					settings->ledMode = LedModeOff;
+			}
+			badgeLedsApplySettings(settings, true);
+		}
+
+		if (selOption == ledColorOption) {
+
+			if (button == KEY_BIT_LEFT) {
+				if (settings->ledColor)
+					settings->ledColor--;
+				else
+					continue;
+			}
+			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
+				if (settings->ledColor < LedColorNumColors - 1)
+					settings->ledColor++;
+				else
+					settings->ledColor = LedColorCustom;
 			}
 			badgeLedsApplySettings(settings, true);
 		}
@@ -4173,9 +4198,90 @@ reload_dir:
 		return ok;
 	}
 
+	static bool uiPrvFirmwareFileName(const char *fname)
+	{
+		return uiPrvStrEndsWithNoCase(fname, ".bin");
+	}
+
+	static void uiPrvFwUpdateFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name, bool tryZDU)
+	{
+		uint32_t fileSz = fatfsFileGetSize(fil);
+
+		if (fileSz < 1024) {
+
+			if (!tryZDU)
+				uiAlert(cnv, "Selected firmware file is too small to be believable. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
+		}
+		else {
+
+			bool tryToUpdate = false;
+
+			if (tryZDU) {
+				uint8_t curForcedVer = *(volatile uint8_t*)0x10000020, availForcedVer;
+				uint32_t nBytesRead;
+
+				if (fatfsFileSeek(fil, 0x20) && fatfsFileRead(fil, &availForcedVer, 1, &nBytesRead) && nBytesRead == 1 && fatfsFileSeek(fil, 0) && curForcedVer < availForcedVer) {
+					
+					uiAlert(cnv, "There is a mandatory update to apply. It will be applied now. You may opt out, but the update will proceed anyways. Proceed?", DialogTypeOk);
+
+					tryToUpdate = true;
+				}
+				else {
+
+					pr("%s: update not interesting\n", __func__);
+				}
+			}
+			else {
+				int_fast8_t updateOption, cancelOption, numOptions = 0, selOption;
+				uint_fast8_t itemHeight;
+				uint8_t button = KEY_BIT_A | KEY_BIT_B;
+
+				itemHeight = uiPrvGlyphHeight(cnv) + 1;
+				uiPrvReset(cnv, false);
+				uiPrintf(cnv, 32, 10, "Firmware: %s", name);
+				uiPrvDrawWrappedString(cnv, "This option will replace the current firmware with the selected .bin file. No checks are made. GL HF", 48, 10);
+
+				updateOption = numOptions++;
+				uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Proceed", -1);
+				cancelOption = numOptions++;
+				uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
+				
+				selOption = uiPrvMenu(cnv, 0, numOptions, &button);
+
+				tryToUpdate = button == KEY_BIT_A && selOption == updateOption;
+				(void)cancelOption;
+			}
+
+			if (tryToUpdate) {
+
+				if (!uiPrvLoadFile(cnv, fil, 0x10000000, "FIRMWARE")) {
+
+					uiAlert(cnv, "Firmware update failed to be installed. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
+				}
+				else {
+
+					 while(1)
+					 	NVIC_SystemReset();
+				}
+			}
+		}
+	}
+
+	static void uiPrvFwUpdateLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name)
+	{
+		struct FatfsFil *fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+
+		if (!fil) {
+			uiAlert(cnv, "Cannot open selected firmware file. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
+			return;
+		}
+
+		uiPrvFwUpdateFile(cnv, fil, name, false);
+		(void)fatfsFileClose(fil);
+	}
+
 	static void uiPrvFwUpdate(struct Canvas *cnv, bool tryZDU)
 	{
-		int_fast8_t updateOption, cancelOption = -1, numOptions = 0, selOption, itemHeight;
 		struct FatfsVol *vol;
 
 		vol = uiPrvMountCard(cnv, tryZDU);
@@ -4185,74 +4291,28 @@ reload_dir:
 			pr("%s: no card init\n", __func__);
 		}
 		else {
+			struct FatFileLocator locator;
+			char name[UI_PICK_FILE_NAME_BUF_SZ];
+			const char *displayName = tryZDU ? "/UPDATE_OR_WE_ARE.FUCKED" : name;
+			struct FatfsFil *fil;
 
-			struct FatfsFil *fil = fatfsFileOpen(vol, tryZDU ? "/UPDATE_OR_WE_ARE.FUCKED":"/FIRMWARE.BIN", OPEN_MODE_READ);
+			if (!tryZDU && !uiPrvPickFile(cnv, vol, "/", uiPrvFirmwareFileName, "No .bin firmware files found on the SD card", &locator, name, sizeof(name), NULL, 0))
+				goto out_unmount;
+
+			fil = tryZDU ? fatfsFileOpen(vol, displayName, OPEN_MODE_READ) : fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
 
 			if (!fil) {
 				
 				pr("%s: file\n", __func__);
 
 				if (!tryZDU)
-					uiAlert(cnv, "Cannot find /FIRMWARE.BIN. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
+					uiAlert(cnv, "Cannot open selected firmware file. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
 			}
 			else {
-				uint32_t fileSz = fatfsFileGetSize(fil);
-
-				if (fileSz < 1024) {
-
-					if (!tryZDU)
-						uiAlert(cnv, "/FIRMWARE.BIN is too small to be believable. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
-				}
-				else {
-
-					bool tryToUpdate = false;
-
-					if (tryZDU) {
-						uint8_t curForcedVer = *(volatile uint8_t*)0x10000020, availForcedVer;
-						uint32_t nBytesRead;
-
-						if (fatfsFileSeek(fil, 0x20) && fatfsFileRead(fil, &availForcedVer, 1, &nBytesRead) && nBytesRead == 1 && fatfsFileSeek(fil, 0) && curForcedVer < availForcedVer) {
-							
-							uiAlert(cnv, "There is a mandatory update to apply. It will be applied now. You may opt out, but the update will proceed anyways. Proceed?", DialogTypeOk);
-
-							tryToUpdate = true;
-						}
-						else {
-
-							pr("%s: update not interesting\n", __func__);
-						}
-					}
-					else {
-						uint8_t button = KEY_BIT_A | KEY_BIT_B;
-
-						itemHeight = uiPrvGlyphHeight(cnv) + 1;
-						uiPrvDrawWrappedString(cnv, "This option will replace the current firmware with whatever is in /FIRMWARE.BIN on the card. No checks are made. GL HF", 32, 10);
-
-						updateOption = numOptions++;
-						uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Proceed", -1);
-						cancelOption = numOptions++;
-						uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
-						
-						selOption = uiPrvMenu(cnv, 0, numOptions, &button);
-
-						tryToUpdate = button == KEY_BIT_A && selOption == updateOption;
-					}
-
-					if (tryToUpdate) {
-
-						if (!uiPrvLoadFile(cnv, fil, 0x10000000, "FIRMWARE")) {
-
-							uiAlert(cnv, "Firmware update failed to be installed. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
-						}
-						else {
-
-							 while(1)
-							 	NVIC_SystemReset();
-						}
-					}
-				}
+				uiPrvFwUpdateFile(cnv, fil, displayName, tryZDU);
 				(void)fatfsFileClose(fil);
 			}
+out_unmount:
 			(void)uiPrvCardPreUnmount();
 			fatfsUnmount(vol);
 		}
@@ -4320,6 +4380,7 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenBadUsb,
 	UiBrowserOpenMusic,
 	UiBrowserOpenGame,
+	UiBrowserOpenFwUpdate,
 };
 
 static bool uiPrvRomFileName(const char *fname)
@@ -4355,8 +4416,8 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 
 static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const struct UiFileRef *ref)
 {
-	enum UiBrowserOpenWithId ids[7];
-	const char *labels[7];
+	enum UiBrowserOpenWithId ids[8];
+	const char *labels[8];
 	uint_fast8_t numOptions = 0, itemHeight, i, selOption;
 	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
@@ -4379,6 +4440,10 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	if (uiPrvRomFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenGame;
 		labels[numOptions++] = "Game";
+	}
+	if (uiPrvFirmwareFileName(ref->name)) {
+		ids[numOptions] = UiBrowserOpenFwUpdate;
+		labels[numOptions++] = "Firmware Update";
 	}
 
 	if (!numOptions)
@@ -4430,6 +4495,10 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	case UiBrowserOpenGame:
 		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
+		return UiToolBrowser;
+
+	case UiBrowserOpenFwUpdate:
+		uiPrvFwUpdateLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
 
 	case UiBrowserOpenNone:

@@ -1,4 +1,4 @@
-APP	= uGB
+APP	= DC32-cfw
 CC	= gcc
 LD	= gcc
 

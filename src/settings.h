@@ -9,9 +9,20 @@ enum LedMode {
 	LedModeOff,
 	LedModeSolid,
 	LedModeRainbow,
-	LedModeFlame,
+	LedModePulse,
+	LedModeFlame = LedModePulse,
 	LedModeTravelingDot,
+	LedModeRandom,
+	LedModeFlashlight,
 	LedModeNumModes,
+};
+
+enum LedColor {
+	LedColorCustom,
+	LedColorRainbow,
+	LedColorFlame,
+	LedColorRandom,
+	LedColorNumColors,
 };
 
 struct Settings {
@@ -32,7 +43,8 @@ struct Settings {
 	uint8_t ledBrightness;
 	uint8_t musicVolume		:	4;
 	uint8_t musicLoopTrack	:	1;
-	uint8_t reserved		:	3;
+	uint8_t ledColor		:	2;
+	uint8_t reserved		:	1;
 };
 
 

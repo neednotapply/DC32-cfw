@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Embedded C firmware for the DEF CON 32 badge, targeting the Raspberry Pi RP2350 microcontroller. Includes a complete Game Boy (uGB) emulator, badge-specific LCD display driver, audio, touch input, IR, WS2812 LEDs, SD card storage, and USB HID support.
+Embedded C firmware for the DEF CON 32 badge, targeting the Raspberry Pi RP2350 microcontroller. Includes the uGB Game Boy emulator, badge-specific LCD display driver, audio, touch input, IR, WS2812 LEDs, SD card storage, and USB HID support.
 
-This is **not a web application** — it produces a binary firmware image (`uGB.bin` / `uGB.uf2`) that runs on physical badge hardware.
+This is **not a web application** — it produces a binary firmware image (`DC32-cfw.bin` / `DC32-cfw.uf2`) that runs on physical badge hardware.
 
 ## Architecture
 
@@ -33,13 +33,13 @@ This is **not a web application** — it produces a binary firmware image (`uGB.
 cd src && make app
 ```
 
-Produces `src/uGB.bin` — the raw firmware binary.
+Produces `src/DC32-cfw.bin` — the raw firmware binary.
 
 ```bash
 cd src && make sdcard
 ```
 
-Produces `src/FIRMWARE.BIN` — copy to SD card root for on-device update.
+Produces `src/FIRMWARE.BIN` — legacy updater filename. The badge updater can browse for any `.bin` firmware file.
 
 ## Replit-Specific Fixes Applied
 
@@ -63,10 +63,10 @@ Produces `src/FIRMWARE.BIN` — copy to SD card root for on-device update.
 
 ## Workflow
 
-- **Build Firmware**: Runs `cd src && make clean && make app` in the console — compiles and links the full firmware, outputs `src/uGB.bin`.
+- **Build Firmware**: Runs `cd src && make clean && make app` in the console — compiles and links the full firmware, outputs `src/DC32-cfw.bin`.
 
 ## Flashing to Hardware
 
-- **UF2 bootloader**: Use `uGB.uf2` (generated separately or from GitHub releases)
-- **SD card update**: Copy `FIRMWARE.BIN` to SD card root
+- **UF2 bootloader**: Use `DC32-cfw.uf2` (generated separately or from GitHub releases)
+- **SD card update**: Copy a `.bin` firmware image to the SD card and select it from the badge updater or browser
 - **Direct flash**: `sudo make flash` (requires CortexProg)

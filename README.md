@@ -1,6 +1,6 @@
 # DC32 Badge Firmware
 
-This repository contains the custom firmware image that shipped with the DEF CON 32 badge. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles a complete "uGB" Game Boy emulator along with the bespoke display, audio, storage, and user-interface plumbing required to run it on the hardware. The firmware and emulator were created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
+This repository contains the DC32-cfw custom firmware image that shipped with the DEF CON 32 badge. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside the bespoke display, audio, storage, and user-interface plumbing required to run it on the hardware. The firmware and emulator were created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
 ## Features
 
@@ -30,7 +30,7 @@ This repository contains the custom firmware image that shipped with the DEF CON
 ### Prerequisites
 
 - **Toolchain:** Install the ARM embedded GCC toolchain (`arm-none-eabi-gcc`, `arm-none-eabi-objcopy`) and `make`, which are used to compile and package the firmware.
-- **Optional direct flashing utility:** The legacy `make flash` recipe depends on `CortexProg` to write `uGB.bin` to the RP2350 over USB (`sudo CortexProg info targetsel 0 write uGB.bin 0x10000000`). Adjust `CMD` in `src/Makefile` if you use a different programmer.
+- **Optional direct flashing utility:** The legacy `make flash` recipe depends on `CortexProg` to write `DC32-cfw.bin` to the RP2350 over USB (`sudo CortexProg info targetsel 0 write DC32-cfw.bin 0x10000000`). Adjust `CMD` in `src/Makefile` if you use a different programmer.
 
 ### Building the firmware
 
@@ -39,12 +39,12 @@ This repository contains the custom firmware image that shipped with the DEF CON
    ```bash
    make app
    ```
-   This produces `uGB.bin`, which contains the firmware image built with the badge-specific drivers and emulator core.
+   This produces `DC32-cfw.bin`, which contains the firmware image built with the badge-specific drivers and emulator core.
 3. Build the SD-card updater image, if needed:
    ```bash
    make sdcard
    ```
-   This produces `FIRMWARE.BIN`, a byte-for-byte copy of `uGB.bin` with the exact filename the badge's on-device updater looks for at the SD card root.
+   This produces `FIRMWARE.BIN`, a byte-for-byte copy of `DC32-cfw.bin` using the legacy updater filename.
 4. Optional flags:
    - `SDL=1` links against SDL2 to enable the desktop simulation front-end used for development builds.
    - `HQX=1` adds HQ3x upscaling support when building the optional host tooling.
@@ -55,22 +55,22 @@ Clean intermediate objects with `make clean` when switching build options or upd
 
 The GitHub Actions workflow packages a `firmware` artifact after it builds a commit. GitHub releases also receive the two end-user update files:
 
-- `uGB.uf2` - recommended RP2350 USB bootloader image.
-- `FIRMWARE.BIN` - SD-card updater image for the badge UI.
+- `DC32-cfw.uf2` - recommended RP2350 USB bootloader image.
+- `DC32-cfw.bin` or `FIRMWARE.BIN` - SD-card updater image for the badge UI.
 
-The build still creates `uGB.bin` internally as the raw firmware image, but release packages only publish the files users should copy to a badge. Use one flashing path per update:
+The build still creates `DC32-cfw.bin` internally as the raw firmware image, but release packages only publish the files users should copy to a badge. Use one flashing path per update:
 
 #### UF2 bootloader
 
-Put the badge into the RP2350 USB bootloader mode, then copy the downloaded `uGB.uf2` onto the mounted UF2 drive. The drive will disconnect after the copy completes and the badge will boot the new firmware.
+Put the badge into the RP2350 USB bootloader mode, then copy the downloaded `DC32-cfw.uf2` onto the mounted UF2 drive. The drive will disconnect after the copy completes and the badge will boot the new firmware.
 
 #### Direct BIN programmer
 
-The direct binary path is available with `sudo make flash`; it wraps the `CortexProg` invocation defined in `CMD` and writes `uGB.bin` to the RP2350 XIP address space (`0x10000000`). Modify the command or provide the appropriate permissions if your setup differs.
+The direct binary path is available with `sudo make flash`; it wraps the `CortexProg` invocation defined in `CMD` and writes `DC32-cfw.bin` to the RP2350 XIP address space (`0x10000000`). Modify the command or provide the appropriate permissions if your setup differs.
 
 #### SD-card updater
 
-Copy `FIRMWARE.BIN` to the root of the badge SD card so `/FIRMWARE.BIN` exists. Insert the SD card, boot the badge, and use the on-device firmware update option. The updater looks specifically for `/FIRMWARE.BIN`, so keep the filename uppercase and unchanged.
+Copy a `.bin` firmware image such as `DC32-cfw.bin` or `FIRMWARE.BIN` anywhere on the badge SD card. Insert the SD card, boot the badge, and use the on-device firmware update option to browse for the file. The general file browser also opens `.bin` files with the firmware updater.
 
 A `make trace` target is also provided for developers who want to start the badge with hardware tracing enabled at the configured watch address (`ZWT_ADDR`).
 

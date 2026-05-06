@@ -6,6 +6,7 @@
 #include "settings.h"
 
 const char* badgeLedsModeName(uint_fast8_t mode);
+const char* badgeLedsColorName(uint_fast8_t color);
 void badgeLedsApplySettings(const struct Settings *settings, bool force);
 void badgeLedsTick(void);
 void badgeLedsGameWrite(void);

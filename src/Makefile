@@ -34,6 +34,8 @@ LD_FLAGS	+= -Wl,--gc-sections -Wl,-T linker_rp2350_defcon.lkr -lm $(CPU)
 CC		= arm-none-eabi-gcc
 LD		= arm-none-eabi-gcc
 OBJCOPY		= arm-none-eabi-objcopy
+PYTHON		?= python3
+UF2CONV		= $(PYTHON) ../tools/bin_to_uf2.py
 EXTRA_OBJS	= main_rp2350_defcon.o crt_rp2350.o timebase.o printf.o dispDefcon.o utf.o qspi2350.o ui.o settings.o badgeLeds.o bootGuard.o fonts.o sleepDefcon.o sd.o fatfs.o sdHwRP2350.o pioI2C.o pioIrdaSIR.o pioWS2812.o irRemote.o audioPwm.o rtttlPlayer.o usbHid.o badUsb.o toolWorkspace.o
 
 CC_FLAGS	+= -isysteminc_RP2350
@@ -48,6 +50,7 @@ EXTRA_OBJS	+= mappersC.o
 #EXTRA_OBJS	+= mappersAsmM3.o
 
 TARGET		= $(APP).bin
+UF2_TARGET	= $(APP).uf2
 SDCARD_TARGET	= FIRMWARE.BIN
 
 CMD		= sudo CortexProg info targetsel 0 write $(APP).bin 0x10000000
@@ -68,15 +71,20 @@ $(APP): $(OBJS)
 	$(EXTRA)
 
 
-.PHONY: app AVR clean flash sdcard trace
+.PHONY: app AVR clean flash sdcard trace uf2
 
-app: $(TARGET)
+app: $(TARGET) $(UF2_TARGET)
 
 %.bin: %
 	$(OBJCOPY) -O binary $< $@ -j.text -j.rodata -j.data -j.vectors
 
+%.uf2: %.bin ../tools/bin_to_uf2.py
+	$(UF2CONV) $< $@ --base 0x10000000 --family rp2350-arm-s --abs-block
+
 $(SDCARD_TARGET): $(APP).bin
 	cp $< $@
+
+uf2: $(UF2_TARGET)
 
 sdcard: $(SDCARD_TARGET)
 
@@ -90,7 +98,7 @@ AVR:	$(APP)
 	$(CC) $(CCFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(APP) $(APP).bin $(SDCARD_TARGET) *.o
+	rm -f $(APP) $(APP).bin $(UF2_TARGET) $(SDCARD_TARGET) *.o
 
 flash: $(APP).bin
 	$(CMD)

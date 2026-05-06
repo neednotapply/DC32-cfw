@@ -49,7 +49,6 @@ static void __ramcode flashPrvEnterXipMode(void)
 	uint_fast8_t i;
 
 	divClk = (TICKS_PER_SECOND + maxClk - 1) / maxClk;	//non-integer divisions do not do well with QSPI
-	pr("QSPI: using divisor %u for a clock rate of %luHz. RXDELAY = %d\n", divClk, TICKS_PER_SECOND / divClk, rxDelay);
 	
 	//issue a read with the proper mode bits
 	qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
@@ -222,7 +221,7 @@ bool __attribute__((noinline)) __ramcode flashWrite(uint32_t addr, uint32_t erzS
 }
 
 
-void flashBootInit(void)
+void __ramcode flashBootInit(void)
 {
 	uint32_t i, prevPrimask;
 	uint64_t uid;
@@ -260,5 +259,3 @@ uint64_t flashGetUid(void)
 {
 	return mFlashUid;
 }
-
-

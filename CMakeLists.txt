@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 set(PICO_BOARD "defcon32_badge" CACHE STRING "Badge board name for SDK-compatible build metadata")
 project(dc32_badge_firmware C ASM)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(APP DC32-cfw)
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -110,6 +111,12 @@ target_link_libraries(${APP} PRIVATE m)
 add_custom_command(TARGET ${APP} POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${APP}> ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin -j.text -j.rodata -j.data -j.vectors
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin ${CMAKE_CURRENT_BINARY_DIR}/FIRMWARE.BIN
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/bin_to_uf2.py
+        ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin
+        ${CMAKE_CURRENT_BINARY_DIR}/${APP}.uf2
+        --base 0x10000000
+        --family rp2350-arm-s
+        --abs-block
     COMMAND ${CMAKE_SIZE} -A $<TARGET_FILE:${APP}>
     COMMAND ${CMAKE_COMMAND}
         -D SIZE_TOOL=${CMAKE_SIZE}

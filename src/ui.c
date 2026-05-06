@@ -1770,6 +1770,9 @@ bool uiSaveSavestate(void)
 #ifndef NO_SD_CARD
 	#define IR_POWER_FILE			"/IR/POWER.IR"
 	#define IR_FLIPPER_TV_FILE		"/IR/tv.ir"
+	#define IR_FLIPPER_AC_FILE		"/IR/ac.ir"
+	#define IR_FLIPPER_AUDIO_FILE	"/IR/audio.ir"
+	#define IR_FLIPPER_PROJECTOR_FILE	"/IR/projector.ir"
 	#define IR_FILE_MAGIC			"DC32IR1"
 	#define IR_DEFAULT_CARRIER		38000
 	#define IR_DEFAULT_REPEAT		1
@@ -1809,6 +1812,18 @@ bool uiSaveSavestate(void)
 		bool hasAddress;
 		bool hasCommand;
 		bool sentRaw;
+	};
+
+	struct IrUniversalRemote {
+		const char *name;
+		const char *path;
+	};
+
+	static const struct IrUniversalRemote mIrUniversalRemotes[] = {
+		{"TV", IR_FLIPPER_TV_FILE},
+		{"A/C", IR_FLIPPER_AC_FILE},
+		{"Audio", IR_FLIPPER_AUDIO_FILE},
+		{"Projector", IR_FLIPPER_PROJECTOR_FILE},
 	};
 
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
@@ -3112,9 +3127,23 @@ bool uiSaveSavestate(void)
 		return uiPrvStrEndsWithNoCase(fname, ".ir");
 	}
 
+	static bool uiPrvIrButtonListContains(struct MusicOption *head, const char *name)
+	{
+		while (head) {
+			if (uiPrvEqNoCase(head->name, name))
+				return true;
+			head = head->next;
+		}
+
+		return false;
+	}
+
 	static bool uiPrvIrButtonListAppend(struct UiFileListCtx *ctx, const char *name)
 	{
 		struct FatFileLocator loc;
+
+		if (uiPrvIrButtonListContains(ctx->head, name))
+			return true;
 
 		memset(&loc, 0, sizeof(loc));
 		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
@@ -3241,9 +3270,8 @@ bool uiSaveSavestate(void)
 		}
 	}
 
-	static bool uiPrvIrRemoteLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *fileName)
+	static bool uiPrvIrRemoteFile(struct Canvas *cnv, struct FatfsFil *fil, const char *fileName)
 	{
-		struct FatfsFil *fil = NULL;
 		struct MusicOption *buttons = NULL, *button;
 		char buttonName[IR_NAME_BUF_SZ];
 		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
@@ -3256,12 +3284,6 @@ bool uiSaveSavestate(void)
 		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
 			uiAlert(cnv, "Tool workspace is too small for IR remote", DialogTypeOk);
 			return false;
-		}
-
-		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
-		if (!fil) {
-			uiAlert(cnv, "Cannot open IR remote file", DialogTypeOk);
-			goto out_report;
 		}
 
 		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
@@ -3290,14 +3312,11 @@ bool uiSaveSavestate(void)
 		memset(&stats, 0, sizeof(stats));
 		irRemoteBegin();
 		irStarted = true;
-		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 1);
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 0);
 
 	out_close:
 		if (irStarted)
 			irRemoteEnd();
-		if (fil)
-			fatfsFileClose(fil);
-	out_report:
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
@@ -3305,12 +3324,58 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "IR remote cancelled", DialogTypeOk);
 		}
 		else if (ret) {
-			uiAlert(cnv, "IR remote button sent", DialogTypeOk);
+			char msg[96];
+
+			(void)sprintf(msg, "IR remote complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (irStarted) {
 			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
 		}
 
+		return ret;
+	}
+
+	static bool uiPrvIrRemoteLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *fileName)
+	{
+		struct FatfsFil *fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+		bool ret = false;
+
+		if (!fil) {
+			uiAlert(cnv, "Cannot open IR remote file", DialogTypeOk);
+			return false;
+		}
+
+		ret = uiPrvIrRemoteFile(cnv, fil, fileName);
+		fatfsFileClose(fil);
+		return ret;
+	}
+
+	static bool uiPrvIrUniversalRemote(struct Canvas *cnv, const struct IrUniversalRemote *remote)
+	{
+		struct FatfsVol *vol = NULL;
+		struct FatfsFil *fil = NULL;
+		bool ret = false;
+		char msg[96];
+
+		vol = uiPrvMountCard(cnv, false);
+		if (!vol)
+			return false;
+
+		fil = fatfsFileOpen(vol, remote->path, OPEN_MODE_READ);
+		if (!fil) {
+			(void)sprintf(msg, "Cannot find %s on the SD card", remote->path);
+			uiAlert(cnv, msg, DialogTypeOk);
+			goto out_unmount;
+		}
+
+		ret = uiPrvIrRemoteFile(cnv, fil, remote->name);
+
+	out_unmount:
+		if (fil)
+			fatfsFileClose(fil);
+		(void)uiPrvCardPreUnmount();
+		fatfsUnmount(vol);
 		return ret;
 	}
 
@@ -3339,27 +3404,21 @@ bool uiSaveSavestate(void)
 	static bool uiPrvIrTools(struct Canvas *cnv)
 	{
 		while (1) {
-			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t powerOption = 0, muteOption = 1, remoteOption = 2, backOption = 3;
+			uint_fast8_t itemHeight, selOption, i;
+			uint_fast8_t numRemotes = sizeof(mIrUniversalRemotes) / sizeof(*mIrUniversalRemotes);
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
-			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Power Spam", -1);
-			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Mute Spam", -1);
-			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Remote", -1);
+			for (i = 0; i < numRemotes; i++)
+				uiPuts(cnv, cnv->h - (numRemotes + 1 - i) * itemHeight, 10, mIrUniversalRemotes[i].name, -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
-			selOption = uiPrvMenu(cnv, 0, 4, &button);
-			if (button == KEY_BIT_B || selOption == backOption)
+			selOption = uiPrvMenu(cnv, 0, numRemotes + 1, &button);
+			if (button == KEY_BIT_B || selOption == numRemotes)
 				return false;
-			if (selOption == powerOption)
-				(void)uiPrvIrPowerBlast(cnv);
-			else if (selOption == muteOption)
-				(void)uiPrvIrMuteBlast(cnv);
-			else if (selOption == remoteOption)
-				(void)uiPrvIrRemote(cnv);
+			(void)uiPrvIrUniversalRemote(cnv, &mIrUniversalRemotes[selOption]);
 		}
 	}
 

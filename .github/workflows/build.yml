@@ -40,14 +40,22 @@ jobs:
 
       - name: Build firmware
         working-directory: src
-        run: make app sdcard
+        run: make clean app sdcard
 
       - name: Package firmware artifacts
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
           cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
-          cp src/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+          python3 tools/bin_to_uf2.py \
+            src/DC32-cfw.bin \
+            "$ARTIFACT_DIR/DC32-cfw.uf2" \
+            --base 0x10000000 \
+            --family rp2350-arm-s \
+            --abs-block
+          cmp src/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+          python3 tools/verify_uf2.py "$ARTIFACT_DIR/DC32-cfw.uf2" --input-bin src/DC32-cfw.bin
+          sha256sum "$ARTIFACT_DIR/DC32-cfw.uf2" "$ARTIFACT_DIR/FIRMWARE.BIN" > "$ARTIFACT_DIR/SHA256SUMS"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -56,6 +64,7 @@ jobs:
           path: |
             ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
+            ${{ runner.temp }}/firmware/SHA256SUMS
 
       - name: Attach firmware to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
@@ -64,4 +73,5 @@ jobs:
           files: |
             ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
+            ${{ runner.temp }}/firmware/SHA256SUMS
           overwrite_files: true

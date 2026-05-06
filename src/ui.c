@@ -3044,6 +3044,69 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
+	static bool uiPrvIrBlastLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *wantedName, const char *title)
+	{
+		struct FatfsFil *fil = NULL;
+		struct ToolWorkspaceSpan lineMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
+		char *line = (char*)lineMem.ptr;
+		struct IrBlastStats stats;
+		bool ret = false, isFlipper = false, irStarted = false;
+
+		memset(&stats, 0, sizeof(stats));
+		if (!line || lineMem.size < IR_LINE_BUF_SZ) {
+			uiAlert(cnv, "Tool workspace is too small for IR", DialogTypeOk);
+			return false;
+		}
+
+		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+		if (!fil) {
+			uiAlert(cnv, "Cannot open IR file", DialogTypeOk);
+			goto out_report;
+		}
+
+		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper))
+			goto out_close;
+		if (wantedName && !isFlipper) {
+			uiAlert(cnv, "Selected IR action requires a Flipper IR file", DialogTypeOk);
+			goto out_close;
+		}
+
+		memset(&stats, 0, sizeof(stats));
+		irRemoteBegin();
+		irStarted = true;
+		ret = isFlipper ? uiPrvIrBlastFlipper(cnv, fil, line, &stats, wantedName, title, 0) : uiPrvIrPowerBlastDc32(cnv, fil, line, &stats);
+
+	out_close:
+		if (irStarted)
+			irRemoteEnd();
+		if (fil)
+			fatfsFileClose(fil);
+	out_report:
+		if (stats.lineTooLong) {
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.malformed && !stats.sent) {
+			char msg[80];
+
+			(void)sprintf(msg, "Malformed IR file near line %u", (unsigned)stats.lineNo);
+			uiAlert(cnv, msg, DialogTypeOk);
+		}
+		else if (stats.cancelled) {
+			uiAlert(cnv, "IR action cancelled", DialogTypeOk);
+		}
+		else if (ret) {
+			char msg[96];
+
+			(void)sprintf(msg, "IR action complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			uiAlert(cnv, msg, DialogTypeOk);
+		}
+		else if (fil) {
+			uiAlert(cnv, "No matching IR codes found in the selected file", DialogTypeOk);
+		}
+
+		return ret;
+	}
+
 	static bool uiPrvIrRemoteFileName(const char *fname)
 	{
 		return uiPrvStrEndsWithNoCase(fname, ".ir");
@@ -3277,19 +3340,25 @@ bool uiSaveSavestate(void)
 	{
 		while (1) {
 			uint_fast8_t itemHeight, selOption;
-			uint_fast8_t remoteOption = 0, backOption = 1;
+			uint_fast8_t powerOption = 0, muteOption = 1, remoteOption = 2, backOption = 3;
 			uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
+			uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Power Spam", -1);
+			uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Mute Spam", -1);
 			uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Remote", -1);
 			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
-			selOption = uiPrvMenu(cnv, 0, 2, &button);
+			selOption = uiPrvMenu(cnv, 0, 4, &button);
 			if (button == KEY_BIT_B || selOption == backOption)
 				return false;
-			if (selOption == remoteOption)
+			if (selOption == powerOption)
+				(void)uiPrvIrPowerBlast(cnv);
+			else if (selOption == muteOption)
+				(void)uiPrvIrMuteBlast(cnv);
+			else if (selOption == remoteOption)
 				(void)uiPrvIrRemote(cnv);
 		}
 	}
@@ -4108,6 +4177,7 @@ enum UiToolId {
 	UiToolFwUpdate,
 	UiToolPowerOff,
 	UiToolNum,
+	UiToolRunGame,
 };
 
 #ifndef NO_SD_CARD
@@ -4119,6 +4189,17 @@ struct UiFileRef {
 	const char *parentPath;
 };
 
+enum UiBrowserOpenWithId {
+	UiBrowserOpenNone,
+	UiBrowserOpenCancelled,
+	UiBrowserOpenIrPowerSpam,
+	UiBrowserOpenIrMuteSpam,
+	UiBrowserOpenIrRemote,
+	UiBrowserOpenBadUsb,
+	UiBrowserOpenMusic,
+	UiBrowserOpenGame,
+};
+
 static bool uiPrvPathIsFolderNoCase(const char *path, const char *folder)
 {
 	uint32_t pathLen = strlen(path), folderLen = strlen(folder);
@@ -4128,6 +4209,13 @@ static bool uiPrvPathIsFolderNoCase(const char *path, const char *folder)
 	if (strsCaselesslyCompareUtf(path, folder, folderLen))
 		return false;
 	return !path[folderLen] || path[folderLen] == '/';
+}
+
+static bool uiPrvPathEqNoCase(const char *a, const char *b)
+{
+	uint32_t aLen = strlen(a), bLen = strlen(b);
+
+	return aLen == bLen && !strsCaselesslyCompareUtf(a, b, aLen);
 }
 
 static bool uiPrvRomFileName(const char *fname)
@@ -4161,21 +4249,73 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	return (enum UiToolId)selOption;
 }
 
-static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref, UiRunGameF runGameF, void *userData)
+static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const struct UiFileRef *ref)
 {
-	(void)runGameF;
-	(void)userData;
+	enum UiBrowserOpenWithId ids[7];
+	const char *labels[7];
+	uint_fast8_t numOptions = 0, itemHeight, i, selOption;
+	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 	if (uiPrvIrRemoteFileName(ref->name)) {
-		(void)uiPrvIrRemoteLocator(cnv, vol, &ref->locator, ref->name);
-		return UiToolBrowser;
+		ids[numOptions] = UiBrowserOpenIrRemote;
+		labels[numOptions++] = "IR Remote";
+		ids[numOptions] = UiBrowserOpenIrPowerSpam;
+		labels[numOptions++] = "IR Power Spam";
+		ids[numOptions] = UiBrowserOpenIrMuteSpam;
+		labels[numOptions++] = "IR Mute Spam";
 	}
 	if (uiPrvStrEndsWithNoCase(ref->name, ".badusb") ||
 		(uiPrvStrEndsWithNoCase(ref->name, ".txt") && uiPrvPathIsFolderNoCase(ref->parentPath, "/BADUSB"))) {
+		ids[numOptions] = UiBrowserOpenBadUsb;
+		labels[numOptions++] = "BadUSB";
+	}
+	if (uiPrvStrEndsWithNoCase(ref->name, ".rtttl") ||
+		(uiPrvStrEndsWithNoCase(ref->name, ".txt") && uiPrvPathIsFolderNoCase(ref->parentPath, "/MUSIC"))) {
+		ids[numOptions] = UiBrowserOpenMusic;
+		labels[numOptions++] = "Music";
+	}
+	if (uiPrvRomFileName(ref->name)) {
+		ids[numOptions] = UiBrowserOpenGame;
+		labels[numOptions++] = "Game";
+	}
+
+	if (!numOptions)
+		return UiBrowserOpenNone;
+	if (numOptions == 1)
+		return ids[0];
+
+	uiPrvReset(cnv, false);
+	itemHeight = uiPrvGlyphHeight(cnv) + 1;
+	for (i = 0; i < numOptions; i++)
+		uiPuts(cnv, cnv->h - (numOptions + 1 - i) * itemHeight, 10, labels[i], -1);
+	uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
+
+	selOption = uiPrvMenu(cnv, 0, numOptions + 1, &button);
+	if (button == KEY_BIT_B || selOption == numOptions)
+		return UiBrowserOpenCancelled;
+	return ids[selOption];
+}
+
+static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref)
+{
+	switch (uiPrvBrowserOpenWith(cnv, ref)) {
+	case UiBrowserOpenIrRemote:
+		(void)uiPrvIrRemoteLocator(cnv, vol, &ref->locator, ref->name);
+		return UiToolBrowser;
+
+	case UiBrowserOpenIrPowerSpam:
+		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, NULL, "IR Power Spam");
+		return UiToolBrowser;
+
+	case UiBrowserOpenIrMuteSpam:
+		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, "Mute", "IR Mute Spam");
+		return UiToolBrowser;
+
+	case UiBrowserOpenBadUsb:
 		(void)uiPrvRunBadUsbLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
-	}
-	if (uiPrvStrEndsWithNoCase(ref->name, ".rtttl")) {
+
+	case UiBrowserOpenMusic: {
 		struct Settings settings;
 
 		settingsGet(&settings);
@@ -4184,17 +4324,25 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		settingsSet(&settings);
 		return UiToolBrowser;
 	}
-	if (uiPrvRomFileName(ref->name)) {
-		if (!uiPrvPathIsFolderNoCase(ref->parentPath, "/ROM")) {
+
+	case UiBrowserOpenGame:
+		if (!uiPrvPathEqNoCase(ref->parentPath, "/ROM")) {
 			uiAlert(cnv, "Game files must be launched from /ROM", DialogTypeOk);
 			return UiToolBrowser;
 		}
 		if (uiPrvConfirmRomSelection(cnv, vol, ref->name))
-			return UiToolGame;
+			return UiToolRunGame;
 		return UiToolBrowser;
+
+	case UiBrowserOpenNone:
+		uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
+		return UiToolBrowser;
+
+	case UiBrowserOpenCancelled:
+	default:
+		break;
 	}
 
-	uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
 	return UiToolBrowser;
 }
 
@@ -4207,6 +4355,9 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 	char *browserPath = (char*)pathMem.ptr;
 	struct UiFileRef ref;
+
+	(void)runGameF;
+	(void)userData;
 
 	if (!browserPath || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ) {
 		uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
@@ -4230,7 +4381,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 		ref.locator = locator;
 		ref.name = name;
 		ref.parentPath = browserPath;
-		nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref, runGameF, userData);
+		nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref);
 		if (nextTool != UiToolBrowser)
 			break;
 		browserPath[0] = '/';
@@ -4242,6 +4393,16 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	return nextTool;
 }
 #endif
+
+static void uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	toolWorkspaceEnd();
+	uiPrvLoadSavestate();
+	runGameF(userData);
+	if (!uiSaveSavestate())
+		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
+	toolWorkspaceBegin();
+}
 
 static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
@@ -4272,22 +4433,12 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (button == KEY_BIT_B || selOption == switchOption)
 			return uiPrvToolSwitcher(cnv, UiToolGame);
 		if (selOption == runOption) {
-			toolWorkspaceEnd();
-			uiPrvLoadSavestate();
-			runGameF(userData);
-			if (!uiSaveSavestate())
-				uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
-			toolWorkspaceBegin();
+			uiPrvRunLoadedGame(cnv, runGameF, userData);
 		}
 	#ifndef NO_SD_CARD
 		else if (selOption == selectOption) {
 			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0)) {
-				toolWorkspaceEnd();
-				uiPrvLoadSavestate();
-				runGameF(userData);
-				if (!uiSaveSavestate())
-					uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
-				toolWorkspaceBegin();
+				uiPrvRunLoadedGame(cnv, runGameF, userData);
 			}
 		}
 	#endif
@@ -4366,6 +4517,11 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			case UiToolGame:
 				activeTool = uiPrvGameTool(cnv, runGameF, userData);
+				continue;
+
+			case UiToolRunGame:
+				uiPrvRunLoadedGame(cnv, runGameF, userData);
+				activeTool = UiToolBrowser;
 				continue;
 
 			case UiToolSettings:

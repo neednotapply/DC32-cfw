@@ -4,6 +4,7 @@
 #include "gbCartHeader.h"
 #include "settings.h"
 #include "badgeLeds.h"
+#include "bootGuard.h"
 #include "memMap.h"
 #include "printf.h"
 #include "sleep.h"
@@ -1010,6 +1011,11 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 	}
 
 	return true;
+}
+
+static bool uiPrvRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc");
 }
 
 #ifndef NO_SD_CARD
@@ -2126,124 +2132,21 @@ bool uiSaveSavestate(void)
 	
 	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz)	//corrupts GB's RAM, returns true if a selection was made
 	{
-		uint32_t i, listTop, itemLeft, numRoms, topItem = 0, selectedOnscreenItem = 0, prevTopItem = 1, prevSelOnscreenItem = 1, curGlobalIdx;
-		uint_fast8_t itemHeight, itemsOnscreen;
-		struct RomOption *head, *tail, *cur;
-		struct FontGlyphInfo gi;
+		struct FatFileLocator locator;
 		struct FatfsVol *vol;
+		char name[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ret = false;
 		
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
 		
-		cnv->font = FontLarge;
-		listTop = uiPrvGlyphHeight(cnv) + 1;
-		uiPrvReset(cnv, false);
-		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
-
 		//rom selection will corrupt our cart RAM, save it
 		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
-		
-		itemHeight = uiPrvGlyphHeight(cnv) + 1;
-		itemsOnscreen = (cnv->h - listTop) / itemHeight;
-		
-		numRoms = uiPrvListRoms(cnv, vol, &head, &tail);
-		if (!numRoms)
-			return false;
-		
-		sortNames(&head, &tail, numRoms);
-			
-		if (itemsOnscreen > numRoms)
-			itemsOnscreen = numRoms;
-		
-		while (1) {
-			
-			uint_fast8_t scrollWidth;
-			
-			curGlobalIdx = topItem + selectedOnscreenItem;
-			for (cur = head, i = 0; i < topItem; i++, cur = cur->next);
-			
-			if (prevTopItem != topItem) {
-				
-				uiPrvReset(cnv, false);
-				
-				scrollWidth = uiPrvDrawScrollbar(cnv, listTop, numRoms, topItem, itemsOnscreen);
-				
-				cnv->foreColor = 12;
-				for (i = 0; i < itemsOnscreen; i++, cur = cur->next)
-					uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, cur->name);
-				
-				prevSelOnscreenItem = selectedOnscreenItem + 1;		//force redraw of arrow
-			}
-			prevTopItem = topItem;
-			if (prevSelOnscreenItem != selectedOnscreenItem) {
-				
-				cnv->foreColor = 0;
-				uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
-				cnv->foreColor = 15;
-				uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
-			}
-			prevSelOnscreenItem = selectedOnscreenItem;
-			switch (uiPrvRecvKeypress()) {
-				case KEY_BIT_A:
-					for (cur = head, i = 0; i < curGlobalIdx; i++, cur = cur->next);
-					if (uiPrvConfirmRomSelection(cnv, vol, NULL, cur->name)) {
-						ret = true;
-						goto out;
-					}
-					prevTopItem = topItem + 1;	//force a redraw
-					break;
-					
-				case KEY_BIT_B:		//no rom selected
-					goto out;
-				
-				case KEY_BIT_DOWN:
-					if (curGlobalIdx < numRoms - 1) {
-						curGlobalIdx++;
-						selectedOnscreenItem++;
-						if (selectedOnscreenItem == itemsOnscreen) {
-							
-							topItem += itemsOnscreen;
-							if (topItem > numRoms - itemsOnscreen)	
-								topItem = numRoms - itemsOnscreen;
-							selectedOnscreenItem = curGlobalIdx - topItem;
-						}
-					}
-					break;
-				
-				case KEY_BIT_UP:
-					if (curGlobalIdx > 0) {
-						curGlobalIdx--;
-						if (!selectedOnscreenItem--) {
-							
-							if (topItem < itemsOnscreen)
-								topItem = 0;
-							else
-								topItem -= itemsOnscreen;
-							selectedOnscreenItem = curGlobalIdx - topItem;
-						}
-					}
-					break;
 
-				case KEY_BIT_RIGHT: {
-					uint32_t selectedItem = curGlobalIdx;
-
-					uiPrvPageSelection(&selectedItem, &topItem, numRoms, itemsOnscreen, true);
-					selectedOnscreenItem = selectedItem - topItem;
-					break;
-				}
-
-				case KEY_BIT_LEFT: {
-					uint32_t selectedItem = curGlobalIdx;
-
-					uiPrvPageSelection(&selectedItem, &topItem, numRoms, itemsOnscreen, false);
-					selectedOnscreenItem = selectedItem - topItem;
-					break;
-				}
-			}
-		}
+		if (uiPrvPickFile(cnv, vol, "/", uiPrvRomFileName, "No .gb or .gbc files found on the SD card", &locator, name, sizeof(name), NULL, 0))
+			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:
 		(void)uiPrvCardPreUnmount();
@@ -4407,6 +4310,41 @@ enum UiToolId {
 	UiToolRunGame,
 };
 
+static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
+{
+	switch (tool) {
+		case UiToolGame:
+		case UiToolRunGame:
+			return BootGuardModeGame;
+
+		case UiToolIr:
+			return BootGuardModeIr;
+
+		case UiToolBadUsb:
+			return BootGuardModeBadUsb;
+
+		case UiToolMusic:
+			return BootGuardModeMusic;
+
+		case UiToolBrowser:
+		case UiToolSettings:
+		case UiToolFwUpdate:
+		case UiToolPowerOff:
+		default:
+			return BootGuardModeTool;
+	}
+}
+
+static void uiPrvEnterTool(enum UiToolId tool)
+{
+	bootGuardEnter(uiPrvBootGuardModeForTool(tool));
+}
+
+static void uiPrvExitTool(enum UiToolId tool)
+{
+	bootGuardExit(uiPrvBootGuardModeForTool(tool));
+}
+
 #ifndef NO_SD_CARD
 struct UiFileRef {
 	struct FatFileLocator locator;
@@ -4427,11 +4365,6 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenGame,
 	UiBrowserOpenFwUpdate,
 };
-
-static bool uiPrvRomFileName(const char *fname)
-{
-	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc");
-}
 
 static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool)
 {
@@ -4610,12 +4543,14 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 
 static void uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
+	uiPrvEnterTool(UiToolGame);
 	toolWorkspaceEnd();
 	uiPrvLoadSavestate();
 	runGameF(userData);
 	if (!uiSaveSavestate())
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 	toolWorkspaceBegin();
+	uiPrvExitTool(UiToolGame);
 }
 
 static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -4697,13 +4632,19 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 	uiPrvReset(cnv, false);
 	toolWorkspaceBegin();
+	if (bootGuardRecoveredMode() != BootGuardModeNone) {
+		pr("boot guard recovered mode %u; starting tool shell\n", bootGuardRecoveredMode());
+		bootGuardClear();
+	}
 	activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
 
 	while (1) {
 		switch (activeTool) {
 			case UiToolBrowser:
 			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
 				activeTool = uiPrvBrowserTool(cnv, runGameF, userData);
+				uiPrvExitTool(UiToolBrowser);
 			#else
 				activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
 			#endif
@@ -4711,24 +4652,32 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			case UiToolIr:
 			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
 				(void)uiPrvIrTools(cnv);
+				uiPrvExitTool(activeTool);
 			#endif
 				break;
 
 			case UiToolBadUsb:
 			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
 				(void)uiPrvBadUsbTool(cnv);
+				uiPrvExitTool(activeTool);
 			#endif
 				break;
 
 			case UiToolMusic:
 			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
 				uiPrvMusicPlayer(cnv);
+				uiPrvExitTool(activeTool);
 			#endif
 				break;
 
 			case UiToolGame:
+				uiPrvEnterTool(activeTool);
 				activeTool = uiPrvGameTool(cnv, runGameF, userData);
+				uiPrvExitTool(UiToolGame);
 				continue;
 
 			case UiToolRunGame:
@@ -4737,12 +4686,16 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				continue;
 
 			case UiToolSettings:
+				uiPrvEnterTool(activeTool);
 				(void)uiPrvSettings(cnv);
+				uiPrvExitTool(activeTool);
 				break;
 
 			case UiToolFwUpdate:
 			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
 				uiPrvFwUpdate(cnv, false);
+				uiPrvExitTool(activeTool);
 			#endif
 				break;
 

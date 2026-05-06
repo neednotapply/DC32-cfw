@@ -5,6 +5,7 @@
 #include "pioIrdaSIR.h"
 #include "dispDefcon.h"
 #include "badgeLeds.h"
+#include "bootGuard.h"
 #include "pioWS2812.h"
 #include "frontend.h"
 #include "timebase.h"
@@ -1718,6 +1719,7 @@ void __attribute__((noreturn, used)) micromain(void)
                 
         
         asm volatile("cpsie i");
+        bootGuardInit();
         timebaseInit();
         
         pr("ready, time is 0x%016llx\n", getTime());

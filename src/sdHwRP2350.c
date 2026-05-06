@@ -14,6 +14,7 @@ static volatile uint32_t mTrash;
 
 #define SD_DMA_CH_READ		(SD_DMA_FIRST + 0)
 #define SD_DMA_CH_WRITE		(SD_DMA_FIRST + 1)
+#define SD_DMA_TIMEOUT_TICKS	(TICKS_PER_SECOND / 10)
 
 
 void sdHwNotifyRCA(uint_fast16_t rca)
@@ -137,6 +138,35 @@ void sdHwChipDeselect(void)
 	sio_hw->gpio_set = 1 << PIN_SD_NCS;
 	sdSpiByte(0xff);
 	while (spi1_hw->sr & SPI_SSPSR_BSY_BITS);
+}
+
+static void sdHwPrvDmaAbort(void)
+{
+	uint32_t mask = (1 << SD_DMA_CH_READ) | (1 << SD_DMA_CH_WRITE);
+
+	dma_hw->abort = mask;
+	dma_hw->ch[SD_DMA_CH_READ].al1_ctrl &=~ DMA_CH2_CTRL_TRIG_EN_BITS;
+	dma_hw->ch[SD_DMA_CH_WRITE].al1_ctrl &=~ DMA_CH3_CTRL_TRIG_EN_BITS;
+	dma_hw->ch[SD_DMA_CH_READ].al1_ctrl |= DMA_CH2_CTRL_TRIG_EN_BITS;
+	dma_hw->ch[SD_DMA_CH_WRITE].al1_ctrl |= DMA_CH3_CTRL_TRIG_EN_BITS;
+}
+
+static bool sdHwPrvDmaWait(uint32_t timeoutTicks)
+{
+	uint64_t startTime = getTime();
+
+	if (!timeoutTicks)
+		timeoutTicks = SD_DMA_TIMEOUT_TICKS;
+
+	while ((dma_hw->ch[SD_DMA_CH_WRITE].al1_ctrl & DMA_CH3_CTRL_TRIG_BUSY_BITS) || (dma_hw->ch[SD_DMA_CH_READ].al1_ctrl & DMA_CH2_CTRL_TRIG_BUSY_BITS)) {
+		if (getTime() - startTime >= timeoutTicks) {
+			pr("sd dma timeout after %u ticks\n", timeoutTicks);
+			sdHwPrvDmaAbort();
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static uint_fast8_t sdCrc7(uint_fast8_t data, uint_fast8_t crc)
@@ -313,9 +343,13 @@ bool sdHwReadData(uint8_t* data, uint_fast16_t sz)	//length must be even, pointe
 		dma_hw->ch[SD_DMA_CH_READ].al2_write_addr_trig = (uintptr_t)data;
 		dma_hw->ch[SD_DMA_CH_WRITE].al3_read_addr_trig = (uintptr_t)&mTrash;
 		
-		//wait
-		while (dma_hw->ch[SD_DMA_CH_WRITE].al1_ctrl & DMA_CH3_CTRL_TRIG_BUSY_BITS);
-		while (dma_hw->ch[SD_DMA_CH_READ].al1_ctrl & DMA_CH2_CTRL_TRIG_BUSY_BITS);
+		if (!sdHwPrvDmaWait(mRdTimeoutTicks)) {
+			spi1_hw->cr1 &=~ SPI_SSPCR1_SSE_BITS;
+			spi1_hw->cr0 = (spi1_hw->cr0 &~ SPI_SSPCR0_DSS_BITS) |  ((8 - 1) << SPI_SSPCR0_DSS_LSB);
+			spi1_hw->cr1 |= SPI_SSPCR1_SSE_BITS;
+			spi1_hw->dmacr &=~ (SPI_SSPDMACR_TXDMAE_BITS | SPI_SSPDMACR_RXDMAE_BITS);
+			return false;
+		}
 		
 		spi1_hw->cr1 &=~ SPI_SSPCR1_SSE_BITS;
 		spi1_hw->cr0 = (spi1_hw->cr0 &~ SPI_SSPCR0_DSS_BITS) |  ((8 - 1) << SPI_SSPCR0_DSS_LSB);
@@ -446,5 +480,4 @@ bool sdHwMultiBlockReadSignalEnd(void)
 	
 	return true;
 }
-
 

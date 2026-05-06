@@ -29,7 +29,8 @@
 #define UI_FIRMWARE_FLASH_BASE			0x10000000UL
 #define UI_FIRMWARE_MAX_SIZE			(QSPI_SETTINGS_START - UI_FIRMWARE_FLASH_BASE)
 #define UI_FIRMWARE_MIN_SIZE			1024
-#define UI_FIRMWARE_STACK_TOP			0x20082000UL
+#define UI_FIRMWARE_SRAM_START			0x20000000UL
+#define UI_FIRMWARE_SRAM_END			0x20082000UL
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -747,6 +748,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		if (!sdGetNumSecs()) {
 			
 			if (!sdCardInit() || !sdGetNumSecs()) {
+				(void)uiPrvCardPreUnmount();
 				if (!quiet)
 					uiAlert(cnv, "Insert an SD card, or check that the card can be read", DialogTypeOk);
 				return NULL;	
@@ -757,6 +759,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		if (vol)
 			return vol;
 		
+		(void)uiPrvCardPreUnmount();
 		if (!quiet)
 			uiAlert(cnv, "Cannot find a valid FAT filesystem on the SD card", DialogTypeOk);
 		return NULL;
@@ -4207,21 +4210,40 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".bin");
 	}
 
+	static bool uiPrvFwReadWord(struct FatfsFil *fil, uint32_t pos, uint32_t *wordP)
+	{
+		uint8_t bytes[4];
+		uint32_t nBytesRead;
+
+		if (!fatfsFileSeek(fil, pos) || !fatfsFileRead(fil, bytes, sizeof(bytes), &nBytesRead) || nBytesRead != sizeof(bytes)) {
+			(void)uiPrvCardPreUnmount();
+			return false;
+		}
+
+		*wordP = ((uint32_t)bytes[0]) | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+		return true;
+	}
+
 	static bool uiPrvFwFilePlausible(struct FatfsFil *fil, uint32_t fileSz)
 	{
-		uint32_t header[2], nBytesRead;
+		uint32_t stackTop, resetVector, resetAddr;
 
 		if (fileSz < UI_FIRMWARE_MIN_SIZE || fileSz > UI_FIRMWARE_MAX_SIZE)
 			return false;
-		if (!fatfsFileSeek(fil, 0) || !fatfsFileRead(fil, header, sizeof(header), &nBytesRead) || nBytesRead != sizeof(header))
+		if (!uiPrvFwReadWord(fil, 0, &stackTop) || !uiPrvFwReadWord(fil, 4, &resetVector))
 			return false;
 
-		if (header[0] != UI_FIRMWARE_STACK_TOP || !(header[1] & 1))
+		resetAddr = resetVector &~ 1UL;
+		if ((stackTop & 3) || stackTop < UI_FIRMWARE_SRAM_START || stackTop > UI_FIRMWARE_SRAM_END)
 			return false;
-		if ((header[1] &~ 1UL) - UI_FIRMWARE_FLASH_BASE >= fileSz)
+		if (!(resetVector & 1) || resetAddr < UI_FIRMWARE_FLASH_BASE || resetAddr >= UI_FIRMWARE_FLASH_BASE + fileSz)
 			return false;
 
-		return fatfsFileSeek(fil, 0);
+		if (!fatfsFileSeek(fil, 0)) {
+			(void)uiPrvCardPreUnmount();
+			return false;
+		}
+		return true;
 	}
 
 	static void uiPrvFwUpdateFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name, bool tryZDU)
@@ -4249,6 +4271,7 @@ reload_dir:
 				}
 				else {
 
+					(void)uiPrvCardPreUnmount();
 					pr("%s: update not interesting\n", __func__);
 				}
 			}
@@ -4293,6 +4316,7 @@ reload_dir:
 		struct FatfsFil *fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 
 		if (!fil) {
+			(void)uiPrvCardPreUnmount();
 			uiAlert(cnv, "Cannot open selected firmware file. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
 			return;
 		}
@@ -4671,6 +4695,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 	uiPrvReset(cnv, false);
 #ifndef NO_SD_CARD
+	uiPrvDrawWrappedString(cnv, "Checking SD card...", 32, 10);
 	uiPrvFwUpdate(cnv, true);
 	uiPrvReset(cnv, false);
 #endif

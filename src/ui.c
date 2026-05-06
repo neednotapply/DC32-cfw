@@ -4578,6 +4578,8 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	browserPath[0] = '/';
 	browserPath[1] = 0;
 
+	uiPrvReset(cnv, false);
+	uiPrvDrawWrappedString(cnv, "Opening Browser...", 32, 10);
 	vol = uiPrvMountCard(cnv, false);
 	if (!vol)
 		return uiPrvToolSwitcher(cnv, UiToolBrowser);
@@ -4691,15 +4693,11 @@ enum UiGameAction uiGameMenu(void)
 void uiRunToolShell(UiRunGameF runGameF, void *userData)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	enum UiToolId activeTool = UiToolBrowser;
+	enum UiToolId activeTool;
 
 	uiPrvReset(cnv, false);
-#ifndef NO_SD_CARD
-	uiPrvDrawWrappedString(cnv, "Checking SD card...", 32, 10);
-	uiPrvFwUpdate(cnv, true);
-	uiPrvReset(cnv, false);
-#endif
 	toolWorkspaceBegin();
+	activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
 
 	while (1) {
 		switch (activeTool) {

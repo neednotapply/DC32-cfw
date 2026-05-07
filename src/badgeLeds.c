@@ -46,12 +46,13 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 {
 	static const char names[][11] = {
 		[LedModeOff] = "OFF",
-		[LedModeSolid] = "SOLID",
+		[LedModeSolid] = "ALL ON",
 		[LedModeRainbow] = "RAINBOW",
 		[LedModePulse] = "PULSE",
 		[LedModeTravelingDot] = "DOT",
 		[LedModeRandom] = "RANDOM",
-		[LedModeFlashlight] = "FLASHLIGHT",
+		[LedModeFlashlight] = "REAR ON",
+		[LedModeFrontOn] = "FRONT ON",
 	};
 
 	mode = badgeLedsPrvSanitizeMode(mode);
@@ -245,19 +246,32 @@ static void badgeLedsPrvRenderRandom(void)
 	ws2812refresh();
 }
 
-static void badgeLedsPrvRenderFlashlight(void)
+static void badgeLedsPrvRenderSet(const uint8_t *activeLeds, uint_fast8_t numActiveLeds)
 {
-	static const uint8_t activeLeds[] = {2, 3, 8, 7};	//PCB labels LED2, LED4, LED10, LED9
 	uint_fast8_t i;
 
 	ws2812SetAllRgb(0, 0, 0);
-	for (i = 0; i < sizeof(activeLeds) / sizeof(*activeLeds); i++) {
+	for (i = 0; i < numActiveLeds; i++) {
 		uint8_t red, green, blue;
 
 		badgeLedsPrvColor(activeLeds[i], (uint8_t)(mLedFrame * 5 + activeLeds[i] * 28), &red, &green, &blue, true);
 		badgeLedsPrvSetRgb(activeLeds[i], red, green, blue);
 	}
 	ws2812refresh();
+}
+
+static void badgeLedsPrvRenderRearOn(void)
+{
+	static const uint8_t activeLeds[] = {0, 2, 7, 8};	//chain 0->LED2, 2->LED4, 7->LED9, 8->LED10
+
+	badgeLedsPrvRenderSet(activeLeds, sizeof(activeLeds) / sizeof(*activeLeds));
+}
+
+static void badgeLedsPrvRenderFrontOn(void)
+{
+	static const uint8_t activeLeds[] = {1, 3, 4, 5, 6};	//chain 1->LED3, 3->LED5, 4->LED6, 5->LED7, 6->LED8
+
+	badgeLedsPrvRenderSet(activeLeds, sizeof(activeLeds) / sizeof(*activeLeds));
 }
 
 static void badgeLedsPrvRenderCurrent(void)
@@ -284,7 +298,11 @@ static void badgeLedsPrvRenderCurrent(void)
 			break;
 
 		case LedModeFlashlight:
-			badgeLedsPrvRenderFlashlight();
+			badgeLedsPrvRenderRearOn();
+			break;
+
+		case LedModeFrontOn:
+			badgeLedsPrvRenderFrontOn();
 			break;
 
 		case LedModeOff:
@@ -324,7 +342,7 @@ void badgeLedsTick(void)
 		return;
 
 	mode = badgeLedsPrvSanitizeMode(mLedSettings.ledMode);
-	if (mode == LedModeOff || mode == LedModeSolid)
+	if (mode == LedModeOff || (mode == LedModeSolid && badgeLedsPrvSanitizeColor(mLedSettings.ledColor) == LedColorCustom))
 		return;
 
 	now = getTime();

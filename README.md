@@ -13,7 +13,7 @@ The original firmware and emulator were created by Dmitry Grinberg (DmitryGR), w
 - **IR tools** - Supports Flipper-style `.ir` files, DC32 IR library files, universal remote categories for TV, A/C, Audio, and Projector files on the SD card, individual button selection, and power/mute blast modes with cancellable progress screens.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as a USB HID keyboard/mouse/consumer-control device. Supported commands include strings, delays, repeats, key chords, hold/release, mouse movement/click/scroll, media keys, Alt codes, SysRq, custom USB IDs, and wait-for-button pauses.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, including folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
-- **LED controls** - Drives the badge WS2812 LEDs with off, solid, rainbow, pulse, dot, random, and flashlight patterns; supports custom, rainbow, flame, and random colors; and exposes speed plus brightness controls.
+- **LED controls** - Drives the badge WS2812 LEDs with off, all-on, front-on, rear-on, rainbow, pulse, dot, and random patterns; supports custom, rainbow, flame, and random colors; and exposes speed plus brightness controls.
 - **Screen and game settings** - Provides on-device settings for screen rotation, brightness/contrast where supported, Game Boy Color mode, upscaling, emulator speed, and LED behavior.
 - **Firmware updater** - Installs raw `.bin` images from the SD card through the dedicated updater or from the file browser after basic firmware-image checks. UF2 output is also generated for RP2350 bootloader flashing.
 

@@ -14,6 +14,7 @@ enum LedMode {
 	LedModeTravelingDot,
 	LedModeRandom,
 	LedModeFlashlight,
+	LedModeFrontOn,
 	LedModeNumModes,
 };
 
@@ -55,4 +56,3 @@ bool settingsSet(const struct Settings *settings);
 
 
 #endif
-

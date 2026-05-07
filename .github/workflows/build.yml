@@ -17,9 +17,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      PICOTOOL_RELEASE: v2.2.0-3
-      PICOTOOL_VERSION: 2.2.0-a4
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,19 +27,9 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             cmake \
-            curl \
             gcc-arm-none-eabi \
-            libusb-1.0-0 \
             libnewlib-arm-none-eabi \
             ninja-build
-
-      - name: Install picotool
-        run: |
-          curl -L "https://github.com/raspberrypi/pico-sdk-tools/releases/download/${PICOTOOL_RELEASE}/picotool-${PICOTOOL_VERSION}-x86_64-lin.tar.gz" -o /tmp/picotool.tar.gz
-          mkdir -p "$HOME/picotool"
-          tar -xzf /tmp/picotool.tar.gz -C "$HOME/picotool"
-          echo "$HOME/picotool/picotool" >> "$GITHUB_PATH"
-          "$HOME/picotool/picotool/picotool" version
 
       - name: Build firmware with CMake
         run: |
@@ -53,33 +40,28 @@ jobs:
 
       - name: Build firmware
         working-directory: src
-        run: make clean app sdcard
+        run: make app sdcard
 
       - name: Package firmware artifacts
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
           cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
-          picotool uf2 convert "$ARTIFACT_DIR/FIRMWARE.BIN" "$ARTIFACT_DIR/uGB.uf2" -o 0x10000000 --family rp2350-arm-s --abs-block
-          cmp src/DC32-cfw.uf2 "$ARTIFACT_DIR/uGB.uf2"
-          python3 tools/verify_uf2.py "$ARTIFACT_DIR/uGB.uf2" --input-bin src/DC32-cfw.bin
-          sha256sum "$ARTIFACT_DIR/uGB.uf2" "$ARTIFACT_DIR/FIRMWARE.BIN" > "$ARTIFACT_DIR/SHA256SUMS"
+          cp src/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: |
-            ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
-            ${{ runner.temp }}/firmware/SHA256SUMS
 
       - name: Attach firmware to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/firmware/uGB.uf2
+            ${{ runner.temp }}/firmware/DC32-cfw.uf2
             ${{ runner.temp }}/firmware/FIRMWARE.BIN
-            ${{ runner.temp }}/firmware/SHA256SUMS
           overwrite_files: true

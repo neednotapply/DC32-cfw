@@ -18,6 +18,7 @@ MAGIC0 = 0x0A324655
 MAGIC1 = 0x9E5D5157
 MAGIC_END = 0x0AB16F30
 FLAG_FAMILY_ID = 0x00002000
+FLAG_EXTENSION_TAGS = 0x00008000
 PAYLOAD_SIZE = 256
 
 FAMILIES = {
@@ -44,13 +45,14 @@ def write_block(
     block_number: int,
     total_blocks: int,
     family_id: int,
+    flags: int = FLAG_FAMILY_ID,
 ) -> None:
     payload = payload[:PAYLOAD_SIZE].ljust(PAYLOAD_SIZE, b"\xff")
     header = struct.pack(
         "<IIIIIIII",
         MAGIC0,
         MAGIC1,
-        FLAG_FAMILY_ID,
+        flags,
         address,
         PAYLOAD_SIZE,
         block_number,
@@ -75,32 +77,31 @@ def main() -> None:
 
     data = args.input.read_bytes()
     firmware_blocks = (len(data) + PAYLOAD_SIZE - 1) // PAYLOAD_SIZE
-    total_blocks = firmware_blocks + (1 if args.abs_block else 0)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("wb") as output:
-        block_number = 0
         if args.abs_block:
+            # Match picotool: the RP2350 absolute E10 block is not part of
+            # the firmware-family block sequence used to detect completion.
             write_block(
                 output,
                 address=args.abs_block_loc,
                 payload=b"\xef" * PAYLOAD_SIZE,
-                block_number=block_number,
-                total_blocks=total_blocks,
+                block_number=0,
+                total_blocks=2,
                 family_id=FAMILIES["absolute"],
+                flags=FLAG_FAMILY_ID | FLAG_EXTENSION_TAGS,
             )
-            block_number += 1
 
-        for offset in range(0, len(data), PAYLOAD_SIZE):
+        for block_number, offset in enumerate(range(0, len(data), PAYLOAD_SIZE)):
             write_block(
                 output,
                 address=args.base + offset,
                 payload=data[offset : offset + PAYLOAD_SIZE],
                 block_number=block_number,
-                total_blocks=total_blocks,
+                total_blocks=firmware_blocks,
                 family_id=args.family,
             )
-            block_number += 1
 
 
 if __name__ == "__main__":

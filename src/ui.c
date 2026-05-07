@@ -1898,13 +1898,20 @@ bool uiSaveSavestate(void)
 	struct IrUniversalRemote {
 		const char *name;
 		const char *path;
+		const char *const *buttons;
+		uint_fast8_t numButtons;
 	};
 
+	static const char *const mIrTvButtons[] = {"Power", "Mute", "Vol_up", "Vol_dn", "Ch_next", "Ch_prev"};
+	static const char *const mIrAcButtons[] = {"Off", "Dh", "Cool_hi", "Cool_lo", "Heat_hi", "Heat_lo"};
+	static const char *const mIrAudioButtons[] = {"Power", "Mute", "Vol_up", "Vol_dn", "Play", "Pause", "Next", "Prev"};
+	static const char *const mIrProjectorButtons[] = {"Power", "Mute", "Vol_up", "Vol_dn"};
+
 	static const struct IrUniversalRemote mIrUniversalRemotes[] = {
-		{"TV", IR_FLIPPER_TV_FILE},
-		{"A/C", IR_FLIPPER_AC_FILE},
-		{"Audio", IR_FLIPPER_AUDIO_FILE},
-		{"Projector", IR_FLIPPER_PROJECTOR_FILE},
+		{"TV", IR_FLIPPER_TV_FILE, mIrTvButtons, sizeof(mIrTvButtons) / sizeof(*mIrTvButtons)},
+		{"A/C", IR_FLIPPER_AC_FILE, mIrAcButtons, sizeof(mIrAcButtons) / sizeof(*mIrAcButtons)},
+		{"Audio", IR_FLIPPER_AUDIO_FILE, mIrAudioButtons, sizeof(mIrAudioButtons) / sizeof(*mIrAudioButtons)},
+		{"Projector", IR_FLIPPER_PROJECTOR_FILE, mIrProjectorButtons, sizeof(mIrProjectorButtons) / sizeof(*mIrProjectorButtons)},
 	};
 
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
@@ -2925,7 +2932,7 @@ bool uiSaveSavestate(void)
 			}
 		}
 
-		if (!maxSent || stats->sent < maxSent)
+		if (!stats->lineTooLong && !stats->cancelled && (!maxSent || stats->sent < maxSent))
 			uiPrvFlipperRecordFinish(cnv, &rec, stats, wantedName, title);
 
 		if (!haveHeader || !haveVersion)
@@ -3164,6 +3171,29 @@ bool uiSaveSavestate(void)
 		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
 	}
 
+	static uint32_t uiPrvIrListFixedButtons(const struct IrUniversalRemote *remote, struct MusicOption **headP, bool *overflowP)
+	{
+		struct UiFileListCtx ctx;
+		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
+		uint_fast8_t i;
+
+		memset(&ctx, 0, sizeof(ctx));
+		if (!listMem.ptr || listMem.size < sizeof(struct MusicOption))
+			goto out;
+		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
+		ctx.spaceAvail = listMem.size;
+
+		for (i = 0; i < remote->numButtons; i++)
+			if (!uiPrvIrButtonListAppend(&ctx, remote->buttons[i]))
+				break;
+
+	out:
+		*headP = ctx.head;
+		if (overflowP)
+			*overflowP = ctx.overflow;
+		return ctx.count;
+	}
+
 	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP)
 	{
 		struct UiFileListCtx ctx;
@@ -3285,20 +3315,66 @@ bool uiSaveSavestate(void)
 		}
 	}
 
-	static bool uiPrvIrRemoteFile(struct Canvas *cnv, struct FatfsFil *fil, const char *fileName)
+	static bool uiPrvIrSendButtonSpamFile(struct Canvas *cnv, struct FatfsFil *fil, const char *buttonName)
+	{
+		struct ToolWorkspaceSpan lineMem;
+		char *line;
+		struct IrBlastStats stats;
+		bool ret = false, isFlipper = false, irStarted = false;
+
+		memset(&stats, 0, sizeof(stats));
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
+			uiAlert(cnv, "Tool workspace is too small for IR button spam", DialogTypeOk);
+			toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
+			return false;
+		}
+		line = (char*)lineMem.ptr;
+
+		if (!fatfsFileSeek(fil, 0))
+			goto out_report;
+		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
+			goto out_report;
+
+		memset(&stats, 0, sizeof(stats));
+		irRemoteBegin();
+		irStarted = true;
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Button Spam", 0);
+
+	out_report:
+		if (irStarted)
+			irRemoteEnd();
+		if (stats.lineTooLong) {
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.cancelled) {
+			uiAlert(cnv, "IR button spam cancelled", DialogTypeOk);
+		}
+		else if (ret) {
+			char msg[96];
+
+			(void)sprintf(msg, "IR button spam complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
+			uiAlert(cnv, msg, DialogTypeOk);
+		}
+		else if (isFlipper) {
+			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
+		}
+
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
+		return ret;
+	}
+
+	static bool uiPrvIrButtonSpamFile(struct Canvas *cnv, struct FatfsFil *fil, const char *fileName)
 	{
 		struct MusicOption *buttons = NULL, *button;
 		char buttonName[IR_NAME_BUF_SZ];
 		struct ToolWorkspaceSpan lineMem, listMem;
 		char *line;
-		struct IrBlastStats stats;
-		bool ret = false, overflow = false, lineTooLong = false, isFlipper = false, irStarted = false;
+		bool ret = false, overflow = false, lineTooLong = false;
 		uint32_t numButtons;
 
-		memset(&stats, 0, sizeof(stats));
 		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ ||
 			!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr, &listMem)) {
-			uiAlert(cnv, "Tool workspace is too small for IR remote", DialogTypeOk);
+			uiAlert(cnv, "Tool workspace is too small for IR button spam", DialogTypeOk);
 			toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 			return false;
 		}
@@ -3310,7 +3386,7 @@ bool uiSaveSavestate(void)
 			goto out_close;
 		}
 		if (overflow)
-			uiAlert(cnv, "Remote has too many buttons; showing what fits", DialogTypeOk);
+			uiAlert(cnv, "IR file has too many buttons; showing what fits", DialogTypeOk);
 		if (!numButtons) {
 			uiAlert(cnv, "No Flipper buttons found in that IR file", DialogTypeOk);
 			goto out_close;
@@ -3320,53 +3396,27 @@ bool uiSaveSavestate(void)
 		if (!button)
 			goto out_close;
 		uiPrvCopyStr(buttonName, sizeof(buttonName), button->name);
-
-		if (!fatfsFileSeek(fil, 0))
-			goto out_close;
-		memset(&stats, 0, sizeof(stats));
-		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
-			goto out_close;
-
-		memset(&stats, 0, sizeof(stats));
-		irRemoteBegin();
-		irStarted = true;
-		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "IR Remote", 1);
+		ret = uiPrvIrSendButtonSpamFile(cnv, fil, buttonName);
+		goto out_release;
 
 	out_close:
-		if (irStarted)
-			irRemoteEnd();
-		if (stats.lineTooLong) {
-			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
-		}
-		else if (stats.cancelled) {
-			uiAlert(cnv, "IR remote cancelled", DialogTypeOk);
-		}
-		else if (ret) {
-			char msg[96];
-
-			(void)sprintf(msg, "IR remote complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
-			uiAlert(cnv, msg, DialogTypeOk);
-		}
-		else if (irStarted) {
-			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
-		}
-
+	out_release:
 		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
 		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;
 	}
 
-	static bool uiPrvIrRemoteLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *fileName)
+	static bool uiPrvIrButtonSpamLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *fileName)
 	{
 		struct FatfsFil *fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		bool ret = false;
 
 		if (!fil) {
-			uiAlert(cnv, "Cannot open IR remote file", DialogTypeOk);
+			uiAlert(cnv, "Cannot open IR file", DialogTypeOk);
 			return false;
 		}
 
-		ret = uiPrvIrRemoteFile(cnv, fil, fileName);
+		ret = uiPrvIrButtonSpamFile(cnv, fil, fileName);
 		fatfsFileClose(fil);
 		return ret;
 	}
@@ -3375,6 +3425,10 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsVol *vol = NULL;
 		struct FatfsFil *fil = NULL;
+		struct MusicOption *buttons = NULL, *button;
+		char buttonName[IR_NAME_BUF_SZ];
+		bool overflow = false;
+		uint32_t numButtons;
 		bool ret = false;
 		char msg[96];
 
@@ -3389,7 +3443,30 @@ bool uiSaveSavestate(void)
 			goto out_unmount;
 		}
 
-		ret = uiPrvIrRemoteFile(cnv, fil, remote->name);
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr, NULL)) {
+			uiAlert(cnv, "Tool workspace is too small for IR button list", DialogTypeOk);
+			goto out_unmount;
+		}
+
+		numButtons = uiPrvIrListFixedButtons(remote, &buttons, &overflow);
+		if (overflow)
+			uiAlert(cnv, "IR button list is too large; showing what fits", DialogTypeOk);
+		if (!numButtons) {
+			uiAlert(cnv, "No buttons are configured for that IR database", DialogTypeOk);
+			goto out_release_buttons;
+		}
+
+		button = uiPrvChooseFlatOption(cnv, buttons, numButtons, remote->name);
+		if (!button)
+			goto out_release_buttons;
+		uiPrvCopyStr(buttonName, sizeof(buttonName), button->name);
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
+
+		ret = uiPrvIrSendButtonSpamFile(cnv, fil, buttonName);
+		goto out_unmount;
+
+	out_release_buttons:
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
 
 	out_unmount:
 		if (fil)
@@ -3399,7 +3476,7 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static bool uiPrvIrRemote(struct Canvas *cnv)
+	static bool uiPrvIrButtonSpam(struct Canvas *cnv)
 	{
 		struct FatfsVol *vol = NULL;
 		struct FatFileLocator locator;
@@ -3413,7 +3490,7 @@ bool uiSaveSavestate(void)
 		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName), NULL, 0))
 			goto out_unmount;
 
-		ret = uiPrvIrRemoteLocator(cnv, vol, &locator, fileName);
+		ret = uiPrvIrButtonSpamLocator(cnv, vol, &locator, fileName);
 
 	out_unmount:
 		(void)uiPrvCardPreUnmount();
@@ -4491,7 +4568,7 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenCancelled,
 	UiBrowserOpenIrPowerSpam,
 	UiBrowserOpenIrMuteSpam,
-	UiBrowserOpenIrRemote,
+	UiBrowserOpenIrButtonSpam,
 	UiBrowserOpenBadUsb,
 	UiBrowserOpenMusic,
 	UiBrowserOpenGame,
@@ -4532,8 +4609,8 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 
 	if (uiPrvIrRemoteFileName(ref->name)) {
-		ids[numOptions] = UiBrowserOpenIrRemote;
-		labels[numOptions++] = "IR Remote";
+		ids[numOptions] = UiBrowserOpenIrButtonSpam;
+		labels[numOptions++] = "IR Button Spam";
 		ids[numOptions] = UiBrowserOpenIrPowerSpam;
 		labels[numOptions++] = "IR Power Spam";
 		ids[numOptions] = UiBrowserOpenIrMuteSpam;
@@ -4576,8 +4653,8 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref)
 {
 	switch (uiPrvBrowserOpenWith(cnv, ref)) {
-	case UiBrowserOpenIrRemote:
-		(void)uiPrvIrRemoteLocator(cnv, vol, &ref->locator, ref->name);
+	case UiBrowserOpenIrButtonSpam:
+		(void)uiPrvIrButtonSpamLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
 
 	case UiBrowserOpenIrPowerSpam:
@@ -4889,4 +4966,3 @@ void uiSelfTestSetMarks(struct Canvas *cnv, uint8_t passMask, uint8_t failMask)
 		uiPrvFillRectEx(cnv, eachSpacing * idx, cnv->h * 3 / 4, idx == 7 ? cnv->w : eachSpacing * idx + eachWidth, cnv->h, color);
 	}
 }
-

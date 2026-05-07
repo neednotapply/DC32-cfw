@@ -262,7 +262,7 @@ static void badgeLedsPrvRenderSet(const uint8_t *activeLeds, uint_fast8_t numAct
 
 static void badgeLedsPrvRenderRearOn(void)
 {
-	static const uint8_t activeLeds[] = {0, 2, 7, 8};	//chain 0->LED2, 2->LED4, 7->LED9, 8->LED10
+	static const uint8_t activeLeds[] = {1, 3, 7, 8};	//chain 0->LED2, 2->LED4, 7->LED9, 8->LED10
 
 	badgeLedsPrvRenderSet(activeLeds, sizeof(activeLeds) / sizeof(*activeLeds));
 }

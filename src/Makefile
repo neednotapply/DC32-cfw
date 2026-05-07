@@ -51,7 +51,6 @@ EXTRA_OBJS	+= mappersC.o
 
 TARGET		= $(APP).bin
 UF2_TARGET	= $(APP).uf2
-SDCARD_TARGET	= FIRMWARE.BIN
 
 CMD		= sudo CortexProg info targetsel 0 write $(APP).bin 0x10000000
 
@@ -71,7 +70,7 @@ $(APP): $(OBJS)
 	$(EXTRA)
 
 
-.PHONY: app AVR clean flash sdcard trace uf2
+.PHONY: app AVR clean flash trace uf2
 
 app: $(TARGET) $(UF2_TARGET)
 
@@ -81,12 +80,7 @@ app: $(TARGET) $(UF2_TARGET)
 %.uf2: %.bin ../tools/bin_to_uf2.py
 	$(UF2CONV) $< $@ --base 0x10000000 --family rp2350-arm-s --abs-block
 
-$(SDCARD_TARGET): $(APP).bin
-	cp $< $@
-
 uf2: $(UF2_TARGET)
-
-sdcard: $(SDCARD_TARGET)
 
 AVR:	$(APP)
 	sudo avrdude -V -p ATmega1284p -c avrisp2 -P usb -U flash:w:$(APP).hex:i
@@ -98,7 +92,7 @@ AVR:	$(APP)
 	$(CC) $(CCFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(APP) $(APP).bin $(UF2_TARGET) $(SDCARD_TARGET) *.o
+	rm -f $(APP) $(APP).bin $(UF2_TARGET) *.o
 
 flash: $(APP).bin
 	$(CMD)

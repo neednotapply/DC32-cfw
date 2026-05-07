@@ -26,12 +26,7 @@
 #include "sd.h"
 #include "gb.h"
 
-
-#define UI_RAMCODE					__attribute__((section(".fastcode"), noinline))
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
-#define UI_FIRMWARE_FLASH_BASE			0x10000000UL
-#define UI_FIRMWARE_FLASH_END			(QSPI_ROM_START + QSPI_ROM_SIZE_MAX)
-#define UI_FIRMWARE_MAX_SIZE			(UI_FIRMWARE_FLASH_END - UI_FIRMWARE_FLASH_BASE)
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -1993,103 +1988,6 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static void UI_RAMCODE uiPrvFwProgressFill(struct Canvas *cnv, uint32_t done, uint32_t total)
-	{
-		uint16_t *fb = (uint16_t*)cnv->framebuffer;
-		uint32_t row, col, width, filled, r, c;
-
-		if (!fb || !total)
-			return;
-
-		row = cnv->h / 2;
-		if (row + 6 >= cnv->h)
-			return;
-
-		width = cnv->w > 104 ? 100 : cnv->w - 4;
-		filled = (done > total ? total : done) * width / total;
-		for (r = row; r < row + 6; r++) {
-			for (c = 0; c < width; c++) {
-				if (cnv->rotated)
-					fb[c * cnv->h + r] = c < filled ? 0x07e0 : 0;
-				else
-					fb[r * cnv->w + c + 2] = c < filled ? 0x07e0 : 0;
-			}
-		}
-	}
-
-	static void UI_RAMCODE uiPrvFwResetFromRam(void)
-	{
-		*(volatile uint32_t*)0xe000ed0c = (0x5fa << 16) | (1 << 2);
-		while (1) {
-		}
-	}
-
-	static bool UI_RAMCODE uiPrvFwLoadFileAndReset(struct Canvas *cnv, struct FatfsFil *fil, uint8_t *buf, uint32_t bufSz, uint32_t totalSz)
-	{
-		uint32_t pos, done, now, nowDone, writeSz, eraseSz, i;
-		bool writeOk;
-
-		bufSz &=~ (QSPI_ERASE_GRANULARITY - 1);
-		if (bufSz < QSPI_WRITE_GRANULARITY)
-			return false;
-
-		for (pos = totalSz, done = 0; pos; done += now) {
-			now = pos % bufSz;
-			if (!now)
-				now = bufSz;
-			pos -= now;
-
-			writeSz = (now + QSPI_WRITE_GRANULARITY - 1) &~ (QSPI_WRITE_GRANULARITY - 1);
-			eraseSz = (now + QSPI_ERASE_GRANULARITY - 1) &~ (QSPI_ERASE_GRANULARITY - 1);
-			for (i = now; i < writeSz; i++)
-				buf[i] = 0;
-
-			if (!fatfsFileSeek(fil, pos))
-				return false;
-			if (!fatfsFileRead(fil, buf, now, &nowDone) || now != nowDone)
-				return false;
-			writeOk = flashWrite(UI_FIRMWARE_FLASH_BASE + pos, eraseSz, buf, writeSz);
-			if (!writeOk)
-				return false;
-			if (!pos)
-				uiPrvFwResetFromRam();
-
-			uiPrvFwProgressFill(cnv, done + now, totalSz);
-		}
-
-		uiPrvFwProgressFill(cnv, totalSz, totalSz);
-		uiPrvFwResetFromRam();
-		return true;
-	}
-
-	static bool uiPrvFwInstallFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name)
-	{
-		uint32_t row, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
-		struct ToolWorkspaceSpan bufMem;
-		bool ret;
-
-		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &bufMem)) {
-			uiAlert(cnv, "Tool workspace is busy; cannot load firmware", DialogTypeOk);
-			return false;
-		}
-		if (bufSz > bufMem.size)
-			bufSz = bufMem.size;
-
-		cnv->font = FontLarge;
-		row = uiPrvGlyphHeight(cnv) + 1;
-		uiPrvReset(cnv, false);
-		uiPrintf(cnv, row, 10, "Loading %s...", name);
-		cnv->foreColor = 15;
-		uiPrvFillRect(cnv, row + 8, 50, 131, 60);
-		cnv->foreColor = 0;
-		uiPrvFillRect(cnv, row + 9, 51, 130, 59);
-		cnv->foreColor = 10;
-
-		ret = uiPrvFwLoadFileAndReset(cnv, fil, (uint8_t*)bufMem.ptr, bufSz, totalSz);
-		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
-		return ret;
-	}
-	
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
@@ -4332,140 +4230,6 @@ reload_dir:
 		return ok;
 	}
 
-	static bool uiPrvFirmwareFileName(const char *fname)
-	{
-		return uiPrvStrEndsWithNoCase(fname, ".bin");
-	}
-
-	static bool uiPrvPickFirmwareFile(struct Canvas *cnv, struct FatfsVol *vol, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
-	{
-		return uiPrvPickFile(cnv, vol, "/FIRMWARE", uiPrvFirmwareFileName, "No .bin firmware files found in /FIRMWARE", locatorOut, nameOut, nameOutSz, NULL, 0);
-	}
-
-	static bool uiPrvFwFilePlausible(struct FatfsFil *fil, uint32_t fileSz)
-	{
-		(void)fil;
-
-		return fileSz && fileSz <= UI_FIRMWARE_MAX_SIZE;
-	}
-
-	static void uiPrvFwUpdateFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name, bool tryZDU)
-	{
-		uint32_t fileSz = fatfsFileGetSize(fil);
-
-		if (!uiPrvFwFilePlausible(fil, fileSz)) {
-
-			if (!tryZDU)
-				uiAlert(cnv, "Firmware file is empty or too large.", DialogTypeOk);
-		}
-		else {
-
-			bool tryToUpdate = false;
-
-			if (tryZDU) {
-				uint8_t curForcedVer = *(volatile uint8_t*)0x10000020, availForcedVer;
-				uint32_t nBytesRead;
-
-				if (fatfsFileSeek(fil, 0x20) && fatfsFileRead(fil, &availForcedVer, 1, &nBytesRead) && nBytesRead == 1 && fatfsFileSeek(fil, 0) && curForcedVer < availForcedVer) {
-					
-					uiAlert(cnv, "There is a mandatory update to apply. It will be applied now. You may opt out, but the update will proceed anyways. Proceed?", DialogTypeOk);
-
-					tryToUpdate = true;
-				}
-				else {
-
-					(void)uiPrvCardPreUnmount();
-					pr("%s: update not interesting\n", __func__);
-				}
-			}
-			else {
-				int_fast8_t updateOption, cancelOption, numOptions = 0, selOption;
-				uint_fast8_t itemHeight;
-				uint8_t button = KEY_BIT_A | KEY_BIT_B;
-
-				itemHeight = uiPrvGlyphHeight(cnv) + 1;
-				uiPrvReset(cnv, false);
-				uiPrintf(cnv, 32, 10, "Firmware: %s", name);
-				uiPrvDrawWrappedString(cnv, "Replace firmware with this .bin file?", 48, 10);
-
-				updateOption = numOptions++;
-				uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Proceed", -1);
-				cancelOption = numOptions++;
-				uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
-				
-				selOption = uiPrvMenu(cnv, 0, numOptions, &button);
-
-				tryToUpdate = button == KEY_BIT_A && selOption == updateOption;
-				(void)cancelOption;
-			}
-
-			if (tryToUpdate) {
-
-				if (!uiPrvFwInstallFile(cnv, fil, name)) {
-
-					uiAlert(cnv, "Firmware update failed to be installed. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
-				}
-				else {
-
-					 while(1)
-					 	NVIC_SystemReset();
-				}
-			}
-		}
-	}
-
-	static void uiPrvFwUpdateLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name)
-	{
-		struct FatfsFil *fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
-
-		if (!fil) {
-			(void)uiPrvCardPreUnmount();
-			uiAlert(cnv, "Cannot open selected firmware file. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
-			return;
-		}
-
-		uiPrvFwUpdateFile(cnv, fil, name, false);
-		(void)fatfsFileClose(fil);
-	}
-
-	static void uiPrvFwUpdate(struct Canvas *cnv, bool tryZDU)
-	{
-		struct FatfsVol *vol;
-
-		vol = uiPrvMountCard(cnv, tryZDU);
-		if (!vol) {
-
-			//uiPrvMountCard shows its own error message
-			pr("%s: no card init\n", __func__);
-		}
-		else {
-			struct FatFileLocator locator;
-			char name[UI_PICK_FILE_NAME_BUF_SZ];
-			const char *displayName = tryZDU ? "/UPDATE_OR_WE_ARE.FUCKED" : name;
-			struct FatfsFil *fil;
-
-			if (!tryZDU && !uiPrvPickFirmwareFile(cnv, vol, &locator, name, sizeof(name)))
-				goto out_unmount;
-
-			fil = tryZDU ? fatfsFileOpen(vol, displayName, OPEN_MODE_READ) : fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);
-
-			if (!fil) {
-				
-				pr("%s: file\n", __func__);
-
-				if (!tryZDU)
-					uiAlert(cnv, "Cannot open selected firmware file. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
-			}
-			else {
-				uiPrvFwUpdateFile(cnv, fil, displayName, tryZDU);
-				(void)fatfsFileClose(fil);
-			}
-out_unmount:
-			(void)uiPrvCardPreUnmount();
-			fatfsUnmount(vol);
-		}
-	}
-
 #endif //NO_SD_CARD
 
 static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)
@@ -4504,7 +4268,6 @@ enum UiToolId {
 	UiToolMusic,
 	UiToolGame,
 	UiToolSettings,
-	UiToolFwUpdate,
 	UiToolPowerOff,
 	UiToolNum,
 	UiToolRunGame,
@@ -4528,7 +4291,6 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 
 		case UiToolBrowser:
 		case UiToolSettings:
-		case UiToolFwUpdate:
 		case UiToolPowerOff:
 		default:
 			return BootGuardModeTool;
@@ -4606,7 +4368,6 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenBadUsb,
 	UiBrowserOpenMusic,
 	UiBrowserOpenGame,
-	UiBrowserOpenFwUpdate,
 };
 
 static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool)
@@ -4618,7 +4379,6 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolMusic] = "Music",
 		[UiToolGame] = "Game",
 		[UiToolSettings] = "Settings",
-		[UiToolFwUpdate] = "Firmware Update",
 		[UiToolPowerOff] = "Power Off",
 	};
 	uint_fast8_t itemHeight, i, selOption;
@@ -4661,10 +4421,6 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	if (uiPrvRomFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenGame;
 		labels[numOptions++] = "Game";
-	}
-	if (uiPrvFirmwareFileName(ref->name)) {
-		ids[numOptions] = UiBrowserOpenFwUpdate;
-		labels[numOptions++] = "Firmware Update";
 	}
 
 	if (!numOptions)
@@ -4723,10 +4479,6 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	case UiBrowserOpenGame:
 		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
-		return UiToolBrowser;
-
-	case UiBrowserOpenFwUpdate:
-		uiPrvFwUpdateLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
 
 	case UiBrowserOpenNone:
@@ -4967,14 +4719,6 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvEnterTool(activeTool);
 				(void)uiPrvSettings(cnv);
 				uiPrvExitTool(activeTool);
-				break;
-
-			case UiToolFwUpdate:
-			#ifndef NO_SD_CARD
-				uiPrvEnterTool(activeTool);
-				uiPrvFwUpdate(cnv, false);
-				uiPrvExitTool(activeTool);
-			#endif
 				break;
 
 			case UiToolPowerOff:

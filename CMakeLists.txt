@@ -110,7 +110,6 @@ target_link_libraries(${APP} PRIVATE m)
 
 add_custom_command(TARGET ${APP} POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${APP}> ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin -j.text -j.rodata -j.data -j.vectors
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin ${CMAKE_CURRENT_BINARY_DIR}/FIRMWARE.BIN
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/bin_to_uf2.py
         ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin
         ${CMAKE_CURRENT_BINARY_DIR}/${APP}.uf2

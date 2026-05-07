@@ -19,10 +19,8 @@ SECTIONS
                 KEEP ( *(.text.vec) ) ;
                 KEEP ( *(.text.vec.*) ) ;
                 *(.text.vec) *(.text.vec.*) ;
-                *(EXCLUDE_FILE (*fatfs.o *fatfs.c.obj *sd.o *sd.c.obj *sdHwRP2350.o *sdHwRP2350.c.obj *timebase.o *timebase.c.obj *printf.o *printf.c.obj) .text) ;
-                *(EXCLUDE_FILE (*fatfs.o *fatfs.c.obj *sd.o *sd.c.obj *sdHwRP2350.o *sdHwRP2350.c.obj *timebase.o *timebase.c.obj *printf.o *printf.c.obj) .text.*) ;
-                *(EXCLUDE_FILE (*fatfs.o *fatfs.c.obj *sd.o *sd.c.obj *sdHwRP2350.o *sdHwRP2350.c.obj *timebase.o *timebase.c.obj *printf.o *printf.c.obj) .rodata) ;
-                *(EXCLUDE_FILE (*fatfs.o *fatfs.c.obj *sd.o *sd.c.obj *sdHwRP2350.o *sdHwRP2350.c.obj *timebase.o *timebase.c.obj *printf.o *printf.c.obj) .rodata.*) ;
+                *(.text) *(.text.*) ;
+                *(.rodata) *(.rodata.*) ;
                 . = ALIGN(4);
         }  > rom
 
@@ -31,16 +29,6 @@ SECTIONS
                 __data_data = LOADADDR(.data);
 
                 *(.fastcode) ; *(.fastcode.*) ;
-                *fatfs.o(.text .text.* .rodata .rodata.*) ;
-                *fatfs.c.obj(.text .text.* .rodata .rodata.*) ;
-                *sd.o(.text .text.* .rodata .rodata.*) ;
-                *sd.c.obj(.text .text.* .rodata .rodata.*) ;
-                *sdHwRP2350.o(.text .text.* .rodata .rodata.*) ;
-                *sdHwRP2350.c.obj(.text .text.* .rodata .rodata.*) ;
-                *timebase.o(.text .text.* .rodata .rodata.*) ;
-                *timebase.c.obj(.text .text.* .rodata .rodata.*) ;
-                *printf.o(.text .text.* .rodata .rodata.*) ;
-                *printf.c.obj(.text .text.* .rodata .rodata.*) ;
 
                 *(.data) ; *(.data.*) ;
                 . = ALIGN(4);

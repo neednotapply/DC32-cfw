@@ -632,7 +632,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 }
 
 #ifndef NO_SD_CARD
-	static bool UI_RAMCODE uiPrvCardReadSec(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
+	static bool uiPrvCardReadSec(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
 	{
 		uint8_t *dst = (uint8_t*)dstP;
 		
@@ -2026,27 +2026,35 @@ bool uiSaveSavestate(void)
 
 	static bool UI_RAMCODE uiPrvFwLoadFileAndReset(struct Canvas *cnv, struct FatfsFil *fil, uint8_t *buf, uint32_t bufSz, uint32_t totalSz)
 	{
-		uint32_t pos, now, nowDone, writeSz, eraseSz, i;
+		uint32_t pos, done, now, nowDone, writeSz, eraseSz, i;
+		bool writeOk;
 
+		bufSz &=~ (QSPI_ERASE_GRANULARITY - 1);
 		if (bufSz < QSPI_WRITE_GRANULARITY)
 			return false;
 
-		for (pos = 0; pos < totalSz; pos += now) {
-			now = totalSz - pos;
-			if (now > bufSz)
+		for (pos = totalSz, done = 0; pos; done += now) {
+			now = pos % bufSz;
+			if (!now)
 				now = bufSz;
+			pos -= now;
 
 			writeSz = (now + QSPI_WRITE_GRANULARITY - 1) &~ (QSPI_WRITE_GRANULARITY - 1);
 			eraseSz = (now + QSPI_ERASE_GRANULARITY - 1) &~ (QSPI_ERASE_GRANULARITY - 1);
 			for (i = now; i < writeSz; i++)
 				buf[i] = 0;
 
+			if (!fatfsFileSeek(fil, pos))
+				return false;
 			if (!fatfsFileRead(fil, buf, now, &nowDone) || now != nowDone)
 				return false;
-			if (!flashWrite(UI_FIRMWARE_FLASH_BASE + pos, eraseSz, buf, writeSz))
+			writeOk = flashWrite(UI_FIRMWARE_FLASH_BASE + pos, eraseSz, buf, writeSz);
+			if (!writeOk)
 				return false;
+			if (!pos)
+				uiPrvFwResetFromRam();
 
-			uiPrvFwProgressFill(cnv, pos + now, totalSz);
+			uiPrvFwProgressFill(cnv, done + now, totalSz);
 		}
 
 		uiPrvFwProgressFill(cnv, totalSz, totalSz);

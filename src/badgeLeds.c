@@ -247,7 +247,7 @@ static void badgeLedsPrvRenderRandom(void)
 
 static void badgeLedsPrvRenderFlashlight(void)
 {
-	static const uint8_t activeLeds[] = {1, 3, 8, 7};	//PCB labels LED2, LED4, LED10, LED9
+	static const uint8_t activeLeds[] = {2, 3, 8, 7};	//PCB labels LED2, LED4, LED10, LED9
 	uint_fast8_t i;
 
 	ws2812SetAllRgb(0, 0, 0);

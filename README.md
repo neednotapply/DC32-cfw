@@ -96,7 +96,7 @@ The direct binary path is available with `sudo make flash`; it wraps the `Cortex
 
 #### SD-card updater
 
-Copy a raw `.bin` firmware image such as `DC32-cfw.bin` or `FIRMWARE.BIN` anywhere on the badge SD card. Insert the SD card, boot the badge, and use the on-device firmware update option to browse for the file. The general file browser also opens `.bin` files with the firmware updater after basic firmware-image checks.
+Copy a raw `.bin` firmware image such as `DC32-cfw.bin` or `FIRMWARE.BIN` into `/FIRMWARE` on the badge SD card. The on-device firmware update option starts there and can browse subfolders. The general file browser also opens `.bin` files with the firmware updater.
 
 A `make trace` target is also provided for developers who want to start the badge with hardware tracing enabled at the configured watch address (`ZWT_ADDR`).
 

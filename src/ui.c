@@ -30,9 +30,6 @@
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 #define UI_FIRMWARE_FLASH_BASE			0x10000000UL
 #define UI_FIRMWARE_MAX_SIZE			(QSPI_SETTINGS_START - UI_FIRMWARE_FLASH_BASE)
-#define UI_FIRMWARE_MIN_SIZE			1024
-#define UI_FIRMWARE_SRAM_START			0x20000000UL
-#define UI_FIRMWARE_SRAM_END			0x20082000UL
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -2176,7 +2173,7 @@ bool uiSaveSavestate(void)
 		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
-		if (uiPrvPickFile(cnv, vol, "/", uiPrvRomFileName, "No .gb or .gbc files found on the SD card", &locator, name, sizeof(name), NULL, 0))
+		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb or .gbc files found in /ROM", &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:
@@ -4240,100 +4237,16 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".bin");
 	}
 
-	static bool uiPrvPickFirmwareRoot(struct Canvas *cnv, struct FatfsVol *vol, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
+	static bool uiPrvPickFirmwareFile(struct Canvas *cnv, struct FatfsVol *vol, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
 	{
-		struct ToolWorkspaceSpan listMem;
-		struct UiFileListCtx ctx;
-		struct FatfsDir *dir;
-		struct MusicOption *picked;
-		char fname[FATFS_NAME_BUF_LEN], shortName[UI_PICK_FILE_NAME_BUF_SZ];
-		uint32_t fileSz;
-		uint8_t attrs;
-		struct FatFileLocator locator;
-		bool ret = false;
-
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerTransfer, &listMem)) {
-			uiAlert(cnv, "Tool workspace is busy; cannot list firmware", DialogTypeOk);
-			return false;
-		}
-
-		memset(&ctx, 0, sizeof(ctx));
-		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
-		ctx.spaceAvail = listMem.size;
-		ctx.filterF = uiPrvFirmwareFileName;
-		ctx.fname = fname;
-
-		dir = fatfsRootDirOpen(vol);
-		if (!dir) {
-			uiAlert(cnv, "Cannot open SD card root", DialogTypeOk);
-			goto out_release;
-		}
-
-		while (fatfsDirRead(dir, fname, &fileSz, &attrs, &locator)) {
-			if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
-				continue;
-			if (!uiPrvFirmwareFileName(fname))
-				continue;
-			uiPrvCopyStr(shortName, sizeof(shortName), fname);
-			if (!uiPrvFileListAppend(&ctx, shortName, fileSz, false, &locator))
-				break;
-		}
-		fatfsDirClose(dir);
-
-		if (!ctx.count) {
-			uiAlert(cnv, "No root .bin firmware files found on the SD card", DialogTypeOk);
-			goto out_release;
-		}
-		if (ctx.overflow)
-			uiAlert(cnv, "Too many firmware files; showing what fits", DialogTypeOk);
-
-		picked = uiPrvChooseFlatOption(cnv, ctx.head, ctx.count, "Firmware Update");
-		if (!picked)
-			goto out_release;
-
-		*locatorOut = picked->locator;
-		uiPrvCopyStr(nameOut, nameOutSz, picked->name);
-		ret = true;
-
-	out_release:
-		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerTransfer);
-		return ret;
-	}
-
-	static bool uiPrvFwReadWord(struct FatfsFil *fil, uint32_t pos, uint32_t *wordP)
-	{
-		uint8_t bytes[4];
-		uint32_t nBytesRead;
-
-		if (!fatfsFileSeek(fil, pos) || !fatfsFileRead(fil, bytes, sizeof(bytes), &nBytesRead) || nBytesRead != sizeof(bytes)) {
-			(void)uiPrvCardPreUnmount();
-			return false;
-		}
-
-		*wordP = ((uint32_t)bytes[0]) | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
-		return true;
+		return uiPrvPickFile(cnv, vol, "/FIRMWARE", uiPrvFirmwareFileName, "No .bin firmware files found in /FIRMWARE", locatorOut, nameOut, nameOutSz, NULL, 0);
 	}
 
 	static bool uiPrvFwFilePlausible(struct FatfsFil *fil, uint32_t fileSz)
 	{
-		uint32_t stackTop, resetVector, resetAddr;
+		(void)fil;
 
-		if (fileSz < UI_FIRMWARE_MIN_SIZE || fileSz > UI_FIRMWARE_MAX_SIZE)
-			return false;
-		if (!uiPrvFwReadWord(fil, 0, &stackTop) || !uiPrvFwReadWord(fil, 4, &resetVector))
-			return false;
-
-		resetAddr = resetVector &~ 1UL;
-		if ((stackTop & 3) || stackTop < UI_FIRMWARE_SRAM_START || stackTop > UI_FIRMWARE_SRAM_END)
-			return false;
-		if (!(resetVector & 1) || resetAddr < UI_FIRMWARE_FLASH_BASE || resetAddr >= UI_FIRMWARE_FLASH_BASE + fileSz)
-			return false;
-
-		if (!fatfsFileSeek(fil, 0)) {
-			(void)uiPrvCardPreUnmount();
-			return false;
-		}
-		return true;
+		return fileSz && fileSz <= UI_FIRMWARE_MAX_SIZE;
 	}
 
 	static void uiPrvFwUpdateFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name, bool tryZDU)
@@ -4343,7 +4256,7 @@ reload_dir:
 		if (!uiPrvFwFilePlausible(fil, fileSz)) {
 
 			if (!tryZDU)
-				uiAlert(cnv, "Invalid firmware image.", DialogTypeOk);
+				uiAlert(cnv, "Firmware file is empty or too large.", DialogTypeOk);
 		}
 		else {
 
@@ -4431,7 +4344,7 @@ reload_dir:
 			const char *displayName = tryZDU ? "/UPDATE_OR_WE_ARE.FUCKED" : name;
 			struct FatfsFil *fil;
 
-			if (!tryZDU && !uiPrvPickFirmwareRoot(cnv, vol, &locator, name, sizeof(name)))
+			if (!tryZDU && !uiPrvPickFirmwareFile(cnv, vol, &locator, name, sizeof(name)))
 				goto out_unmount;
 
 			fil = tryZDU ? fatfsFileOpen(vol, displayName, OPEN_MODE_READ) : fatfsFileOpenWithLocator(vol, &locator, OPEN_MODE_READ);

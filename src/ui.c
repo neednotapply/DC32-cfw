@@ -27,6 +27,7 @@
 #include "gb.h"
 
 
+#define UI_RAMCODE					__attribute__((section(".fastcode"), noinline))
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 #define UI_FIRMWARE_FLASH_BASE			0x10000000UL
 #define UI_FIRMWARE_FLASH_END			(QSPI_ROM_START + QSPI_ROM_SIZE_MAX)
@@ -631,7 +632,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 }
 
 #ifndef NO_SD_CARD
-	static bool uiPrvCardReadSec(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
+	static bool UI_RAMCODE uiPrvCardReadSec(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
 	{
 		uint8_t *dst = (uint8_t*)dstP;
 		
@@ -1950,6 +1951,7 @@ bool uiSaveSavestate(void)
 
 		if (bufSz > bufMem.size)
 			bufSz = bufMem.size;
+		bufSz &=~ (QSPI_ERASE_GRANULARITY - 1);
 		
 		cnv->font = FontLarge;
 		row = uiPrvGlyphHeight(cnv) + 1;
@@ -1987,6 +1989,95 @@ bool uiSaveSavestate(void)
 		
 		ret = true;
 	out_release:
+		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
+		return ret;
+	}
+
+	static void UI_RAMCODE uiPrvFwProgressFill(struct Canvas *cnv, uint32_t done, uint32_t total)
+	{
+		uint16_t *fb = (uint16_t*)cnv->framebuffer;
+		uint32_t row, col, width, filled, r, c;
+
+		if (!fb || !total)
+			return;
+
+		row = cnv->h / 2;
+		if (row + 6 >= cnv->h)
+			return;
+
+		width = cnv->w > 104 ? 100 : cnv->w - 4;
+		filled = (done > total ? total : done) * width / total;
+		for (r = row; r < row + 6; r++) {
+			for (c = 0; c < width; c++) {
+				if (cnv->rotated)
+					fb[c * cnv->h + r] = c < filled ? 0x07e0 : 0;
+				else
+					fb[r * cnv->w + c + 2] = c < filled ? 0x07e0 : 0;
+			}
+		}
+	}
+
+	static void UI_RAMCODE uiPrvFwResetFromRam(void)
+	{
+		*(volatile uint32_t*)0xe000ed0c = (0x5fa << 16) | (1 << 2);
+		while (1) {
+		}
+	}
+
+	static bool UI_RAMCODE uiPrvFwLoadFileAndReset(struct Canvas *cnv, struct FatfsFil *fil, uint8_t *buf, uint32_t bufSz, uint32_t totalSz)
+	{
+		uint32_t pos, now, nowDone, writeSz, eraseSz, i;
+
+		if (bufSz < QSPI_WRITE_GRANULARITY)
+			return false;
+
+		for (pos = 0; pos < totalSz; pos += now) {
+			now = totalSz - pos;
+			if (now > bufSz)
+				now = bufSz;
+
+			writeSz = (now + QSPI_WRITE_GRANULARITY - 1) &~ (QSPI_WRITE_GRANULARITY - 1);
+			eraseSz = (now + QSPI_ERASE_GRANULARITY - 1) &~ (QSPI_ERASE_GRANULARITY - 1);
+			for (i = now; i < writeSz; i++)
+				buf[i] = 0;
+
+			if (!fatfsFileRead(fil, buf, now, &nowDone) || now != nowDone)
+				return false;
+			if (!flashWrite(UI_FIRMWARE_FLASH_BASE + pos, eraseSz, buf, writeSz))
+				return false;
+
+			uiPrvFwProgressFill(cnv, pos + now, totalSz);
+		}
+
+		uiPrvFwProgressFill(cnv, totalSz, totalSz);
+		uiPrvFwResetFromRam();
+		return true;
+	}
+
+	static bool uiPrvFwInstallFile(struct Canvas *cnv, struct FatfsFil *fil, const char *name)
+	{
+		uint32_t row, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
+		struct ToolWorkspaceSpan bufMem;
+		bool ret;
+
+		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &bufMem)) {
+			uiAlert(cnv, "Tool workspace is busy; cannot load firmware", DialogTypeOk);
+			return false;
+		}
+		if (bufSz > bufMem.size)
+			bufSz = bufMem.size;
+
+		cnv->font = FontLarge;
+		row = uiPrvGlyphHeight(cnv) + 1;
+		uiPrvReset(cnv, false);
+		uiPrintf(cnv, row, 10, "Loading %s...", name);
+		cnv->foreColor = 15;
+		uiPrvFillRect(cnv, row + 8, 50, 131, 60);
+		cnv->foreColor = 0;
+		uiPrvFillRect(cnv, row + 9, 51, 130, 59);
+		cnv->foreColor = 10;
+
+		ret = uiPrvFwLoadFileAndReset(cnv, fil, (uint8_t*)bufMem.ptr, bufSz, totalSz);
 		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
 		return ret;
 	}
@@ -4302,7 +4393,7 @@ reload_dir:
 
 			if (tryToUpdate) {
 
-				if (!uiPrvLoadFile(cnv, fil, 0x10000000, "FIRMWARE")) {
+				if (!uiPrvFwInstallFile(cnv, fil, name)) {
 
 					uiAlert(cnv, "Firmware update failed to be installed. You're out of luck in the firmware department. No firmware for you.", DialogTypeOk);
 				}

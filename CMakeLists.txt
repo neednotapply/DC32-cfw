@@ -28,6 +28,7 @@ add_executable(${APP}
     ${SRC_DIR}/pioWS2812.c
     ${SRC_DIR}/printf.c
     ${SRC_DIR}/qspi2350.c
+    ${SRC_DIR}/ramUtils.c
     ${SRC_DIR}/rtttlPlayer.c
     ${SRC_DIR}/sd.c
     ${SRC_DIR}/sdHwRP2350.c

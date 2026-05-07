@@ -36,7 +36,7 @@ LD		= arm-none-eabi-gcc
 OBJCOPY		= arm-none-eabi-objcopy
 PYTHON		?= python3
 UF2CONV		= $(PYTHON) ../tools/bin_to_uf2.py
-EXTRA_OBJS	= main_rp2350_defcon.o crt_rp2350.o timebase.o printf.o dispDefcon.o utf.o qspi2350.o ui.o settings.o badgeLeds.o bootGuard.o fonts.o sleepDefcon.o sd.o fatfs.o sdHwRP2350.o pioI2C.o pioIrdaSIR.o pioWS2812.o irRemote.o audioPwm.o rtttlPlayer.o usbHid.o badUsb.o toolWorkspace.o
+EXTRA_OBJS	= main_rp2350_defcon.o crt_rp2350.o timebase.o printf.o dispDefcon.o utf.o qspi2350.o ramUtils.o ui.o settings.o badgeLeds.o bootGuard.o fonts.o sleepDefcon.o sd.o fatfs.o sdHwRP2350.o pioI2C.o pioIrdaSIR.o pioWS2812.o irRemote.o audioPwm.o rtttlPlayer.o usbHid.o badUsb.o toolWorkspace.o
 
 CC_FLAGS	+= -isysteminc_RP2350
 

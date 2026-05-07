@@ -4778,8 +4778,11 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 }
 #endif
 
-static void uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+static enum UiGameAction mLastGameMenuAction = UiGameActionResume;
+
+static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
+	mLastGameMenuAction = UiGameActionResume;
 	uiPrvEnterTool(UiToolGame);
 	toolWorkspaceEnd();
 	uiPrvLoadSavestate();
@@ -4788,6 +4791,7 @@ static void uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *us
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 	toolWorkspaceBegin();
 	uiPrvExitTool(UiToolGame);
+	return mLastGameMenuAction;
 }
 
 static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -4819,12 +4823,14 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (button == KEY_BIT_B || selOption == switchOption)
 			return uiPrvToolSwitcher(cnv, UiToolGame);
 		if (selOption == runOption) {
-			uiPrvRunLoadedGame(cnv, runGameF, userData);
+			if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
+				return uiPrvToolSwitcher(cnv, UiToolGame);
 		}
 	#ifndef NO_SD_CARD
 		else if (selOption == selectOption) {
 			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0)) {
-				uiPrvRunLoadedGame(cnv, runGameF, userData);
+				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
+					return uiPrvToolSwitcher(cnv, UiToolGame);
 			}
 		}
 	#endif
@@ -4834,8 +4840,11 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 enum UiGameAction uiGameMenu(void)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	uint_fast8_t itemHeight, selOption;
-	uint_fast8_t resumeOption = 0, settingsOption = 1, switchOption = 2, powerOffOption = 3;
+	uint_fast8_t itemHeight;
+	int_fast8_t runOption = -1, selectOption = -1, settingsOption, switchOption, numOptions = 0, selOption;
+	char name[ROM_NAME_LEN + 1];
+	uint32_t ramSz = 0;
+	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint8_t button = KEY_BIT_A | KEY_BIT_B;
 	
 	uiPrvReset(cnv, false);
@@ -4844,20 +4853,39 @@ enum UiGameAction uiGameMenu(void)
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
-	uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Resume Game", -1);
-	uiPuts(cnv, cnv->h - 3 * itemHeight, 10, "Settings", -1);
-	uiPuts(cnv, cnv->h - 2 * itemHeight, 10, "Switch Tool", -1);
-	uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Power Off", -1);
+	if (validRom)
+		runOption = numOptions++;
+#ifndef NO_SD_CARD
+	selectOption = numOptions++;
+#endif
+	settingsOption = numOptions++;
+	switchOption = numOptions++;
 
-	selOption = uiPrvMenu(cnv, 0, 4, &button);
-	if (button == KEY_BIT_B || selOption == resumeOption)
+	if (validRom)
+		uiPrintf(cnv, cnv->h - (numOptions - runOption) * itemHeight, 10, "Run game '%s'", name);
+#ifndef NO_SD_CARD
+	uiPuts(cnv, cnv->h - (numOptions - selectOption) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
+#endif
+	uiPuts(cnv, cnv->h - (numOptions - settingsOption) * itemHeight, 10, "Settings", -1);
+	uiPuts(cnv, cnv->h - (numOptions - switchOption) * itemHeight, 10, "Switch Tool", -1);
+
+	selOption = uiPrvMenu(cnv, 0, numOptions, &button);
+	if (button == KEY_BIT_B || selOption == runOption)
 		return UiGameActionResume;
-	if (selOption == settingsOption)
-		return uiPrvSettings(cnv) ? UiGameActionRestart : UiGameActionResume;
-	if (selOption == switchOption)
-		return UiGameActionSwitchTool;
-	if (selOption == powerOffOption)
-		doSleep();
+#ifndef NO_SD_CARD
+	if (selOption == selectOption) {
+		mLastGameMenuAction = uiPrvSelectRom(cnv, validRom ? ramSz : 0) ? UiGameActionSelectGame : UiGameActionResume;
+		return mLastGameMenuAction;
+	}
+#endif
+	if (selOption == settingsOption) {
+		mLastGameMenuAction = uiPrvSettings(cnv) ? UiGameActionRestart : UiGameActionResume;
+		return mLastGameMenuAction;
+	}
+	if (selOption == switchOption) {
+		mLastGameMenuAction = UiGameActionSwitchTool;
+		return mLastGameMenuAction;
+	}
 
 	return UiGameActionResume;
 }
@@ -4918,7 +4946,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				continue;
 
 			case UiToolRunGame:
-				uiPrvRunLoadedGame(cnv, runGameF, userData);
+				(void)uiPrvRunLoadedGame(cnv, runGameF, userData);
 				activeTool = UiToolBrowser;
 				continue;
 

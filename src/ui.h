@@ -29,6 +29,7 @@ struct Canvas {
 enum UiGameAction {
 	UiGameActionResume,
 	UiGameActionRestart,
+	UiGameActionSelectGame,
 	UiGameActionSwitchTool,
 };
 
@@ -52,4 +53,3 @@ void uiSelfTestSetText(struct Canvas *cnv, unsigned row, unsigned col, const cha
 void uiSelfTestSetMarks(struct Canvas *cnv, uint8_t passMask, uint8_t failMask);
 
 #endif
-

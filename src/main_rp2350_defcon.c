@@ -218,11 +218,19 @@ static void exitGame(void)
                         uiPrvUpscalerDeinit();
 
         action = uiGameMenu();
-        if (action == UiGameActionSwitchTool)
-                mGameToolExitRequested = true;
-        if (action != UiGameActionResume) {
-                gbAbort();
-                return;
+        switch (action) {
+                case UiGameActionResume:
+                        break;
+
+                case UiGameActionRestart:
+                case UiGameActionSelectGame:
+                        gbAbort();
+                        return;
+
+                case UiGameActionSwitchTool:
+                        mGameToolExitRequested = true;
+                        gbAbort();
+                        return;
         }
 
         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
@@ -1896,5 +1904,4 @@ void __attribute__((naked, used)) HardFault_Handler(void)
                         "bl   bootGuardCaptureHardFault          \n\t"
                         :::"memory");
 }
-
 

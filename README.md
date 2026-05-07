@@ -1,15 +1,40 @@
 # DC32 Badge Firmware
 
-This repository contains the DC32-cfw custom firmware image that shipped with the DEF CON 32 badge. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside the bespoke display, audio, storage, and user-interface plumbing required to run it on the hardware. The firmware and emulator were created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
+This repository contains `DC32-cfw`, a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current on-device header is `DC32-cfw v1.6.9`. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside badge-specific display, audio, storage, IR, USB HID, LED, and user-interface plumbing.
 
-## Features
+The original firmware and emulator were created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
-- **Game Boy emulation** - The `gb*.c` modules implement the core CPU, PPU, cartridge, and memory-mapper logic for the uGB emulator that drives badge gameplay.
-- **Badge-native display pipeline** - `dispDefcon.c` programs the RP2350 PIO, DMA, and PWM peripherals to stream frames to the badge LCD while handling backlight control and frame timing.
-- **Audio, input, and badge peripherals** - `main_rp2350_defcon.c` initializes the hardware, services the UI, and orchestrates audio playback, touch input, IR, accelerometer, and the WS2812 LED strip integration specific to the DEF CON badge layout.
-- **Filesystem and ROM loading** - The SD card and FAT filesystem stack (`sd*.c`, `fatfs.c`) provide persistent storage so Game Boy ROMs and saves can be loaded from removable media.
-- **Settings and UI support** - `ui.c`, `settings.c`, `fonts.c`, and related helpers deliver an on-device configuration experience and badge-specific overlays for the emulator.
-- **Original badge game** - The adventure that shipped on the badge is preserved in the [DC32BadgeGame repository](https://github.com/CosmicBonBon/DC32BadgeGame), which contains the game assets and scripting that run on top of this firmware.
+## Current functionality
+
+- **Game Boy and Game Boy Color emulation** - Runs uGB on the DEF CON 32 badge hardware, including cartridge parsing, mapper support, save RAM handling, optional GBC behavior, display speed selection, and optional upscaling.
+- **Tool shell** - Boots into a badge-native launcher with Browser, IR, BadUSB, Music, Game, Settings, Firmware Update, and Power Off entries. A boot guard records crashes or resets inside tools and restarts into a safe shell instead of immediately re-entering the failing mode.
+- **SD-card file browser** - Browses folders on the SD card and opens supported files with the right tool: `.gb`/`.gbc` games, `.ir` remotes, `.txt`/`.badusb` BadUSB scripts, `.rtttl`/`.txt` RTTTL music, and `.bin` firmware images.
+- **Game loading and saves** - Loads Game Boy ROMs from SD, confirms ROM metadata before flashing/loading, exports the current save when changing games, and keeps flash-backed save state support for the active game.
+- **IR tools** - Supports Flipper-style `.ir` files, DC32 IR library files, universal remote categories for TV, A/C, Audio, and Projector files on the SD card, individual button selection, and power/mute blast modes with cancellable progress screens.
+- **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as a USB HID keyboard/mouse/consumer-control device. Supported commands include strings, delays, repeats, key chords, hold/release, mouse movement/click/scroll, media keys, Alt codes, SysRq, custom USB IDs, and wait-for-button pauses.
+- **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, including folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
+- **LED controls** - Drives the badge WS2812 LEDs with off, solid, rainbow, pulse, dot, random, and flashlight patterns; supports custom, rainbow, flame, and random colors; and exposes speed plus brightness controls.
+- **Screen and game settings** - Provides on-device settings for screen rotation, brightness/contrast where supported, Game Boy Color mode, upscaling, emulator speed, and LED behavior.
+- **Firmware updater** - Installs raw `.bin` images from the SD card through the dedicated updater or from the file browser after basic firmware-image checks. UF2 output is also generated for RP2350 bootloader flashing.
+
+## Comparison with stock firmware
+
+The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://github.com/jaku/DEFCON-32-BadgeFirmware), whose [firmware note](https://raw.githubusercontent.com/jaku/DEFCON-32-BadgeFirmware/main/firmware/readme.md) identifies the images as official firmware posted with DmitryGR's permission. The baseline used here is the stock image in [firmware/1.6](https://github.com/jaku/DEFCON-32-BadgeFirmware/tree/main/firmware/1.6). A string-level check against `firmware/1.6/stock-firmware.bin` shows the stock image exposes the original uGB game/settings/update flow, while this firmware adds the broader tool shell and file-driven utilities.
+
+| Capability | Stock official firmware | `DC32-cfw v1.6.9` |
+| ---------- | ----------------------- | ----------------- |
+| uGB badge game runtime | Yes | Yes |
+| Game settings, firmware update, power off | Yes | Yes |
+| SD-card ROM loading | Limited to stock/custom-image flows | Yes, from the Game tool and browser |
+| General SD file browser | No visible browser entry | Yes |
+| BadUSB scripting | Not present | Yes |
+| RTTTL music player | Not present | Yes |
+| IR remote and IR blast tools | Not present as user tools | Yes |
+| Expanded LED pattern/color settings | Basic badge LED behavior | Yes |
+| Safe tool-shell recovery after crashes/resets | Not present as a visible workflow | Yes |
+| Release formats | Stock `.bin` and `.uf2` images | `.bin`, `FIRMWARE.BIN`, and `.uf2` images |
+
+Stock firmware is still the right choice if you want the original badge experience with the official game image. `DC32-cfw` is aimed at using the badge as a post-con tool platform: loading ROMs, browsing SD-card content, replaying IR files, running HID scripts, playing RTTTL files, and updating firmware without rebuilding a full custom image each time.
 
 ## Repository layout
 

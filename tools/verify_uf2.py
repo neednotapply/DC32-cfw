@@ -14,6 +14,7 @@ MAGIC0 = 0x0A324655
 MAGIC1 = 0x9E5D5157
 MAGIC_END = 0x0AB16F30
 FLAG_FAMILY_ID = 0x00002000
+FLAG_EXTENSION_TAGS = 0x00008000
 PAYLOAD_SIZE = 256
 
 FAMILY_ABSOLUTE = 0xE48BFF57
@@ -57,26 +58,31 @@ def main() -> None:
         fail("file size is not a non-zero multiple of 512 bytes")
 
     block_count = len(uf2_data) // 512
+    firmware_blocks = (len(bin_data) + PAYLOAD_SIZE - 1) // PAYLOAD_SIZE
     firmware = bytearray()
     expected_firmware_addr = args.base
 
     for idx in range(block_count):
-        target, block_no, total_blocks, family, _flags, payload = parse_block(
+        target, block_no, total_blocks, family, flags, payload = parse_block(
             uf2_data[idx * 512 : (idx + 1) * 512], idx * 512
         )
-
-        if block_no != idx:
-            fail(f"block number {block_no} does not match position {idx}")
-        if total_blocks != block_count:
-            fail(f"block {idx} total {total_blocks} does not match {block_count}")
 
         if idx == 0:
             if target != ABS_BLOCK_LOC or family != FAMILY_ABSOLUTE:
                 fail("first block is not the required RP2350 absolute block")
+            if block_no != 0 or total_blocks != 2:
+                fail("absolute block does not match picotool --abs-block numbering")
+            if (flags & FLAG_EXTENSION_TAGS) == 0:
+                fail("absolute block is missing the RP2350 extension-tags flag")
             if payload != b"\xef" * PAYLOAD_SIZE:
                 fail("absolute block payload does not match RP2350 flash workaround data")
             continue
 
+        firmware_idx = idx - 1
+        if block_no != firmware_idx:
+            fail(f"firmware block number {block_no} does not match position {firmware_idx}")
+        if total_blocks != firmware_blocks:
+            fail(f"firmware block {firmware_idx} total {total_blocks} does not match {firmware_blocks}")
         if family != FAMILY_RP2350_ARM_S:
             fail(f"block {idx} has unexpected family 0x{family:08x}")
         if target != expected_firmware_addr:

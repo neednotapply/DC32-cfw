@@ -1,0 +1,7 @@
+build/
+src/build_codex/
+src/*.o
+src/DC32-cfw
+src/DC32-cfw.bin
+src/DC32-cfw.uf2
+src/FIRMWARE.BIN

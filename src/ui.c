@@ -3444,11 +3444,11 @@ bool uiSaveSavestate(void)
 		if (!button)
 			goto out_close;
 		uiPrvCopyStr(buttonName, sizeof(buttonName), button->name);
-		ret = uiPrvIrSendButtonSpamFile(cnv, fil, buttonName);
-		goto out_release;
+		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
+		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
+		return uiPrvIrSendButtonSpamFile(cnv, fil, buttonName);
 
 	out_close:
-	out_release:
 		toolWorkspaceRelease(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr);
 		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 		return ret;

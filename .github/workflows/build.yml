@@ -38,16 +38,12 @@ jobs:
             -DPICO_BOARD=defcon32_badge
           cmake --build build
 
-      - name: Build firmware
-        working-directory: src
-        run: make app sdcard
-
       - name: Package firmware artifacts
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
-          cp src/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
-          cp src/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+          cp build/FIRMWARE.BIN "$ARTIFACT_DIR/FIRMWARE.BIN"
+          cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4

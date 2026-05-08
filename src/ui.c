@@ -500,7 +500,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 
 static void uiPrvReset(struct Canvas *cnv, bool invert)
 {
-	static const char windowTitle[] = "DC32-cfw v1.6.9";
+	static const char windowTitle[] = "DC32-cfw v1.69.6.7";
 	memset(cnv->framebuffer, invert ? 0xff : 0, cnv->w * cnv->h * DISP_BPP / 8);
 	
 	//draw title

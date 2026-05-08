@@ -5,7 +5,6 @@
 #define BADUSB_LINE_BUF_SZ			512
 #define BADUSB_KEY_DELAY_MS			12
 #define BADUSB_ENUM_WAIT_MS			5000
-#define BADUSB_REENUM_DELAY_MS		300
 
 struct BadUsbState {
 	struct BadUsbStatus status;
@@ -198,8 +197,7 @@ static void badUsbPrvCopy(char *dst, uint32_t dstLen, const char *src)
 static bool badUsbPrvPoll(struct BadUsbState *st, const char *msg)
 {
 	st->status.message = msg;
-	if (!st->validateOnly)
-		usbHidTask();
+	usbHidTask();
 	return !st->statusF || st->statusF(st->userData, &st->status);
 }
 
@@ -363,12 +361,6 @@ static bool badUsbPrvNamedKey(const char *name, uint8_t *usageP)
 		return badUsbPrvAsciiKey(name[0], usageP, &mods);
 	}
 	return false;
-}
-
-static bool badUsbPrvReenumerate(struct BadUsbState *st)
-{
-	usbHidEnd();
-	return badUsbPrvDelay(st, BADUSB_REENUM_DELAY_MS, "Resetting USB");
 }
 
 static bool badUsbPrvSendKeyboard(struct BadUsbState *st, uint8_t mods, uint8_t usage)
@@ -847,18 +839,16 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 	st.validateOnly = false;
 	if (!badUsbPrvPoll(&st, "Starting USB"))
 		return BadUsbResultCancelled;
-	if (!badUsbPrvReenumerate(&st))
-		return BadUsbResultCancelled;
 	if (!usbHidBegin(&info))
 		return BadUsbResultUsbError;
 	if (!badUsbPrvWaitReady(&st)) {
-		usbHidEnd();
 		return BadUsbResultUsbError;
 	}
 
+	usbHidSetReportsEnabled(true);
 	ret = badUsbPrvRunScript(fil, &st, false);
 	usbHidReleaseAll();
-	usbHidEnd();
+	usbHidSetReportsEnabled(false);
 	if (ret != BadUsbResultDone)
 		return ret;
 	if (!badUsbPrvPoll(&st, "Done"))

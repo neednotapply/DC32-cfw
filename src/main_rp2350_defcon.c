@@ -16,6 +16,7 @@
 #include "printf.h"
 #include "sleep.h"
 #include "audioPwm.h"
+#include "usbHid.h"
 #include "2350.h"
 #include "qspi.h"
 #include "mbc.h"
@@ -195,19 +196,23 @@ uint_fast8_t uiGetKeys(void)
 {
         uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
-        while(1) {
-                badgeLedsTick();
-                val = sio_hw->gpio_in & ourKeysMask;
-                for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++)
-                        badgeLedsTick();
-                if (count == countUntil)
-                        return prvKeysMap(val);
-        }
+	while(1) {
+		usbHidTask();
+		badgeLedsTick();
+		val = sio_hw->gpio_in & ourKeysMask;
+		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+			usbHidTask();
+			badgeLedsTick();
+		}
+		if (count == countUntil)
+			return prvKeysMap(val);
+	}
 }
 
 uint_fast8_t uiGetKeysRaw(void)
 {
-        return prvKeysMap(sio_hw->gpio_in);
+	usbHidTask();
+	return prvKeysMap(sio_hw->gpio_in);
 }
 
 static void exitGame(void)
@@ -1849,6 +1854,10 @@ void __attribute__((noreturn, used)) micromain(void)
         badgeIrdaInit(false);
 
 
+        pr("USB HID...\n");
+        if (!usbHidBegin(NULL))
+                pr("USB HID init failed\n");
+
         uiPrvSelfTestsIfNeeded();
 
         pr("UI...\n");
@@ -1904,4 +1913,3 @@ void __attribute__((naked, used)) HardFault_Handler(void)
                         "bl   bootGuardCaptureHardFault          \n\t"
                         :::"memory");
 }
-

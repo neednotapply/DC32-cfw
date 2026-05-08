@@ -4388,7 +4388,6 @@ static bool uiPrvAutoClickerRun(struct Canvas *cnv, uint_fast8_t speedIdx, bool 
 
 	usbHidDefaultInfo(&info);
 	strcpy(info.product, "DC32 AutoClicker");
-	usbHidEnd();
 	if (!uiPrvAutoClickerDelay(cnv, 300))
 		return false;
 	if (!usbHidBegin(&info)) {
@@ -4396,13 +4395,13 @@ static bool uiPrvAutoClickerRun(struct Canvas *cnv, uint_fast8_t speedIdx, bool 
 		return false;
 	}
 	if (!uiPrvAutoClickerWaitReady(cnv, speed, jiggler)) {
-		usbHidEnd();
 		if (!(uiGetKeysRaw() & KEY_BIT_B))
 			uiAlert(cnv, "AutoClicker USB device failed to enumerate", DialogTypeOk);
 		uiPrvWaitKeysReleased();
 		return false;
 	}
 
+	usbHidSetReportsEnabled(true);
 	nextClick = getTime();
 	nextDraw = 0;
 	while (!(uiGetKeysRaw() & KEY_BIT_B)) {
@@ -4437,7 +4436,7 @@ static bool uiPrvAutoClickerRun(struct Canvas *cnv, uint_fast8_t speedIdx, bool 
 	}
 
 	usbHidReleaseAll();
-	usbHidEnd();
+	usbHidSetReportsEnabled(false);
 	uiPrvWaitKeysReleased();
 	if (!ok)
 		uiAlert(cnv, "AutoClicker USB send failed", DialogTypeOk);
@@ -4529,7 +4528,7 @@ static void uiPrvEnterTool(enum UiToolId tool)
 static void uiPrvExitTool(enum UiToolId tool)
 {
 	audioPwmStop();
-	usbHidEnd();
+	usbHidSetReportsEnabled(false);
 	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));
 }

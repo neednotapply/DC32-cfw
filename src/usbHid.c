@@ -55,7 +55,7 @@ static struct UsbHidDeviceInfo mInfo;
 static uint8_t mConfigured, mPendingAddress, mIdleRate, mProtocol = 1;
 static const uint8_t *mCtrlData;
 static uint16_t mCtrlRemaining;
-static bool mInited, mEp0DataPid, mEp1DataPid;
+static bool mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid;
 
 static const uint8_t mReportDesc[] = {
         0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x85, 0x01, 0x05, 0x07,
@@ -79,10 +79,10 @@ static const uint8_t mReportDesc[] = {
 void usbHidDefaultInfo(struct UsbHidDeviceInfo *info)
 {
         memset(info, 0, sizeof(*info));
-        info->vid = USB_HID_DEFAULT_VID;
-        info->pid = USB_HID_DEFAULT_PID;
-        strcpy(info->manufacturer, "DC32");
-        strcpy(info->product, "DC32 BadUSB");
+	info->vid = USB_HID_DEFAULT_VID;
+	info->pid = USB_HID_DEFAULT_PID;
+	strcpy(info->manufacturer, "DC32");
+	strcpy(info->product, "DC32 HID");
 }
 
 static void usbHidPrvWrite16(uint8_t *dst, uint16_t val)
@@ -330,17 +330,27 @@ static bool usbHidPrvWaitBits(const volatile uint32_t *reg, uint32_t bits, bool 
 
 bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
-        uint32_t units;
+	struct UsbHidDeviceInfo defaultInfo;
+	uint32_t units;
 
-        mInfo = *info;
-        if (!mInfo.vid)
-                mInfo.vid = USB_HID_DEFAULT_VID;
+	if (mInited) {
+		usbHidTask();
+		return true;
+	}
+
+	if (!info) {
+		usbHidDefaultInfo(&defaultInfo);
+		info = &defaultInfo;
+	}
+	mInfo = *info;
+	if (!mInfo.vid)
+		mInfo.vid = USB_HID_DEFAULT_VID;
         if (!mInfo.pid)
                 mInfo.pid = USB_HID_DEFAULT_PID;
-        if (!mInfo.manufacturer[0])
-                strcpy(mInfo.manufacturer, "DC32");
-        if (!mInfo.product[0])
-                strcpy(mInfo.product, "DC32 BadUSB");
+	if (!mInfo.manufacturer[0])
+		strcpy(mInfo.manufacturer, "DC32");
+	if (!mInfo.product[0])
+		strcpy(mInfo.product, "DC32 HID");
 
         units = RESETS_RESET_USBCTRL_BITS | RESETS_RESET_PLL_USB_BITS;
         resets_hw->reset |= units;
@@ -364,11 +374,12 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
         usb_hw->main_ctrl = 0;
         usb_hw->muxing = USB_USB_MUXING_TO_PHY | USB_USB_MUXING_SOFTCON;
         usb_hw->pwr = USB_USB_PWR_VBUS_DETECT | USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN;
-        usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF | USB_SIE_CTRL_PULLUP_EN;
-        usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN;
-        usbHidPrvBusReset();
-        mInited = true;
-        return true;
+	usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF | USB_SIE_CTRL_PULLUP_EN;
+	usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN;
+	usbHidPrvBusReset();
+	mReportsEnabled = false;
+	mInited = true;
+	return true;
 }
 
 void usbHidTask(void)
@@ -407,17 +418,30 @@ void usbHidTask(void)
 
 bool usbHidReady(void)
 {
-        usbHidTask();
-        return mInited && mConfigured;
+	usbHidTask();
+	return mInited && mConfigured;
 }
 
-static bool usbHidPrvSendReport(const uint8_t *report, uint32_t len)
+bool usbHidStarted(void)
 {
-        uint8_t *dst = &usb_dpram->epx_data[USB_EP1_IN_BUF - 0x180];
-        uint64_t end = getTime() + TICKS_PER_SECOND / 2;
+	usbHidTask();
+	return mInited;
+}
 
-        if (len > 16)
-                return false;
+bool usbHidReportsEnabled(void)
+{
+	return mReportsEnabled;
+}
+
+static bool usbHidPrvSendReport(const uint8_t *report, uint32_t len, bool force)
+{
+	uint8_t *dst = &usb_dpram->epx_data[USB_EP1_IN_BUF - 0x180];
+	uint64_t end = getTime() + TICKS_PER_SECOND / 2;
+
+	if (!force && !mReportsEnabled)
+		return false;
+	if (len > 16)
+		return false;
         while (getTime() < end) {
                 usbHidTask();
                 if (!usbHidReady())
@@ -434,45 +458,68 @@ static bool usbHidPrvSendReport(const uint8_t *report, uint32_t len)
 
 bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6])
 {
-        uint8_t report[9] = {1, modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
+	uint8_t report[9] = {1, modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
 
-        return usbHidPrvSendReport(report, sizeof(report));
+	return usbHidPrvSendReport(report, sizeof(report), false);
 }
 
 bool usbHidMouseReport(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
-        uint8_t report[5] = {2, buttons, (uint8_t)x, (uint8_t)y, (uint8_t)wheel};
+	uint8_t report[5] = {2, buttons, (uint8_t)x, (uint8_t)y, (uint8_t)wheel};
 
-        return usbHidPrvSendReport(report, sizeof(report));
+	return usbHidPrvSendReport(report, sizeof(report), false);
 }
 
 bool usbHidConsumerReport(uint16_t usage)
 {
         uint8_t report[3] = {3, usage, usage >> 8};
 
-        if (!usbHidPrvSendReport(report, sizeof(report)))
-                return false;
-        report[1] = report[2] = 0;
-        return usbHidPrvSendReport(report, sizeof(report));
+	if (!usbHidPrvSendReport(report, sizeof(report), false))
+		return false;
+	report[1] = report[2] = 0;
+	return usbHidPrvSendReport(report, sizeof(report), false);
+}
+
+static void usbHidPrvReleaseAll(bool force)
+{
+	uint8_t keys[6] = {0};
+	uint8_t keyboardReport[9] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
+	uint8_t mouseReport[5] = {2, 0, 0, 0, 0};
+	uint8_t consumerReport[3] = {3, 0, 0};
+
+	if (!force) {
+		(void)usbHidKeyboardReport(0, keys);
+		(void)usbHidMouseReport(0, 0, 0, 0);
+		(void)usbHidConsumerReport(0);
+		return;
+	}
+
+	(void)usbHidPrvSendReport(keyboardReport, sizeof(keyboardReport), true);
+	(void)usbHidPrvSendReport(mouseReport, sizeof(mouseReport), true);
+	(void)usbHidPrvSendReport(consumerReport, sizeof(consumerReport), true);
 }
 
 void usbHidReleaseAll(void)
 {
-        uint8_t keys[6] = {0};
+	usbHidPrvReleaseAll(false);
+}
 
-        (void)usbHidKeyboardReport(0, keys);
-        (void)usbHidMouseReport(0, 0, 0, 0);
-        (void)usbHidConsumerReport(0);
+void usbHidSetReportsEnabled(bool enabled)
+{
+	if (mReportsEnabled && !enabled)
+		usbHidPrvReleaseAll(true);
+	mReportsEnabled = enabled;
 }
 
 void usbHidEnd(void)
 {
-        if (!mInited)
-                return;
-        if (mConfigured)
-                usbHidReleaseAll();
-        usb_hw->sie_ctrl &=~ USB_SIE_CTRL_PULLUP_EN;
-        usb_hw->main_ctrl = 0;
-        mConfigured = 0;
-        mInited = false;
+	if (!mInited)
+		return;
+	if (mConfigured)
+		usbHidPrvReleaseAll(true);
+	usb_hw->sie_ctrl &=~ USB_SIE_CTRL_PULLUP_EN;
+	usb_hw->main_ctrl = 0;
+	mConfigured = 0;
+	mReportsEnabled = false;
+	mInited = false;
 }

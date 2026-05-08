@@ -20,18 +20,16 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 
 The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://github.com/jaku/DEFCON-32-BadgeFirmware), whose [firmware note](https://raw.githubusercontent.com/jaku/DEFCON-32-BadgeFirmware/main/firmware/readme.md) identifies the images as official firmware posted with DmitryGR's permission. The baseline used here is the stock image in [firmware/1.6](https://github.com/jaku/DEFCON-32-BadgeFirmware/tree/main/firmware/1.6). A string-level check against `firmware/1.6/stock-firmware.bin` shows the stock image exposes the original uGB game/settings flow, while this firmware adds the broader tool shell and file-driven utilities.
 
-| Capability | Stock official firmware | `DC32-cfw v1.6.9` |
+| Capability | Stock official firmware | `DC32-cfw v1.69.6.7` |
 | ---------- | ----------------------- | ----------------- |
-| uGB badge game runtime | Yes | Yes |
-| Game settings and power off | Yes | Yes |
-| SD-card ROM loading | Limited to stock/custom-image flows | Yes, from the Game tool and browser |
-| General SD file browser | No visible browser entry | Yes |
-| BadUSB scripting | Not present | Yes |
-| RTTTL music player | Not present | Yes |
-| IR remote and IR blast tools | Not present as user tools | Yes |
-| Expanded LED pattern/color settings | Basic badge LED behavior | Yes |
-| Safe tool-shell recovery after crashes/resets | Not present as a visible workflow | Yes |
-| Release formats | Stock `.bin` and `.uf2` images | `.uf2` image |
+| uGB badge game runtime | ✔️ | ✔️ |
+| Game settings and power off | ✔️ | ✔️ |
+| General SD file browser | ❌ | ✔️ |
+| BadUSB scripting | ❌ | ✔️ |
+| RTTTL music player | ❌ | ✔️ |
+| IR blast tools | ❌ | ✔️ |
+| Expanded LED pattern/color settings | Only DefconBadgeGame | Persistent |
+| Safe tool-shell recovery after crashes/resets | ❌ | ✔️ |
 
 Stock firmware is still the right choice if you want the original badge experience with the official game image. `DC32-cfw` is aimed at using the badge as a post-con tool platform: loading ROMs, browsing SD-card content, replaying IR files, running HID scripts, and playing RTTTL files.
 

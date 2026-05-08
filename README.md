@@ -1,4 +1,4 @@
-# DC32 Badge Firmware
+# DC32 Custom Firmware
 
 This repository contains `DC32-cfw`, a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current on-device header is `DC32-cfw v1.6.9`. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside badge-specific display, audio, storage, IR, USB HID, LED, and user-interface plumbing.
 

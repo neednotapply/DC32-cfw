@@ -33,6 +33,7 @@
 #define USB_EP0_OUT_BIT                         (1u << 1)
 
 #define USB_MAIN_CTRL_CONTROLLER_EN             (1u << 0)
+#define USB_SIE_CTRL_EP0_INT_1BUF               (1u << 29)
 #define USB_SIE_CTRL_PULLUP_EN                  (1u << 16)
 #define USB_SIE_STATUS_BUS_RESET                (1u << 19)
 #define USB_SIE_STATUS_SETUP_REC                (1u << 17)
@@ -167,6 +168,11 @@ static void usbHidPrvEp0In(const void *data, uint16_t len)
                 memcpy(usb_dpram->ep0_buf_a, data, len);
         usb_dpram->ep_buf_ctrl[0].in = usbHidPrvBufCtrl(len, mEp0DataPid);
         mEp0DataPid = !mEp0DataPid;
+}
+
+static void usbHidPrvEp0OutStatus(void)
+{
+        usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_DATA1_PID;
 }
 
 static void usbHidPrvCtrlSendNext(void)
@@ -358,7 +364,7 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
         usb_hw->main_ctrl = 0;
         usb_hw->muxing = USB_USB_MUXING_TO_PHY | USB_USB_MUXING_SOFTCON;
         usb_hw->pwr = USB_USB_PWR_VBUS_DETECT | USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN;
-        usb_hw->sie_ctrl = USB_SIE_CTRL_PULLUP_EN;
+        usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF | USB_SIE_CTRL_PULLUP_EN;
         usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN;
         usbHidPrvBusReset();
         mInited = true;
@@ -391,6 +397,9 @@ void usbHidTask(void)
                         else if (mPendingAddress) {
                                 usb_hw->dev_addr_ctrl = mPendingAddress;
                                 mPendingAddress = 0;
+                        }
+                        else {
+                                usbHidPrvEp0OutStatus();
                         }
                 }
         }

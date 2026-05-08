@@ -140,6 +140,33 @@ static bool badUsbPrvParseU32(const char **strP, uint32_t *valP)
 	return true;
 }
 
+static bool badUsbPrvAtEnd(const char *str)
+{
+	while (*str == ' ' || *str == '\t')
+		str++;
+	return !*str;
+}
+
+static bool badUsbPrvParseI32(const char **strP, int32_t *valP)
+{
+	const char *str = *strP;
+	uint32_t val;
+	bool neg = false;
+
+	if (*str == '-') {
+		neg = true;
+		str++;
+	}
+	if (!badUsbPrvParseU32(&str, &val))
+		return false;
+	if ((!neg && val > 2147483647ul) || (neg && val > 2147483648ul))
+		return false;
+
+	*strP = str;
+	*valP = neg ? (val == 2147483648ul ? (int32_t)0x80000000ul : -(int32_t)val) : (int32_t)val;
+	return true;
+}
+
 static bool badUsbPrvParseHex4(const char *str, uint16_t *valP)
 {
 	uint32_t val = 0, i;
@@ -528,6 +555,22 @@ static bool badUsbPrvMedia(struct BadUsbState *st, const char *name)
 	return false;
 }
 
+static int8_t badUsbPrvMouseStep(int32_t *valP)
+{
+	int32_t val = *valP;
+
+	if (val > 127) {
+		*valP = val - 127;
+		return 127;
+	}
+	if (val < -127) {
+		*valP = val + 127;
+		return -127;
+	}
+	*valP = 0;
+	return (int8_t)val;
+}
+
 static bool badUsbPrvMouse(struct BadUsbState *st, char *cmd, char *arg)
 {
 	if (badUsbPrvEq(cmd, "LEFTCLICK") || badUsbPrvEq(cmd, "LEFT_CLICK")) {
@@ -542,38 +585,40 @@ static bool badUsbPrvMouse(struct BadUsbState *st, char *cmd, char *arg)
 	}
 	if (badUsbPrvEq(cmd, "MOUSEMOVE") || badUsbPrvEq(cmd, "MOUSE_MOVE")) {
 		const char *p = arg;
-		uint32_t x, y;
-		bool nx = *p == '-';
+		int32_t x, y;
 
-		if (nx)
-			p++;
-		if (!badUsbPrvParseU32(&p, &x))
+		if (!badUsbPrvParseI32(&p, &x))
 			return false;
 		while (*p == ' ' || *p == '\t')
 			p++;
-		{
-			bool ny = *p == '-';
-			if (ny)
-				p++;
-			if (!badUsbPrvParseU32(&p, &y))
-				return false;
-			if (st->validateOnly)
-				return true;
-			return usbHidMouseReport(st->heldMouseButtons, nx ? -(int8_t)x : (int8_t)x, ny ? -(int8_t)y : (int8_t)y, 0);
-		}
-	}
-	if (badUsbPrvEq(cmd, "MOUSESCROLL") || badUsbPrvEq(cmd, "MOUSE_SCROLL")) {
-		const char *p = arg;
-		uint32_t val;
-		bool neg = *p == '-';
-
-		if (neg)
-			p++;
-		if (!badUsbPrvParseU32(&p, &val))
+		if (!badUsbPrvParseI32(&p, &y) || !badUsbPrvAtEnd(p))
 			return false;
 		if (st->validateOnly)
 			return true;
-		return usbHidMouseReport(st->heldMouseButtons, 0, 0, neg ? -(int8_t)val : (int8_t)val);
+		while (x || y) {
+			int8_t sx = badUsbPrvMouseStep(&x);
+			int8_t sy = badUsbPrvMouseStep(&y);
+
+			if (!usbHidMouseReport(st->heldMouseButtons, sx, sy, 0))
+				return false;
+		}
+		return true;
+	}
+	if (badUsbPrvEq(cmd, "MOUSESCROLL") || badUsbPrvEq(cmd, "MOUSE_SCROLL")) {
+		const char *p = arg;
+		int32_t val;
+
+		if (!badUsbPrvParseI32(&p, &val) || !badUsbPrvAtEnd(p))
+			return false;
+		if (st->validateOnly)
+			return true;
+		while (val) {
+			int8_t step = badUsbPrvMouseStep(&val);
+
+			if (!usbHidMouseReport(st->heldMouseButtons, 0, 0, step))
+				return false;
+		}
+		return true;
 	}
 	return false;
 }
@@ -726,8 +771,11 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 
 		badUsbPrvCopy(execLine, BADUSB_LINE_BUF_SZ, line);
 		trimmed = badUsbPrvTrim(execLine);
-		if (badUsbPrvStarts(trimmed, "ID "))
+		if (badUsbPrvStarts(trimmed, "ID ")) {
+			if (st->status.lineNo != 1)
+				return BadUsbResultDecodeError;
 			continue;
+		}
 		if (badUsbPrvIsRepeat(trimmed, &repeatArg)) {
 			uint32_t count;
 

@@ -1859,7 +1859,6 @@ bool uiSaveSavestate(void)
 	#define IR_MAX_REPEAT			50
 	#define IR_MAX_RAW_DURATION		1000000
 	#define IR_MAX_RAW_DURATIONS	4096
-
 	struct IrBlastStats {
 		uint32_t sent;
 		uint32_t skipped;
@@ -1884,6 +1883,7 @@ bool uiSaveSavestate(void)
 		uint32_t command;
 		bool hasName;
 		bool hasFrequency;
+		bool hasProtocol;
 		bool hasAddress;
 		bool hasCommand;
 		bool sentRaw;
@@ -2715,7 +2715,7 @@ bool uiSaveSavestate(void)
 			return;
 		}
 
-		if (rec->type != FlipperIrTypeParsed || !rec->hasAddress || !rec->hasCommand) {
+		if (rec->type != FlipperIrTypeParsed || !rec->hasProtocol || !rec->hasAddress || !rec->hasCommand) {
 			stats->malformed++;
 			return;
 		}
@@ -2922,7 +2922,12 @@ bool uiSaveSavestate(void)
 					stats->malformed++;
 			}
 			else if (uiPrvStartsWith(trimmed, "protocol:")) {
-				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), uiPrvTrim(trimmed + 9));
+				char *protocol = uiPrvTrim(trimmed + 9);
+
+				uiPrvCopyStr(rec.protocol, sizeof(rec.protocol), protocol);
+				rec.hasProtocol = !!*protocol;
+				if (!rec.hasProtocol)
+					stats->malformed++;
 			}
 			else if (uiPrvStartsWith(trimmed, "address:")) {
 				rec.hasAddress = uiPrvParseFlipperU32Bytes(uiPrvTrim(trimmed + 8), &rec.address);
@@ -4255,6 +4260,200 @@ reload_dir:
 
 #endif //NO_SD_CARD
 
+#define AUTOCLICK_ENUM_WAIT_MS	5000
+#define AUTOCLICK_PRESS_MS		20
+
+struct AutoClickerSpeed {
+	const char *name;
+	uint32_t intervalMs;
+};
+
+static const struct AutoClickerSpeed mAutoClickerSpeeds[] = {
+	{"Slow", 1000},
+	{"Normal", 250},
+	{"Fast", 100},
+	{"Very Fast", 50},
+};
+
+static void uiPrvAutoClickerSettingsDraw(struct Canvas *cnv, uint_fast8_t selected, uint_fast8_t speedIdx, bool jiggler)
+{
+	uint_fast8_t row;
+
+	uiPrvReset(cnv, false);
+	cnv->font = FontLarge;
+	row = uiPrvGlyphHeight(cnv) + 1;
+	uiPuts(cnv, row, 10, "AutoClicker", -1);
+	row += uiPrvGlyphHeight(cnv) + 3;
+	cnv->font = FontMedium;
+	cnv->foreColor = 15;
+	uiPrintf(cnv, row, 18, "Speed: %s", mAutoClickerSpeeds[speedIdx].name);
+	uiPrvDrawOneChar(cnv, row, 2, selected == 0 ? MENU_SELECTION_CHAR : ' ');
+	row += uiPrvGlyphHeight(cnv) + 1;
+	uiPrintf(cnv, row, 18, "Jiggler: %s", jiggler ? "On" : "Off");
+	uiPrvDrawOneChar(cnv, row, 2, selected == 1 ? MENU_SELECTION_CHAR : ' ');
+	cnv->foreColor = 11;
+	uiPuts(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "Left/Right changes settings", -1);
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "A = Start   B = Quit", -1);
+}
+
+static bool uiPrvAutoClickerSettings(struct Canvas *cnv, uint_fast8_t *speedIdxP, bool *jigglerP)
+{
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast8_t key;
+
+		uiPrvAutoClickerSettingsDraw(cnv, selected, *speedIdxP, *jigglerP);
+		key = uiPrvRecvKeypress();
+		if (key == KEY_BIT_A)
+			return true;
+		if (key == KEY_BIT_B)
+			return false;
+		if (key == KEY_BIT_UP && selected)
+			selected--;
+		else if (key == KEY_BIT_DOWN && selected < 1)
+			selected++;
+		else if (key == KEY_BIT_LEFT || key == KEY_BIT_RIGHT) {
+			if (selected == 0) {
+				if (key == KEY_BIT_LEFT) {
+					if (*speedIdxP)
+						(*speedIdxP)--;
+				}
+				else if (*speedIdxP + 1 < sizeof(mAutoClickerSpeeds) / sizeof(*mAutoClickerSpeeds))
+					(*speedIdxP)++;
+			}
+			else
+				*jigglerP = !*jigglerP;
+		}
+	}
+}
+
+static bool uiPrvAutoClickerDelay(struct Canvas *cnv, uint32_t msec)
+{
+	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
+
+	(void)cnv;
+	while (getTime() < end) {
+		usbHidTask();
+		if (uiGetKeysRaw() & KEY_BIT_B)
+			return false;
+	}
+	return true;
+}
+
+static void uiPrvAutoClickerDrawRun(struct Canvas *cnv, const char *status, const struct AutoClickerSpeed *speed, bool jiggler, uint32_t clicks)
+{
+	uint_fast8_t row;
+
+	uiPrvReset(cnv, false);
+	cnv->font = FontLarge;
+	row = uiPrvGlyphHeight(cnv) + 1;
+	uiPuts(cnv, row, 10, "AutoClicker", -1);
+	row += uiPrvGlyphHeight(cnv) + 3;
+	cnv->font = FontMedium;
+	cnv->foreColor = 15;
+	uiPuts(cnv, row, 10, status, -1);
+	row += uiPrvGlyphHeight(cnv) + 1;
+	uiPrintf(cnv, row, 10, "Speed: %s", speed->name);
+	row += uiPrvGlyphHeight(cnv) + 1;
+	uiPrintf(cnv, row, 10, "Jiggler: %s", jiggler ? "On" : "Off");
+	row += uiPrvGlyphHeight(cnv) + 1;
+	uiPrintf(cnv, row, 10, "Clicks: %u", (unsigned)clicks);
+	cnv->foreColor = 11;
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to stop", -1);
+}
+
+static bool uiPrvAutoClickerWaitReady(struct Canvas *cnv, const struct AutoClickerSpeed *speed, bool jiggler)
+{
+	uint64_t end = getTime() + (uint64_t)AUTOCLICK_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+
+	uiPrvAutoClickerDrawRun(cnv, "Waiting for USB", speed, jiggler, 0);
+	while (getTime() < end) {
+		usbHidTask();
+		if (uiGetKeysRaw() & KEY_BIT_B)
+			return false;
+		if (usbHidReady())
+			return true;
+	}
+	return usbHidReady();
+}
+
+static bool uiPrvAutoClickerRun(struct Canvas *cnv, uint_fast8_t speedIdx, bool jiggler)
+{
+	const struct AutoClickerSpeed *speed = &mAutoClickerSpeeds[speedIdx];
+	struct UsbHidDeviceInfo info;
+	uint64_t nextClick, nextDraw;
+	uint32_t clicks = 0;
+	bool jiggleRight = true, ok = true;
+
+	usbHidDefaultInfo(&info);
+	strcpy(info.product, "DC32 AutoClicker");
+	usbHidEnd();
+	if (!uiPrvAutoClickerDelay(cnv, 300))
+		return false;
+	if (!usbHidBegin(&info)) {
+		uiAlert(cnv, "AutoClicker USB failed to start", DialogTypeOk);
+		return false;
+	}
+	if (!uiPrvAutoClickerWaitReady(cnv, speed, jiggler)) {
+		usbHidEnd();
+		if (!(uiGetKeysRaw() & KEY_BIT_B))
+			uiAlert(cnv, "AutoClicker USB device failed to enumerate", DialogTypeOk);
+		uiPrvWaitKeysReleased();
+		return false;
+	}
+
+	nextClick = getTime();
+	nextDraw = 0;
+	while (!(uiGetKeysRaw() & KEY_BIT_B)) {
+		uint64_t now = getTime();
+
+		usbHidTask();
+		if (now >= nextDraw) {
+			uiPrvAutoClickerDrawRun(cnv, "Running", speed, jiggler, clicks);
+			nextDraw = now + TICKS_PER_SECOND / 2;
+		}
+		if (now >= nextClick) {
+			if (jiggler) {
+				if (!usbHidMouseReport(0, jiggleRight ? 1 : -1, 0, 0)) {
+					ok = false;
+					break;
+				}
+				jiggleRight = !jiggleRight;
+			}
+			if (!usbHidMouseReport(1, 0, 0, 0)) {
+				ok = false;
+				break;
+			}
+			if (!uiPrvAutoClickerDelay(cnv, AUTOCLICK_PRESS_MS))
+				break;
+			if (!usbHidMouseReport(0, 0, 0, 0)) {
+				ok = false;
+				break;
+			}
+			clicks++;
+			nextClick = getTime() + (uint64_t)speed->intervalMs * (TICKS_PER_SECOND / 1000);
+		}
+	}
+
+	usbHidReleaseAll();
+	usbHidEnd();
+	uiPrvWaitKeysReleased();
+	if (!ok)
+		uiAlert(cnv, "AutoClicker USB send failed", DialogTypeOk);
+	return ok;
+}
+
+static void uiPrvAutoClickerTool(struct Canvas *cnv)
+{
+	uint_fast8_t speedIdx = 1;
+	bool jiggler = false;
+
+	if (!uiPrvAutoClickerSettings(cnv, &speedIdx, &jiggler))
+		return;
+	(void)uiPrvAutoClickerRun(cnv, speedIdx, jiggler);
+}
+
 static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)
 {
 	const struct CartHeader *hdr = (const struct CartHeader*)QSPI_ROM_START;
@@ -4288,6 +4487,7 @@ enum UiToolId {
 	UiToolBrowser,
 	UiToolIr,
 	UiToolBadUsb,
+	UiToolAutoClicker,
 	UiToolMusic,
 	UiToolGame,
 	UiToolSettings,
@@ -4313,6 +4513,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 			return BootGuardModeMusic;
 
 		case UiToolBrowser:
+		case UiToolAutoClicker:
 		case UiToolSettings:
 		case UiToolPowerOff:
 		default:
@@ -4399,6 +4600,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolBrowser] = "Browser",
 		[UiToolIr] = "IR",
 		[UiToolBadUsb] = "BadUSB",
+		[UiToolAutoClicker] = "AutoClicker",
 		[UiToolMusic] = "Music",
 		[UiToolGame] = "Game",
 		[UiToolSettings] = "Settings",
@@ -4662,7 +4864,21 @@ enum UiGameAction uiGameMenu(void)
 		return UiGameActionResume;
 #ifndef NO_SD_CARD
 	if (selOption == selectOption) {
-		mLastGameMenuAction = uiPrvSelectRom(cnv, validRom ? ramSz : 0) ? UiGameActionSelectGame : UiGameActionResume;
+		bool selected;
+
+		toolWorkspaceBegin();
+		selected = uiPrvSelectRom(cnv, validRom ? ramSz : 0);
+		if (selected) {
+			uiPrvLoadSavestate();
+			mLastGameMenuAction = UiGameActionSelectGame;
+		}
+		else if (uiPrvHaveValidRom(NULL, NULL, NULL)) {
+			uiPrvLoadSavestate();
+			mLastGameMenuAction = UiGameActionResume;
+		}
+		else
+			mLastGameMenuAction = UiGameActionSwitchTool;
+		toolWorkspaceEnd();
 		return mLastGameMenuAction;
 	}
 #endif
@@ -4717,6 +4933,12 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				(void)uiPrvBadUsbTool(cnv);
 				uiPrvExitTool(activeTool);
 			#endif
+				break;
+
+			case UiToolAutoClicker:
+				uiPrvEnterTool(activeTool);
+				uiPrvAutoClickerTool(cnv);
+				uiPrvExitTool(activeTool);
 				break;
 
 			case UiToolMusic:

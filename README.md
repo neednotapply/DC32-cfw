@@ -1,8 +1,8 @@
 # DC32 Custom Firmware
 
-This repository contains `DC32-cfw`, a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current on-device header is `DC32-cfw v1.6.9`. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside badge-specific display, audio, storage, IR, USB HID, LED, and user-interface plumbing.
+This repository contains `DC32-cfw`, a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current on-device header is `DC32-cfw v1.69.6.7`. The codebase targets the Raspberry Pi RP2350 microcontroller used on the badge and bundles the uGB Game Boy emulator alongside badge-specific display, audio, storage, IR, USB HID, LED, and user-interface plumbing.
 
-The original firmware and emulator were created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
+The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
 ## Current functionality
 
@@ -31,7 +31,7 @@ The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://g
 | IR remote and IR blast tools | Not present as user tools | Yes |
 | Expanded LED pattern/color settings | Basic badge LED behavior | Yes |
 | Safe tool-shell recovery after crashes/resets | Not present as a visible workflow | Yes |
-| Release formats | Stock `.bin` and `.uf2` images | `.bin` and `.uf2` images |
+| Release formats | Stock `.bin` and `.uf2` images | `.uf2` image |
 
 Stock firmware is still the right choice if you want the original badge experience with the official game image. `DC32-cfw` is aimed at using the badge as a post-con tool platform: loading ROMs, browsing SD-card content, replaying IR files, running HID scripts, and playing RTTTL files.
 
@@ -80,7 +80,7 @@ The build still creates `DC32-cfw.bin` internally as the raw firmware image for 
 
 #### UF2 bootloader
 
-Put the badge into the RP2350 USB bootloader mode, then copy the downloaded `DC32-cfw.uf2` onto the mounted UF2 drive. The drive will disconnect after the copy completes and the badge will boot the new firmware. The UF2 bootloader path requires a `.uf2` file, not `DC32-cfw.bin`.
+Put the badge into the RP2350 USB bootloader mode, then copy the downloaded `DC32-cfw.uf2` onto the mounted UF2 drive. The drive will disconnect after the copy completes and the badge will boot the new firmware.
 
 #### Direct BIN programmer
 

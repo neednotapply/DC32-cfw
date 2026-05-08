@@ -1931,12 +1931,19 @@ bool uiSaveSavestate(void)
 		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, buf, (strlen(buf) + 1 + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY);
 	}
 	
-	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr)
+	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr, uint32_t maxSize)
 	{
 		uint32_t row, now, nowDone, pos, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
 		struct ToolWorkspaceSpan bufMem;
 		uint8_t *buf;
 		bool ret = false;
+		char msg[96];
+
+		if (totalSz > maxSize) {
+			(void)sprintf(msg, "%s is too large for this firmware. Max: %lu bytes", nameStr, (unsigned long)maxSize);
+			uiAlert(cnv, msg, DialogTypeOk);
+			return false;
+		}
 
 		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &bufMem)) {
 			uiAlert(cnv, "Tool workspace is busy; cannot load file", DialogTypeOk);
@@ -2037,6 +2044,22 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "Does not appear to be a valid ROM file", DialogTypeOk);
 			goto out_close_file;
 		}
+
+		if (romSzExpected > QSPI_ROM_SIZE_MAX) {
+			char msg[96];
+
+			(void)sprintf(msg, "ROM is too large for this firmware. Max: %lu bytes", (unsigned long)QSPI_ROM_SIZE_MAX);
+			uiAlert(cnv, msg, DialogTypeOk);
+			goto out_close_file;
+		}
+
+		if (ramSzExpected > QSPI_RAM_SIZE_MAX) {
+			char msg[96];
+
+			(void)sprintf(msg, "Cart save RAM is too large for this firmware. Max: %lu bytes", (unsigned long)QSPI_RAM_SIZE_MAX);
+			uiAlert(cnv, msg, DialogTypeOk);
+			goto out_close_file;
+		}
 	
 		if (fileSz != romSzExpected) {
 		
@@ -2096,7 +2119,7 @@ bool uiSaveSavestate(void)
 			//erase old path and thus mark the ROM as invalid. This will prevent a poweroff mid-load from causing us to try to play a half-loaded ROM
 			(void)uiPrvEraseGamePath();
 			
-			ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM");
+			ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM", QSPI_ROM_SIZE_MAX);
 			
 			if (!ret) {
 				//erase rom header if we failed to load the ROM fully
@@ -2108,7 +2131,7 @@ bool uiSaveSavestate(void)
 			(void)uiPrvSetGamePath(romName);
 			
 			if (filS)
-				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE") && ret;
+				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE", QSPI_RAM_SIZE_MAX) && ret;
 			else
 				ret = flashWrite(QSPI_RAM_COPY_START, QSPI_RAM_SIZE_MAX, NULL, 0) && ret;
 			

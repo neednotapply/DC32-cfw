@@ -47,12 +47,15 @@ uint8_t mVRAM[VRAM_SZ];
 uint8_t __attribute__((aligned(4))) mHRAM[HRAM_SIZE];
 uint8_t __attribute__((aligned(4))) mOAM[256]; // really [160], but making it 256 makes life easier
 static uint8_t __attribute__((aligned(4))) mWRAM[WRAM_SZ];
+static uint8_t __attribute__((aligned(4))) mRomBank0Cache[GB_MMAP_ROM_BANK0_SIZE];
+static uint8_t __attribute__((aligned(4))) mRomBankXCache[GB_MMAP_ROM_BANKx_SIZE];
 
 static uint8_t *mRam;
 static const uint8_t *mRom;
 static uint16_t mRamBank, mRomBank, mRomBankMask;
 static uint8_t mMbcPrivate[9];
 static uint32_t mMbcPrivate2;
+static uint16_t mRomBank0CacheBank, mRomBankXCacheBank;
 
 void* mbcPrvGetWramBuf(void)
 {
@@ -86,6 +89,32 @@ static void mbcPrvFillPtrs(uint8_t **arr, uint16_t base, uint16_t size, uint8_t 
 			*arr++ = NULL;
 		size -= MEMMAP_MAP_CHUNK_SZ;
 	}
+}
+
+static void mbcPrvInvalidateRomCache(void)
+{
+	mRomBank0CacheBank = 0xffff;
+	mRomBankXCacheBank = 0xffff;
+}
+
+static uint8_t *mbcPrvGetCachedRomBank(uint8_t *cache, uint16_t *cacheBankP, uint16_t bank)
+{
+	if (*cacheBankP != bank) {
+		memcpy(cache, mRom + (uint32_t)GB_MMAP_ROM_BANKx_SIZE * bank, GB_MMAP_ROM_BANKx_SIZE);
+		*cacheBankP = bank;
+	}
+
+	return cache;
+}
+
+static void mbcPrvMapRomBank0(uint16_t bank)
+{
+	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANK0_ADDR, GB_MMAP_ROM_BANK0_SIZE, mbcPrvGetCachedRomBank(mRomBank0Cache, &mRomBank0CacheBank, bank));
+}
+
+static void mbcPrvMapRomBankX(uint16_t bank)
+{
+	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, mbcPrvGetCachedRomBank(mRomBankXCache, &mRomBankXCacheBank, bank));
 }
 
 static void mbcPrvFillBothPtrs(uint16_t base, uint16_t size, uint8_t *ptr)		//assumes perfectly valid input
@@ -145,12 +174,13 @@ static bool mbcFillDefaults(const void *romP, void *ramP)
 {
 	mRam = ramP;
 	mRom = romP;
+	mbcPrvInvalidateRomCache();
 	
 	mRomBank = 1;
 	mRamBank = 0;
 	
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANK0_ADDR, GB_MMAP_ROM_BANK0_SIZE, (uint8_t*)mRom);
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANK0_SIZE);
+	mbcPrvMapRomBank0(0);
+	mbcPrvMapRomBankX(1);
 	mbcPrvFillBothPtrs(GB_MMAP_WRAM_BANK0_ADDR, GB_MMAP_WRAM_BANK0_SIZE, mWRAM);
 	mbcPrvFillBothPtrs(GB_MMAP_OAM_ADDR, GB_MMAP_OAM_SIZE, mOAM);
 	mbcPrvFillBothPtrs(GB_MMAP_OAM_ADDR, GB_MMAP_OAM_SIZE, mOAM);
@@ -188,13 +218,13 @@ static bool mbcInitNone(const void *romP, void *ramP, uint_fast8_t features)
 
 static void mbc1prvMapThings(void)
 {
-	uint8_t romBank0 = (mMbcPrivate[MBC1_DATA_MODE] ? 0x20 * mRamBank : 0) & mRomBankMask;
-	uint8_t ramBank =  mMbcPrivate[MBC1_DATA_MODE] ? mRamBank : 0;
-	uint8_t romBank1 = (mRomBank + 0x20 * mRamBank) & mRomBankMask;
+	uint16_t romBank0 = (mMbcPrivate[MBC1_DATA_MODE] ? 0x20 * mRamBank : 0) & mRomBankMask;
+	uint16_t ramBank =  mMbcPrivate[MBC1_DATA_MODE] ? mRamBank : 0;
+	uint16_t romBank1 = (mRomBank + 0x20 * mRamBank) & mRomBankMask;
 
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANK0_ADDR, GB_MMAP_ROM_BANK0_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * romBank0);
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
-	mbcPrvFillBothPtrs(GB_MMAP_CARTRAM_BANKx_ADDR, GB_MMAP_CARTRAM_BANKx_SIZE, mMbcPrivate[MBC1_DATA_RAM_CS] ? mRam + GB_MMAP_CARTRAM_BANKx_SIZE * romBank1  :NULL);
+	mbcPrvMapRomBank0(romBank0);
+	mbcPrvMapRomBankX(romBank1);
+	mbcPrvFillBothPtrs(GB_MMAP_CARTRAM_BANKx_ADDR, GB_MMAP_CARTRAM_BANKx_SIZE, mMbcPrivate[MBC1_DATA_RAM_CS] ? mRam + GB_MMAP_CARTRAM_BANKx_SIZE * ramBank  :NULL);
 }
 
 static bool mbc1prvRamCs(uint16_t fullAddr, uint8_t data)
@@ -313,7 +343,7 @@ static bool mbc2prvRomBank(uint16_t fullAddr, uint8_t data)
 	mRomBank = data & mRomBankMask;
 	if (!mRomBank)
 		mRomBank = 1;
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
+	mbcPrvMapRomBankX(mRomBank);
 	
 	return true;
 }
@@ -438,7 +468,7 @@ static bool mbc3prvRomBank(uint16_t fullAddr, uint8_t data)
 	mRomBank = data & mRomBankMask;
 	if (!mRomBank)
 		mRomBank = 1;
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
+	mbcPrvMapRomBankX(mRomBank);
 	
 	return true;
 }
@@ -529,7 +559,7 @@ static bool mbc5prvRomBankLo(uint16_t fullAddr, uint8_t data)
 	(void)fullAddr;
 	
 	mRomBank = ((mRomBank & 0x100) + data) & mRomBankMask;
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
+	mbcPrvMapRomBankX(mRomBank);
 	
 	return true;
 }
@@ -539,7 +569,7 @@ static bool mbc5prvRomBankHi(uint16_t fullAddr, uint8_t data)
 	(void)fullAddr;
 	
 	mRomBank = ((mRomBank & 0x0ff) + 0x100 * (data & 1)) & mRomBankMask;
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
+	mbcPrvMapRomBankX(mRomBank);
 	
 	return true;
 }
@@ -985,7 +1015,7 @@ static bool mbc7prvRomBank(uint16_t fullAddr, uint8_t data)
 	(void)fullAddr;
 	
 	mRomBank = data & mRomBankMask;
-	mbcPrvFillPtrs(mReadPtrs, GB_MMAP_ROM_BANKx_ADDR, GB_MMAP_ROM_BANKx_SIZE, (uint8_t*)mRom + GB_MMAP_ROM_BANKx_SIZE * mRomBank);
+	mbcPrvMapRomBankX(mRomBank);
 	
 	return true;
 }
@@ -1236,6 +1266,9 @@ bool mbcInit(const void *rom, uint32_t *romSzExpectedP, void *ram, uint32_t *ram
 	memset(mHRAM, 0, sizeof(mHRAM));
 	memset(mOAM, 0, sizeof(mOAM));
 	memset(mWRAM, 0, sizeof(mWRAM));
+	mRom = rom;
+	mRam = ram;
+	mbcPrvInvalidateRomCache();
 
 	//hasRam, hasBattery, hasRtc
 	switch (hdr->cartType) {

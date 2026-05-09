@@ -16,18 +16,12 @@ struct BadUsbState {
 	uint32_t nextStringDelay;
 	uint8_t heldMods;
 	uint8_t heldKeys[6];
-	uint8_t heldMouseButtons;
 	bool validateOnly;
 };
 
 struct BadUsbKey {
 	const char *name;
 	uint8_t usage;
-};
-
-struct BadUsbMedia {
-	const char *name;
-	uint16_t usage;
 };
 
 struct BadUsbScratch {
@@ -48,15 +42,6 @@ static const struct BadUsbKey mSpecialKeys[] = {
 	{"PAGEUP", 0x4b}, {"PAGEDOWN", 0x4e}, {"CAPSLOCK", 0x39}, {"NUMLOCK", 0x53},
 	{"SCROLLLOCK", 0x47}, {"PRINTSCREEN", 0x46}, {"BREAK", 0x48}, {"PAUSE", 0x48},
 	{"SPACE", 0x2c}, {"TAB", 0x2b}, {"MENU", 0x65}, {"APP", 0x65},
-};
-
-static const struct BadUsbMedia mMediaKeys[] = {
-	{"POWER", 0x0030}, {"REBOOT", 0x0031}, {"SLEEP", 0x0032}, {"LOGOFF", 0x019c},
-	{"EXIT", 0x00b4}, {"HOME", 0x0223}, {"BACK", 0x0224}, {"FORWARD", 0x0225},
-	{"REFRESH", 0x0227}, {"SNAPSHOT", 0x0065}, {"PLAY", 0x00b0}, {"PAUSE", 0x00b1},
-	{"PLAY_PAUSE", 0x00cd}, {"NEXT_TRACK", 0x00b5}, {"PREV_TRACK", 0x00b6},
-	{"STOP", 0x00b7}, {"EJECT", 0x00b8}, {"MUTE", 0x00e2}, {"VOLUME_UP", 0x00e9},
-	{"VOLUME_DOWN", 0x00ea}, {"FN", 0x029d}, {"BRIGHT_UP", 0x006f}, {"BRIGHT_DOWN", 0x0070},
 };
 
 static char badUsbPrvUpper(char c)
@@ -481,24 +466,6 @@ static bool badUsbPrvHoldRelease(struct BadUsbState *st, char *arg, bool hold)
 		if (!badUsbPrvSetKey(st->heldKeys, usage, hold))
 			return false;
 	}
-	else if (badUsbPrvEq(arg, "LEFTCLICK") || badUsbPrvEq(arg, "LEFT_CLICK")) {
-		if (hold)
-			st->heldMouseButtons |= 1;
-		else
-			st->heldMouseButtons &=~ 1;
-		if (st->validateOnly)
-			return true;
-		return usbHidMouseReport(st->heldMouseButtons, 0, 0, 0);
-	}
-	else if (badUsbPrvEq(arg, "RIGHTCLICK") || badUsbPrvEq(arg, "RIGHT_CLICK")) {
-		if (hold)
-			st->heldMouseButtons |= 2;
-		else
-			st->heldMouseButtons &=~ 2;
-		if (st->validateOnly)
-			return true;
-		return usbHidMouseReport(st->heldMouseButtons, 0, 0, 0);
-	}
 	else
 		return false;
 	if (st->validateOnly)
@@ -531,88 +498,6 @@ static bool badUsbPrvAltChar(struct BadUsbState *st, uint32_t code)
 		if (!badUsbPrvSendKeyboard(st, USB_HID_MOD_LALT, badUsbPrvNumpadUsage(digits[i])))
 			return false;
 	return true;
-}
-
-static bool badUsbPrvMedia(struct BadUsbState *st, const char *name)
-{
-	uint_fast8_t i;
-
-	for (i = 0; i < sizeof(mMediaKeys) / sizeof(*mMediaKeys); i++) {
-		if (badUsbPrvEq(name, mMediaKeys[i].name)) {
-			if (st->validateOnly)
-				return true;
-			return usbHidConsumerReport(mMediaKeys[i].usage);
-		}
-	}
-	return false;
-}
-
-static int8_t badUsbPrvMouseStep(int32_t *valP)
-{
-	int32_t val = *valP;
-
-	if (val > 127) {
-		*valP = val - 127;
-		return 127;
-	}
-	if (val < -127) {
-		*valP = val + 127;
-		return -127;
-	}
-	*valP = 0;
-	return (int8_t)val;
-}
-
-static bool badUsbPrvMouse(struct BadUsbState *st, char *cmd, char *arg)
-{
-	if (badUsbPrvEq(cmd, "LEFTCLICK") || badUsbPrvEq(cmd, "LEFT_CLICK")) {
-		if (st->validateOnly)
-			return true;
-		return usbHidMouseReport(st->heldMouseButtons | 1, 0, 0, 0) && badUsbPrvDelay(st, BADUSB_KEY_DELAY_MS, "Mouse") && usbHidMouseReport(st->heldMouseButtons, 0, 0, 0);
-	}
-	if (badUsbPrvEq(cmd, "RIGHTCLICK") || badUsbPrvEq(cmd, "RIGHT_CLICK")) {
-		if (st->validateOnly)
-			return true;
-		return usbHidMouseReport(st->heldMouseButtons | 2, 0, 0, 0) && badUsbPrvDelay(st, BADUSB_KEY_DELAY_MS, "Mouse") && usbHidMouseReport(st->heldMouseButtons, 0, 0, 0);
-	}
-	if (badUsbPrvEq(cmd, "MOUSEMOVE") || badUsbPrvEq(cmd, "MOUSE_MOVE")) {
-		const char *p = arg;
-		int32_t x, y;
-
-		if (!badUsbPrvParseI32(&p, &x))
-			return false;
-		while (*p == ' ' || *p == '\t')
-			p++;
-		if (!badUsbPrvParseI32(&p, &y) || !badUsbPrvAtEnd(p))
-			return false;
-		if (st->validateOnly)
-			return true;
-		while (x || y) {
-			int8_t sx = badUsbPrvMouseStep(&x);
-			int8_t sy = badUsbPrvMouseStep(&y);
-
-			if (!usbHidMouseReport(st->heldMouseButtons, sx, sy, 0))
-				return false;
-		}
-		return true;
-	}
-	if (badUsbPrvEq(cmd, "MOUSESCROLL") || badUsbPrvEq(cmd, "MOUSE_SCROLL")) {
-		const char *p = arg;
-		int32_t val;
-
-		if (!badUsbPrvParseI32(&p, &val) || !badUsbPrvAtEnd(p))
-			return false;
-		if (st->validateOnly)
-			return true;
-		while (val) {
-			int8_t step = badUsbPrvMouseStep(&val);
-
-			if (!usbHidMouseReport(st->heldMouseButtons, 0, 0, step))
-				return false;
-		}
-		return true;
-	}
-	return false;
 }
 
 static bool badUsbPrvExecute(struct BadUsbState *st, char *line);
@@ -693,8 +578,6 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		badUsbPrvCopy(chord + strlen(chord), sizeof(chord) - strlen(chord), arg);
 		return badUsbPrvChord(st, chord);
 	}
-	if (badUsbPrvEq(cmd, "MEDIA"))
-		return badUsbPrvMedia(st, arg);
 	if (badUsbPrvEq(cmd, "GLOBE")) {
 		char chord[64] = "GUI ";
 		badUsbPrvCopy(chord + 4, sizeof(chord) - 4, arg);
@@ -707,8 +590,6 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 			return true;
 		return st->waitButtonF(st->userData, &st->status);
 	}
-	if (badUsbPrvMouse(st, cmd, arg))
-		return true;
 	if (*arg) {
 		char *chord = mScratch.chord;
 
@@ -743,7 +624,6 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 	st->status.lineNo = 0;
 	st->status.bytesRead = 0;
 	st->heldMods = 0;
-	st->heldMouseButtons = 0;
 	st->defaultDelay = 0;
 	st->defaultStringDelay = 0;
 	st->nextStringDelay = 0;

@@ -24,6 +24,7 @@
 #define HID_REQ_GET_REPORT                      0x01
 #define HID_REQ_GET_IDLE                        0x02
 #define HID_REQ_GET_PROTOCOL            0x03
+#define HID_REQ_SET_REPORT                      0x09
 #define HID_REQ_SET_IDLE                        0x0a
 #define HID_REQ_SET_PROTOCOL            0x0b
 
@@ -42,6 +43,8 @@
 #define USB_USB_PWR_VBUS_DETECT                 (1u << 2)
 #define USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN     (1u << 3)
 #define USB_HID_HW_WAIT_MS                              100
+#define USB_HID_CONFIG_DESC_LEN                 34
+#define USB_HID_KEYBOARD_REPORT_SIZE            8
 
 struct UsbSetup {
         uint8_t bmRequestType;
@@ -55,26 +58,21 @@ static struct UsbHidDeviceInfo mInfo;
 static uint8_t mConfigured, mPendingAddress, mIdleRate, mProtocol = 1;
 static const uint8_t *mCtrlData;
 static uint16_t mCtrlRemaining;
-static bool mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid;
+static bool mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid, mExpectSetReportOut;
 
 static const uint8_t mReportDesc[] = {
-        0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x85, 0x01, 0x05, 0x07,
+        0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x05, 0x07,
         0x19, 0xe0, 0x29, 0xe7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01,
         0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
-        0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07,
-        0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xc0,
-
-        0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x85, 0x02, 0x09, 0x01,
-        0xa1, 0x00, 0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00,
-        0x25, 0x01, 0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01,
-        0x75, 0x05, 0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31,
-        0x09, 0x38, 0x15, 0x81, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x03,
-        0x81, 0x06, 0xc0, 0xc0,
-
-        0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01, 0x85, 0x03, 0x15, 0x00,
-        0x26, 0xff, 0x03, 0x19, 0x00, 0x2a, 0xff, 0x03, 0x75, 0x10,
-        0x95, 0x01, 0x81, 0x00, 0xc0,
+        0x95, 0x05, 0x75, 0x01, 0x05, 0x08, 0x19, 0x01, 0x29, 0x05,
+        0x91, 0x02, 0x95, 0x01, 0x75, 0x03, 0x91, 0x01, 0x95, 0x06,
+        0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00,
+        0x29, 0x65, 0x81, 0x00, 0xc0,
 };
+
+_Static_assert(sizeof(mReportDesc) == 63, "unexpected keyboard report descriptor size");
+_Static_assert(USB_HID_CONFIG_DESC_LEN == 34, "unexpected HID configuration descriptor size");
+_Static_assert(USB_HID_KEYBOARD_REPORT_SIZE == 8, "unexpected keyboard report size");
 
 void usbHidDefaultInfo(struct UsbHidDeviceInfo *info)
 {
@@ -106,11 +104,11 @@ static const uint8_t* usbHidPrvDeviceDesc(uint16_t *lenP)
 
 static const uint8_t* usbHidPrvConfigDesc(uint16_t *lenP)
 {
-        static uint8_t desc[34] = {
-                9, USB_DT_CONFIGURATION, 34, 0, 1, 1, 0, 0x80, 50,
-                9, USB_DT_INTERFACE, 0, 0, 1, 0x03, 0, 0, 0,
+        static uint8_t desc[USB_HID_CONFIG_DESC_LEN] = {
+                9, USB_DT_CONFIGURATION, USB_HID_CONFIG_DESC_LEN, 0, 1, 1, 0, 0x80, 50,
+                9, USB_DT_INTERFACE, 0, 0, 1, 0x03, 1, 1, 0,
                 9, USB_DT_HID, 0x11, 0x01, 0, 1, USB_DT_REPORT, 0, 0,
-                7, USB_DT_ENDPOINT, 0x81, 0x03, 16, 0, 1,
+                7, USB_DT_ENDPOINT, 0x81, 0x03, USB_HID_KEYBOARD_REPORT_SIZE, 0, 1,
         };
 
         usbHidPrvWrite16(desc + 25, sizeof(mReportDesc));
@@ -175,6 +173,13 @@ static void usbHidPrvEp0OutStatus(void)
         usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_DATA1_PID;
 }
 
+static void usbHidPrvEp0OutData(uint16_t len)
+{
+        if (len > 64)
+                len = 64;
+        usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_DATA1_PID | len;
+}
+
 static void usbHidPrvCtrlSendNext(void)
 {
         uint16_t len = mCtrlRemaining;
@@ -207,6 +212,7 @@ static void usbHidPrvBusReset(void)
         mPendingAddress = 0;
         mCtrlData = NULL;
         mCtrlRemaining = 0;
+        mExpectSetReportOut = false;
         usb_dpram->ep_buf_ctrl[0].in = 0;
         usb_dpram->ep_buf_ctrl[0].out = 0;
         usbHidPrvEp1Init();
@@ -232,6 +238,7 @@ static void usbHidPrvSetup(void)
         mEp0DataPid = true;
         mCtrlData = NULL;
         mCtrlRemaining = 0;
+        mExpectSetReportOut = false;
 
         if ((setup.bmRequestType & 0x60) == 0) {
                 if (setup.bRequest == USB_REQ_GET_DESCRIPTOR) {
@@ -305,6 +312,15 @@ static void usbHidPrvSetup(void)
                 else if (setup.bRequest == HID_REQ_GET_REPORT) {
                         memset(tmp, 0, sizeof(tmp));
                         usbHidPrvControlRead(tmp, setup.wLength > sizeof(tmp) ? sizeof(tmp) : setup.wLength, setup.wLength);
+                }
+                else if (setup.bRequest == HID_REQ_SET_REPORT) {
+                        if (setup.wLength) {
+                                mExpectSetReportOut = true;
+                                usbHidPrvEp0OutData(setup.wLength);
+                        }
+                        else {
+                                usbHidPrvEp0In(NULL, 0);
+                        }
                 }
                 else {
                         usbHidPrvEp0Stall();
@@ -413,6 +429,12 @@ void usbHidTask(void)
                                 usbHidPrvEp0OutStatus();
                         }
                 }
+                if (bufStatus & USB_EP0_OUT_BIT) {
+                        if (mExpectSetReportOut) {
+                                mExpectSetReportOut = false;
+                                usbHidPrvEp0In(NULL, 0);
+                        }
+                }
         }
 }
 
@@ -458,45 +480,22 @@ static bool usbHidPrvSendReport(const uint8_t *report, uint32_t len, bool force)
 
 bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6])
 {
-	uint8_t report[9] = {1, modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
+	uint8_t report[USB_HID_KEYBOARD_REPORT_SIZE] = {modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
 
-	return usbHidPrvSendReport(report, sizeof(report), false);
-}
-
-bool usbHidMouseReport(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
-{
-	uint8_t report[5] = {2, buttons, (uint8_t)x, (uint8_t)y, (uint8_t)wheel};
-
-	return usbHidPrvSendReport(report, sizeof(report), false);
-}
-
-bool usbHidConsumerReport(uint16_t usage)
-{
-        uint8_t report[3] = {3, usage, usage >> 8};
-
-	if (!usbHidPrvSendReport(report, sizeof(report), false))
-		return false;
-	report[1] = report[2] = 0;
 	return usbHidPrvSendReport(report, sizeof(report), false);
 }
 
 static void usbHidPrvReleaseAll(bool force)
 {
 	uint8_t keys[6] = {0};
-	uint8_t keyboardReport[9] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
-	uint8_t mouseReport[5] = {2, 0, 0, 0, 0};
-	uint8_t consumerReport[3] = {3, 0, 0};
+	uint8_t keyboardReport[USB_HID_KEYBOARD_REPORT_SIZE] = {0};
 
 	if (!force) {
 		(void)usbHidKeyboardReport(0, keys);
-		(void)usbHidMouseReport(0, 0, 0, 0);
-		(void)usbHidConsumerReport(0);
 		return;
 	}
 
 	(void)usbHidPrvSendReport(keyboardReport, sizeof(keyboardReport), true);
-	(void)usbHidPrvSendReport(mouseReport, sizeof(mouseReport), true);
-	(void)usbHidPrvSendReport(consumerReport, sizeof(consumerReport), true);
 }
 
 void usbHidReleaseAll(void)

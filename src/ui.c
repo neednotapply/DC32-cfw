@@ -4378,79 +4378,10 @@ static bool uiPrvAutoClickerWaitReady(struct Canvas *cnv, const struct AutoClick
 	return usbHidReady();
 }
 
-static bool uiPrvAutoClickerRun(struct Canvas *cnv, uint_fast8_t speedIdx, bool jiggler)
-{
-	const struct AutoClickerSpeed *speed = &mAutoClickerSpeeds[speedIdx];
-	struct UsbHidDeviceInfo info;
-	uint64_t nextClick, nextDraw;
-	uint32_t clicks = 0;
-	bool jiggleRight = true, ok = true;
-
-	usbHidDefaultInfo(&info);
-	strcpy(info.product, "DC32 AutoClicker");
-	if (!uiPrvAutoClickerDelay(cnv, 300))
-		return false;
-	if (!usbHidBegin(&info)) {
-		uiAlert(cnv, "AutoClicker USB failed to start", DialogTypeOk);
-		return false;
-	}
-	if (!uiPrvAutoClickerWaitReady(cnv, speed, jiggler)) {
-		if (!(uiGetKeysRaw() & KEY_BIT_B))
-			uiAlert(cnv, "AutoClicker USB device failed to enumerate", DialogTypeOk);
-		uiPrvWaitKeysReleased();
-		return false;
-	}
-
-	usbHidSetReportsEnabled(true);
-	nextClick = getTime();
-	nextDraw = 0;
-	while (!(uiGetKeysRaw() & KEY_BIT_B)) {
-		uint64_t now = getTime();
-
-		usbHidTask();
-		if (now >= nextDraw) {
-			uiPrvAutoClickerDrawRun(cnv, "Running", speed, jiggler, clicks);
-			nextDraw = now + TICKS_PER_SECOND / 2;
-		}
-		if (now >= nextClick) {
-			if (jiggler) {
-				if (!usbHidMouseReport(0, jiggleRight ? 1 : -1, 0, 0)) {
-					ok = false;
-					break;
-				}
-				jiggleRight = !jiggleRight;
-			}
-			if (!usbHidMouseReport(1, 0, 0, 0)) {
-				ok = false;
-				break;
-			}
-			if (!uiPrvAutoClickerDelay(cnv, AUTOCLICK_PRESS_MS))
-				break;
-			if (!usbHidMouseReport(0, 0, 0, 0)) {
-				ok = false;
-				break;
-			}
-			clicks++;
-			nextClick = getTime() + (uint64_t)speed->intervalMs * (TICKS_PER_SECOND / 1000);
-		}
-	}
-
-	usbHidReleaseAll();
-	usbHidSetReportsEnabled(false);
-	uiPrvWaitKeysReleased();
-	if (!ok)
-		uiAlert(cnv, "AutoClicker USB send failed", DialogTypeOk);
-	return ok;
-}
-
 static void uiPrvAutoClickerTool(struct Canvas *cnv)
 {
-	uint_fast8_t speedIdx = 1;
-	bool jiggler = false;
-
-	if (!uiPrvAutoClickerSettings(cnv, &speedIdx, &jiggler))
-		return;
-	(void)uiPrvAutoClickerRun(cnv, speedIdx, jiggler);
+	uiAlert(cnv, "AutoClicker is unavailable in keyboard-only HID mode", DialogTypeOk);
+	uiPrvWaitKeysReleased();
 }
 
 static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)

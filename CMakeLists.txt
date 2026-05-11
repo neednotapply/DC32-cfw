@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(PICO_BOARD "defcon32_badge" CACHE STRING "Badge board name for SDK-compatible build metadata")
-project(dc32_badge_firmware C ASM)
+project(dc32_badge_firmware C CXX ASM)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(APP DC32-cfw)
@@ -23,6 +23,11 @@ add_executable(${APP}
     ${SRC_DIR}/main_rp2350_defcon.c
     ${SRC_DIR}/mappersC.c
     ${SRC_DIR}/mbc.c
+    ${SRC_DIR}/nes/InfoNES.cpp
+    ${SRC_DIR}/nes/InfoNES_Mapper.cpp
+    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
+    ${SRC_DIR}/nes/K6502.cpp
+    ${SRC_DIR}/nes/nes_port.cpp
     ${SRC_DIR}/pioI2C.c
     ${SRC_DIR}/pioIrdaSIR.c
     ${SRC_DIR}/pioWS2812.c
@@ -44,6 +49,7 @@ add_executable(${APP}
 target_include_directories(${APP} PRIVATE
     ${SRC_DIR}
     ${SRC_DIR}/inc_RP2350
+    ${SRC_DIR}/nes
 )
 
 target_compile_definitions(${APP} PRIVATE
@@ -87,6 +93,23 @@ target_compile_options(${APP} PRIVATE
     -Wno-maybe-uninitialized
     -Wno-unused-label
     -Wno-missing-field-initializers
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-use-cxa-atexit>
+    $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-narrowing>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-old-style-cast>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-compare>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-class-memaccess>
+)
+
+set_source_files_properties(
+    ${SRC_DIR}/nes/InfoNES.cpp
+    ${SRC_DIR}/nes/InfoNES_Mapper.cpp
+    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
+    ${SRC_DIR}/nes/K6502.cpp
+    ${SRC_DIR}/nes/nes_port.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-error"
 )
 
 set_source_files_properties(
@@ -100,6 +123,7 @@ set_source_files_properties(
 target_link_options(${APP} PRIVATE
     -Wall
     -Wextra
+    -specs=nosys.specs
     -Wl,--gc-sections
     -Wl,-T${LINKER_SCRIPT}
     -mthumb

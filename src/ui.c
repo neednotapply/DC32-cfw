@@ -25,6 +25,7 @@
 #include "ui.h"
 #include "sd.h"
 #include "gb.h"
+#include "nes/nes.h"
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 
@@ -1010,7 +1011,27 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 
 static bool uiPrvRomFileName(const char *fname)
 {
-	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc");
+	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc") || uiPrvStrEndsWithNoCase(fname, ".nes");
+}
+
+#define GAME_META_MAGIC			0x31454d47u /* GME1 */
+#define GAME_META_OFFSET		(QSPI_FILENAME_MAXLEN - QSPI_WRITE_GRANULARITY)
+
+struct GameSelectionFlashMeta {
+	uint32_t magic;
+	uint32_t runtime;
+	uint32_t romSize;
+	uint32_t saveRamSize;
+	uint32_t reserved[4];
+};
+
+static enum GameRuntime uiPrvRuntimeForName(const char *fname)
+{
+	if (uiPrvStrEndsWithNoCase(fname, ".nes"))
+		return GameRuntimeNes;
+	if (uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc"))
+		return GameRuntimeGb;
+	return GameRuntimeNone;
 }
 
 #ifndef NO_SD_CARD
@@ -1816,6 +1837,19 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 static void uiPrvLoadSavestate(void)
 {
 	uint32_t romSzExpected, ramSzExpected;
+	struct GameSelection selection;
+
+	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
+		uint32_t saveSz = selection.saveRamSize;
+
+		if (saveSz > QSPI_RAM_SIZE_MAX)
+			saveSz = QSPI_RAM_SIZE_MAX;
+		if (saveSz)
+			memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, saveSz);
+		if (saveSz < QSPI_RAM_SIZE_MAX)
+			memset(CART_RAM_ADDR_IN_RAM + saveSz, 0xff, QSPI_RAM_SIZE_MAX - saveSz);
+		return;
+	}
 	
 	if (mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL) && ramSzExpected < QSPI_RAM_SIZE_MAX)
 		memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, ramSzExpected);
@@ -1826,6 +1860,21 @@ static void uiPrvLoadSavestate(void)
 bool uiSaveSavestate(void)
 {
 	uint32_t romSzExpected, ramSzExpected;
+	struct GameSelection selection;
+
+	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
+		ramSzExpected = selection.saveRamSize;
+		if (ramSzExpected > QSPI_RAM_SIZE_MAX)
+			return false;
+		if (ramSzExpected && memcmp((const void*)QSPI_RAM_COPY_START, CART_RAM_ADDR_IN_RAM, ramSzExpected)) {
+			uint32_t writeSz = (ramSzExpected + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
+			uint32_t erzSz = (ramSzExpected + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY;
+			
+			if (!flashWrite(QSPI_RAM_COPY_START, erzSz, CART_RAM_ADDR_IN_RAM, writeSz))
+				return false;
+		}
+		return true;
+	}
 	
 	if (!mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL))
 		return false;
@@ -1926,9 +1975,24 @@ bool uiSaveSavestate(void)
 		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, NULL, 0);
 	}
 	
-	static bool uiPrvSetGamePath(const char *buf)		//buf may be over-read, also marks ROM as possibly valid
+	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)		//buf may be over-read, also marks ROM as possibly valid
 	{
-		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, buf, (strlen(buf) + 1 + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY);
+		uint8_t metaBuf[QSPI_WRITE_GRANULARITY];
+		struct GameSelectionFlashMeta *meta = (struct GameSelectionFlashMeta*)metaBuf;
+		bool ret;
+
+		memset(metaBuf, 0xff, sizeof(metaBuf));
+		*meta = (struct GameSelectionFlashMeta){
+			.magic = GAME_META_MAGIC,
+			.runtime = runtime,
+			.romSize = romSize,
+			.saveRamSize = saveRamSize,
+		};
+
+		ret = flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, buf, (strlen(buf) + 1 + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY);
+		if (!ret)
+			return false;
+		return flashWrite(QSPI_FILENAME_START + GAME_META_OFFSET, 0, metaBuf, QSPI_WRITE_GRANULARITY);
 	}
 	
 	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr, uint32_t maxSize)
@@ -1995,12 +2059,48 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
+	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
+	{
+		const char *dot = NULL, *src;
+		uint32_t pos = 0;
+
+		if (!dstLen)
+			return;
+
+		for (src = romName; *src; src++) {
+			if (*src == '.')
+				dot = src;
+		}
+
+		if (runtime != GameRuntimeNes || !dot) {
+			while (pos + 1 < dstLen && romName[pos]) {
+				dst[pos] = romName[pos];
+				pos++;
+			}
+			dst[pos] = 0;
+			return;
+		}
+
+		for (src = romName; src != dot && pos + 1 < dstLen; src++)
+			dst[pos++] = *src;
+		if (pos + 4 < dstLen) {
+			dst[pos++] = '.';
+			dst[pos++] = 's';
+			dst[pos++] = 'a';
+			dst[pos++] = 'v';
+		}
+		dst[pos] = 0;
+	}
+
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
 		char internalName[ROM_NAME_LEN + 1];
+		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		struct FatfsFil *filR, *filS = NULL;
 		enum RomColorSupport colorSupport;
+		enum GameRuntime runtime = uiPrvRuntimeForName(romName);
+		struct NesRomInfo nesInfo;
 		struct FatfsDir *dir;
 		struct CartHeader hdr;
 		bool ret = false;
@@ -2028,19 +2128,38 @@ bool uiSaveSavestate(void)
 		
 		dir = fatfsDirOpen(vol, "/SAVE");
 		if (dir) {
-			filS = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
+			uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
+			filS = fatfsFileOpenAt(dir, saveName, OPEN_MODE_READ);
+			if (!filS && runtime == GameRuntimeNes)
+				filS = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
 			fatfsDirClose(dir);
 		}
 		
 		fileSz = fatfsFileGetSize(filR);
 		
-		if (fileSz < sizeof(hdr) || !fatfsFileRead(filR, &hdr, sizeof(hdr), &numRead) || numRead != sizeof(hdr)) {
+		if (runtime == GameRuntimeNes) {
+			uint8_t nesHdr[16];
+
+			if (fileSz < sizeof(nesHdr) || !fatfsFileRead(filR, nesHdr, sizeof(nesHdr), &numRead) || numRead != sizeof(nesHdr)) {
+				uiAlert(cnv, "Cannot read ROM file", DialogTypeOk);
+				goto out_close_file;
+			}
+			if (!nesAnalyzeRom(nesHdr, fileSz, &nesInfo)) {
+				uiAlert(cnv, "Does not appear to be a valid NES ROM file", DialogTypeOk);
+				goto out_close_file;
+			}
+			romSzExpected = nesInfo.romSize;
+			ramSzExpected = nesInfo.saveRamSize;
+			colorSupport = RomNoColor;
+			(void)sprintf(internalName, "%s", nesInfo.name);
+		}
+		else if (fileSz < sizeof(hdr) || !fatfsFileRead(filR, &hdr, sizeof(hdr), &numRead) || numRead != sizeof(hdr)) {
 			
 			uiAlert(cnv, "Cannot read ROM file", DialogTypeOk);
 			goto out_close_file;
 		}
 		
-		if (!mbcRomAnalyze(&hdr, &romSzExpected, &ramSzExpected, &colorSupport, internalName)) {
+		else if (!mbcRomAnalyze(&hdr, &romSzExpected, &ramSzExpected, &colorSupport, internalName)) {
 			uiAlert(cnv, "Does not appear to be a valid ROM file", DialogTypeOk);
 			goto out_close_file;
 		}
@@ -2096,17 +2215,32 @@ bool uiSaveSavestate(void)
 		uiPrintf(cnv, row, col + 55, "%u bytes", fileSz);
 		row += 1 + uiPrvGlyphHeight(cnv);
 		
-		cnv->foreColor = 10;
-		uiPuts(cnv, row, col, "NAME:", -1);
-		cnv->foreColor = 15;
-		uiPrintf(cnv, row, col + 55, "%s", internalName);
-		row += 1 + uiPrvGlyphHeight(cnv);
-		
-		cnv->foreColor = 10;
-		uiPuts(cnv, row, col, "COLOR:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, row, col + 55, colorTypes[colorSupport], -1);
-		row += 1 + uiPrvGlyphHeight(cnv);
+		if (runtime == GameRuntimeNes) {
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "SYSTEM:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, row, col + 55, "NES", -1);
+			row += 1 + uiPrvGlyphHeight(cnv);
+
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "MAPPER:", -1);
+			cnv->foreColor = 15;
+			uiPrintf(cnv, row, col + 55, "%u", nesInfo.mapper);
+			row += 1 + uiPrvGlyphHeight(cnv);
+		}
+		else {
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "NAME:", -1);
+			cnv->foreColor = 15;
+			uiPrintf(cnv, row, col + 55, "%s", internalName);
+			row += 1 + uiPrvGlyphHeight(cnv);
+			
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "COLOR:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, row, col + 55, colorTypes[colorSupport], -1);
+			row += 1 + uiPrvGlyphHeight(cnv);
+		}
 		
 		cnv->foreColor = 10;
 		uiPuts(cnv, row, col, "SAVE:", -1);
@@ -2128,7 +2262,7 @@ bool uiSaveSavestate(void)
 			}
 			
 			//ROM is loaded
-			(void)uiPrvSetGamePath(romName);
+			(void)uiPrvSetGamePath(romName, runtime, romSzExpected, ramSzExpected);
 			
 			if (filS)
 				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE", QSPI_RAM_SIZE_MAX) && ret;
@@ -2161,7 +2295,18 @@ bool uiSaveSavestate(void)
 				return false;
 		}
 		
-		fil = fatfsFileOpenAt(saveDir, (const char*)QSPI_FILENAME_START, OPEN_MODE_WRITE | OPEN_MODE_CREATE);
+		{
+			struct GameSelection selection;
+			char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+			const char *fileName = (const char*)QSPI_FILENAME_START;
+
+			if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
+				uiPrvSaveFileName((const char*)QSPI_FILENAME_START, GameRuntimeNes, saveName, sizeof(saveName));
+				fileName = saveName;
+			}
+
+			fil = fatfsFileOpenAt(saveDir, fileName, OPEN_MODE_WRITE | OPEN_MODE_CREATE);
+		}
 		if (fil) {
 			
 			uint32_t bytesWritten;
@@ -2194,7 +2339,7 @@ bool uiSaveSavestate(void)
 		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
-		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb or .gbc files found in /ROM", &locator, name, sizeof(name), NULL, 0))
+		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROM", &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:
@@ -2212,12 +2357,56 @@ bool uiSaveSavestate(void)
 			return false;
 		
 		while (*ptr++) {
-			if (++len == QSPI_FILENAME_MAXLEN)
+			if (++len == GAME_META_OFFSET)
 				return false;
 		}
 		
 		return true;
 	}
+
+bool uiGetGameSelection(struct GameSelection *selectionP)
+{
+	const struct GameSelectionFlashMeta *meta = (const struct GameSelectionFlashMeta*)(QSPI_FILENAME_START + GAME_META_OFFSET);
+	struct GameSelection selection = {0};
+
+	if (!uiPrvHaveGamePath())
+		return false;
+
+	if (meta->magic == GAME_META_MAGIC &&
+		(meta->runtime == GameRuntimeGb || meta->runtime == GameRuntimeNes)) {
+		selection.runtime = (enum GameRuntime)meta->runtime;
+		selection.romSize = meta->romSize;
+		selection.saveRamSize = meta->saveRamSize;
+	}
+	else {
+		selection.runtime = uiPrvRuntimeForName((const char*)QSPI_FILENAME_START);
+	}
+
+	if (selection.runtime == GameRuntimeGb) {
+		uint32_t romSzExpected, ramSzExpected;
+
+		if (!mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL))
+			return false;
+		selection.romSize = romSzExpected;
+		selection.saveRamSize = ramSzExpected;
+	}
+	else if (selection.runtime == GameRuntimeNes) {
+		struct NesRomInfo info;
+
+		if (!nesAnalyzeRom((const void*)QSPI_ROM_START, selection.romSize ? selection.romSize : QSPI_ROM_SIZE_MAX, &info))
+			return false;
+		if (!selection.romSize)
+			selection.romSize = info.romSize;
+		if (!selection.saveRamSize)
+			selection.saveRamSize = info.saveRamSize;
+	}
+	else
+		return false;
+
+	if (selectionP)
+		*selectionP = selection;
+	return true;
+}
 
 	static char* uiPrvTrim(char *str)
 	{
@@ -4389,6 +4578,7 @@ static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorS
 	const struct CartHeader *hdr = (const struct CartHeader*)QSPI_ROM_START;
 	uint32_t romSzExpected, ramSzExpected;
 	enum RomColorSupport romColorSupport;
+	struct GameSelection selection;
 
 	#ifndef NO_SD_CARD
 		//in systems with an SD card, the file path is mandatory
@@ -4398,6 +4588,23 @@ static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorS
 
 	if (romNameOutP)
 		romNameOutP[ROM_NAME_LEN] = 0;
+
+	if (!uiGetGameSelection(&selection))
+		return false;
+
+	if (selection.runtime == GameRuntimeNes) {
+		struct NesRomInfo info;
+
+		if (!nesAnalyzeRom((const void*)QSPI_ROM_START, selection.romSize, &info))
+			return false;
+		if (romNameOutP)
+			(void)sprintf(romNameOutP, "%s", info.name);
+		if (romColorSupportP)
+			*romColorSupportP = RomNoColor;
+		if (ramSzExpectedP)
+			*ramSzExpectedP = info.saveRamSize;
+		return true;
+	}
 	
 	if (!mbcRomAnalyze(hdr, &romSzExpected, &ramSzExpected, &romColorSupport, romNameOutP))
 		return false;

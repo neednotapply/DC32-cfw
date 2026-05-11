@@ -33,6 +33,18 @@ enum UiGameAction {
 	UiGameActionSwitchTool,
 };
 
+enum GameRuntime {
+	GameRuntimeNone,
+	GameRuntimeGb,
+	GameRuntimeNes,
+};
+
+struct GameSelection {
+	enum GameRuntime runtime;
+	uint32_t romSize;
+	uint32_t saveRamSize;
+};
+
 typedef void (*UiRunGameF)(void *userData);
 
 void uiRunToolShell(UiRunGameF runGameF, void *userData);
@@ -40,6 +52,7 @@ enum UiGameAction uiGameMenu(void);
 
 
 bool uiSaveSavestate(void);
+bool uiGetGameSelection(struct GameSelection *selectionP);
 
 //lower level, externally provided. debounced Game Boy key state for menu flows
 uint_fast8_t uiGetKeys(void);

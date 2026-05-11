@@ -21,6 +21,7 @@
 #include "qspi.h"
 #include "mbc.h"
 #include "gb.h"
+#include "nes/nes.h"
 #include "ui.h"
 
 static void uiPrvUpscalerInit(void);
@@ -30,6 +31,7 @@ static bool shouldRotateGame(void);
 static bool mUpscaling;
 static bool mRotateGame;
 static bool mGameToolExitRequested;
+static enum GameRuntime mActiveGameRuntime;
 
 static uint64_t mRtcTickOffset;         //ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
@@ -229,20 +231,36 @@ static void exitGame(void)
 
                 case UiGameActionRestart:
                 case UiGameActionSelectGame:
-                        gbAbort();
+                        if (mActiveGameRuntime == GameRuntimeNes)
+                                nesAbort();
+                        else
+                                gbAbort();
                         return;
 
                 case UiGameActionSwitchTool:
                         mGameToolExitRequested = true;
-                        gbAbort();
+                        if (mActiveGameRuntime == GameRuntimeNes)
+                                nesAbort();
+                        else
+                                gbAbort();
                         return;
         }
 
         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
+        if (mActiveGameRuntime == GameRuntimeNes) {
+                mUpscaling = false;
+                mRotateGame = false;
+                return;
+        }
         mUpscaling = shouldUpscale();
         mRotateGame = shouldRotateGame();
         if (mUpscaling)
                 uiPrvUpscalerInit();
+}
+
+void nesPortInGameMenu(void)
+{
+        exitGame();
 }
 
 uint8_t gbExtGetKeys(void)      //arrow keys, f1=a, f2=b, f3=start, f4=select
@@ -698,16 +716,30 @@ static void applySavedLeds(void)
         badgeLedsApplySettings(&settings, true);
 }
 
-static void runGameTool(void *userData)
+static void runSelectedGameTool(void *userData)
 {
+        struct GameSelection selection;
         uint32_t romSzExpected, ramSzExpected;
 
         (void)userData;
         mGameToolExitRequested = false;
         
         while(!mGameToolExitRequested) {
-                
-                if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
+
+                if (!uiGetGameSelection(&selection)) {
+                        pr("Failed to identify selected game\n");
+                        mGameToolExitRequested = true;
+                }
+                else if (selection.runtime == GameRuntimeNes) {
+                        dispPrvFrameCtrReset();
+                        mUpscaling = false;
+                        mRotateGame = false;
+                        memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
+                        mActiveGameRuntime = GameRuntimeNes;
+                        nesRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
+                        mActiveGameRuntime = GameRuntimeNone;
+                }
+                else if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
                         pr("Failed to init the MBC\n");
                         mGameToolExitRequested = true;
                 }
@@ -724,7 +756,9 @@ static void runGameTool(void *userData)
                                 uiPrvUpscalerInit();
                         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);        
                         gbSetFrameDithering(1);
+                        mActiveGameRuntime = GameRuntimeGb;
                         gbRun(shouldActAsCgb());
+                        mActiveGameRuntime = GameRuntimeNone;
                         //if we are aborted by gbAbort, we'll return here and restart or leave the game tool
                 }
         }
@@ -1861,7 +1895,7 @@ void __attribute__((noreturn, used)) micromain(void)
         uiPrvSelfTestsIfNeeded();
 
         pr("UI...\n");
-        uiRunToolShell(runGameTool, NULL);
+        uiRunToolShell(runSelectedGameTool, NULL);
 
         while(1);
 }

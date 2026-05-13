@@ -4761,77 +4761,13 @@ reload_dir:
 
 #endif //NO_SD_CARD
 
-#define AUTOCLICK_ENUM_WAIT_MS	5000
-#define AUTOCLICK_PRESS_MS		20
+#define HID_TEST_ENUM_WAIT_MS	5000
+#define HID_TEST_KEY_DELAY_MS	12
 
-struct AutoClickerSpeed {
-	const char *name;
-	uint32_t intervalMs;
-};
-
-static const struct AutoClickerSpeed mAutoClickerSpeeds[] = {
-	{"Slow", 1000},
-	{"Normal", 250},
-	{"Fast", 100},
-	{"Very Fast", 50},
-};
-
-static void uiPrvAutoClickerSettingsDraw(struct Canvas *cnv, uint_fast8_t selected, uint_fast8_t speedIdx, bool jiggler)
-{
-	uint_fast8_t row;
-
-	uiPrvSetHeaderTitle("AutoClicker");
-	uiPrvReset(cnv, false);
-	cnv->font = FontMedium;
-	row = uiPrvContentTop(cnv);
-	cnv->foreColor = 15;
-	uiPrintf(cnv, row, 18, "Speed: %s", mAutoClickerSpeeds[speedIdx].name);
-	uiPrvDrawOneChar(cnv, row, 2, selected == 0 ? MENU_SELECTION_CHAR : ' ');
-	row += uiPrvGlyphHeight(cnv) + 1;
-	uiPrintf(cnv, row, 18, "Jiggler: %s", jiggler ? "On" : "Off");
-	uiPrvDrawOneChar(cnv, row, 2, selected == 1 ? MENU_SELECTION_CHAR : ' ');
-	cnv->foreColor = 11;
-	uiPuts(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "Left/Right changes settings", -1);
-	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "A = Start   B = Quit", -1);
-}
-
-static bool uiPrvAutoClickerSettings(struct Canvas *cnv, uint_fast8_t *speedIdxP, bool *jigglerP)
-{
-	uint_fast8_t selected = 0;
-
-	while (1) {
-		uint_fast16_t key;
-
-		uiPrvAutoClickerSettingsDraw(cnv, selected, *speedIdxP, *jigglerP);
-		key = uiPrvRecvKeypress();
-		if (key == KEY_BIT_A)
-			return true;
-		if (key == KEY_BIT_B)
-			return false;
-		if (key == KEY_BIT_UP && selected)
-			selected--;
-		else if (key == KEY_BIT_DOWN && selected < 1)
-			selected++;
-		else if (key == KEY_BIT_LEFT || key == KEY_BIT_RIGHT) {
-			if (selected == 0) {
-				if (key == KEY_BIT_LEFT) {
-					if (*speedIdxP)
-						(*speedIdxP)--;
-				}
-				else if (*speedIdxP + 1 < sizeof(mAutoClickerSpeeds) / sizeof(*mAutoClickerSpeeds))
-					(*speedIdxP)++;
-			}
-			else
-				*jigglerP = !*jigglerP;
-		}
-	}
-}
-
-static bool uiPrvAutoClickerDelay(struct Canvas *cnv, uint32_t msec)
+static bool uiPrvHidTestDelay(uint32_t msec)
 {
 	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
 
-	(void)cnv;
 	while (getTime() < end) {
 		usbHidTask();
 		if (uiGetKeysRaw() & KEY_BIT_B)
@@ -4840,44 +4776,160 @@ static bool uiPrvAutoClickerDelay(struct Canvas *cnv, uint32_t msec)
 	return true;
 }
 
-static void uiPrvAutoClickerDrawRun(struct Canvas *cnv, const char *status, const struct AutoClickerSpeed *speed, bool jiggler, uint32_t clicks)
+static bool uiPrvHidTestWaitReady(struct Canvas *cnv)
 {
-	uint_fast8_t row;
+	uint64_t end = getTime() + (uint64_t)HID_TEST_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+	uint64_t lastDraw = 0;
 
-	uiPrvSetHeaderTitle("AutoClicker");
-	uiPrvReset(cnv, false);
-	cnv->font = FontMedium;
-	row = uiPrvContentTop(cnv);
-	cnv->foreColor = 15;
-	uiPuts(cnv, row, 10, status, -1);
-	row += uiPrvGlyphHeight(cnv) + 1;
-	uiPrintf(cnv, row, 10, "Speed: %s", speed->name);
-	row += uiPrvGlyphHeight(cnv) + 1;
-	uiPrintf(cnv, row, 10, "Jiggler: %s", jiggler ? "On" : "Off");
-	row += uiPrvGlyphHeight(cnv) + 1;
-	uiPrintf(cnv, row, 10, "Clicks: %u", (unsigned)clicks);
-	cnv->foreColor = 11;
-	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to stop", -1);
-}
-
-static bool uiPrvAutoClickerWaitReady(struct Canvas *cnv, const struct AutoClickerSpeed *speed, bool jiggler)
-{
-	uint64_t end = getTime() + (uint64_t)AUTOCLICK_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-
-	uiPrvAutoClickerDrawRun(cnv, "Waiting for USB", speed, jiggler, 0);
 	while (getTime() < end) {
+		uint64_t now = getTime();
+
 		usbHidTask();
 		if (uiGetKeysRaw() & KEY_BIT_B)
 			return false;
 		if (usbHidReady())
 			return true;
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvSetHeaderTitle("HID Test");
+			uiPrvReset(cnv, false);
+			cnv->font = FontMedium;
+			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
+			lastDraw = now;
+		}
 	}
 	return usbHidReady();
 }
 
-static void uiPrvAutoClickerTool(struct Canvas *cnv)
+static bool uiPrvHidTestAsciiKey(char ch, uint8_t *usageP, uint8_t *modsP)
 {
-	uiAlert(cnv, "AutoClicker is unavailable in keyboard-only HID mode", DialogTypeOk);
+	*modsP = 0;
+	if (ch >= 'a' && ch <= 'z') {
+		*usageP = 0x04 + ch - 'a';
+		return true;
+	}
+	if (ch >= 'A' && ch <= 'Z') {
+		*usageP = 0x04 + ch - 'A';
+		*modsP = USB_HID_MOD_LSHIFT;
+		return true;
+	}
+	if (ch >= '1' && ch <= '9') {
+		*usageP = 0x1e + ch - '1';
+		return true;
+	}
+	if (ch == '0') {
+		*usageP = 0x27;
+		return true;
+	}
+	switch (ch) {
+		case ' ': *usageP = 0x2c; return true;
+		case '\n': *usageP = 0x28; return true;
+		default: return false;
+	}
+}
+
+static bool uiPrvHidTestSendKey(uint8_t mods, uint8_t usage)
+{
+	uint8_t keys[6] = {usage, 0, 0, 0, 0, 0};
+	uint8_t release[6] = {0};
+	bool ok = true;
+
+	if (!usbHidKeyboardReport(mods, keys))
+		return false;
+	if (!uiPrvHidTestDelay(HID_TEST_KEY_DELAY_MS))
+		ok = false;
+	if (!usbHidKeyboardReport(0, release))
+		ok = false;
+	return ok;
+}
+
+static bool uiPrvHidTestSendString(const char *str)
+{
+	while (*str) {
+		uint8_t usage, mods;
+
+		if (uiPrvHidTestAsciiKey(*str++, &usage, &mods)) {
+			if (!uiPrvHidTestSendKey(mods, usage))
+				return false;
+		}
+	}
+	return true;
+}
+
+static void uiPrvHidTestTool(struct Canvas *cnv)
+{
+	enum {
+		HidTestText,
+		HidTestEnter,
+		HidTestTab,
+		HidTestGuiR,
+		HidTestQuit,
+		HidTestNum,
+	};
+	static const char *labels[HidTestNum] = {
+		[HidTestText] = "Send text",
+		[HidTestEnter] = "ENTER",
+		[HidTestTab] = "TAB",
+		[HidTestGuiR] = "GUI+R",
+		[HidTestQuit] = "Quit",
+	};
+	uint_fast8_t selected = 0;
+	bool reportsEnabled = false;
+
+	uiPrvSetHeaderTitle("HID Test");
+	if (!uiAlert(cnv, "Focus a text field on the host, then start HID test?", DialogTypeYesNo))
+		return;
+	if (!usbHidBegin(NULL)) {
+		uiAlert(cnv, "USB HID failed to start", DialogTypeOk);
+		return;
+	}
+	if (!uiPrvHidTestWaitReady(cnv)) {
+		usbHidEnd();
+		if (!(uiGetKeysRaw() & KEY_BIT_B))
+			uiAlert(cnv, "USB HID failed to enumerate", DialogTypeOk);
+		uiPrvWaitKeysReleased();
+		return;
+	}
+
+	usbHidSetReportsEnabled(true);
+	reportsEnabled = true;
+	uiPrvWaitKeysReleased();
+
+	while (!uiPrvToolExitRequested()) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+		bool sent = true;
+
+		uiPrvSetHeaderTitle("HID Test");
+		uiPrvReset(cnv, false);
+		cnv->font = FontMedium;
+		for (uint_fast8_t i = 0; i < HidTestNum; i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Quit", -1);
+
+		selected = uiPrvMenu(cnv, selected, HidTestNum, &button);
+		if (button == KEY_BIT_B || selected == HidTestQuit)
+			break;
+
+		if (selected == HidTestText)
+			sent = uiPrvHidTestSendString("DC32 HID keyboard test\n");
+		else if (selected == HidTestEnter)
+			sent = uiPrvHidTestSendKey(0, 0x28);
+		else if (selected == HidTestTab)
+			sent = uiPrvHidTestSendKey(0, 0x2b);
+		else if (selected == HidTestGuiR)
+			sent = uiPrvHidTestSendKey(USB_HID_MOD_LGUI, 0x15);
+
+		if (!sent) {
+			uiAlert(cnv, "HID report failed", DialogTypeOk);
+			break;
+		}
+	}
+
+	if (reportsEnabled) {
+		usbHidReleaseAll();
+		usbHidSetReportsEnabled(false);
+	}
+	usbHidEnd();
 	uiPrvWaitKeysReleased();
 }
 
@@ -5044,7 +5096,7 @@ enum UiToolId {
 	UiToolBrowser,
 	UiToolIr,
 	UiToolBadUsb,
-	UiToolAutoClicker,
+	UiToolHidTest,
 	UiToolMusic,
 	UiToolGame,
 	UiToolSettings,
@@ -5059,7 +5111,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolBrowser: return "File Browser";
 		case UiToolIr: return "Universal IR";
 		case UiToolBadUsb: return "BadUSB";
-		case UiToolAutoClicker: return "AutoClicker";
+		case UiToolHidTest: return "HID Test";
 		case UiToolMusic: return "Music";
 		case UiToolGame:
 		case UiToolRunGame:
@@ -5087,7 +5139,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 			return BootGuardModeMusic;
 
 		case UiToolBrowser:
-		case UiToolAutoClicker:
+		case UiToolHidTest:
 		case UiToolSettings:
 		case UiToolPowerOff:
 		default:
@@ -5174,7 +5226,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolBrowser] = "File Browser",
 		[UiToolIr] = "Universal IR",
 		[UiToolBadUsb] = "BadUSB",
-		[UiToolAutoClicker] = "AutoClicker",
+		[UiToolHidTest] = "HID Test",
 		[UiToolMusic] = "Music",
 		[UiToolGame] = "Emulation",
 		[UiToolSettings] = "Settings",
@@ -5184,7 +5236,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		UiToolBrowser,
 		UiToolIr,
 		UiToolBadUsb,
-		UiToolAutoClicker,
+		UiToolHidTest,
 		UiToolMusic,
 		UiToolGame,
 		UiToolSettings,
@@ -5626,9 +5678,9 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			#endif
 				break;
 
-			case UiToolAutoClicker:
+			case UiToolHidTest:
 				uiPrvEnterTool(activeTool);
-				uiPrvAutoClickerTool(cnv);
+				uiPrvHidTestTool(cnv);
 				uiPrvExitTool(activeTool);
 				break;
 

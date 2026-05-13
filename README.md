@@ -7,13 +7,13 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, BadUSB, AutoClicker, Music, Game, Settings, and Power Off entries. AutoClicker is currently present in the menu but disabled because this build exposes a keyboard-only USB HID device.
+- **Main Menu** - Provides File Browser, Universal IR, BadUSB, HID Test, Music, Game, Settings, and Power Off entries. HID Test exposes a direct keyboard report check while mouse/composite HID work remains out of scope.
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
 - **Game loading and saves** - Loads games from `/ROM` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save before switching games when save RAM is present.
 - **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for `/IR/ac.ir`, `/IR/audio.ir`, `/IR/projector.ir`, and `/IR/tv.ir`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
-- **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as a boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
+- **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
 - **LED controls** - Drives the badge WS2812 LEDs with off, all-on, rainbow, pulse, traveling dot, random, rear-on, and front-on patterns. Color modes include custom RGB, rainbow, flame, and random, with speed and brightness controls.
 - **Settings** - Persists Game, LED, Screen, and Music settings in QSPI flash. Game settings include color mode, upscaling, and display speed (`50%`, `100%`, `150%`, `200%`). Screen settings include rotation and brightness. LED settings include pattern, color, custom RGB, speed, and brightness.
@@ -56,7 +56,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ----------- |
 | `CMakeLists.txt` | Primary firmware build used by CI; builds ELF, BIN, and UF2 outputs. |
 | `.github/workflows/build.yml` | GitHub Actions firmware build and release artifact packaging. |
-| `src/main_rp2350_defcon.c` | Firmware entry point, clocks, GPIO, display, USB HID, IRDA, RTC, LEDs, and tool shell startup. |
+| `src/main_rp2350_defcon.c` | Firmware entry point, clocks, GPIO, display, IRDA, RTC, LEDs, and tool shell startup. |
 | `src/ui.c` | On-device UI, tool shell, file browser, game selection, settings, IR, music, BadUSB, and boot recovery screens. |
 | `src/gb.c`, `src/gbCore.h`, `src/gbC.c` | Game Boy execution loop, CPU helpers, and core emulator integration. |
 | `src/mappersC.c`, `src/mbc.c` | Game Boy cartridge mapper implementations and metadata parsing. |
@@ -133,7 +133,7 @@ Adjust the programmer command, permissions, or path for your setup.
 - QSPI layout is defined in `src/memMap.h`: settings, selected-game metadata, save RAM copy, and the loaded ROM occupy fixed flash regions.
 - Game ROM size is capped by `QSPI_ROM_SIZE_MAX` and save RAM by `QSPI_RAM_SIZE_MAX`.
 - The NES runtime intentionally enables only mappers 0, 1, 2, 3, 4, and 7 in `src/nes/InfoNES_Mapper.cpp`.
-- The USB HID implementation is keyboard-only. BadUSB mouse/media behavior and AutoClicker output are not available in this build.
+- The USB HID implementation is keyboard-only and attaches only while BadUSB or HID Test is running. BadUSB mouse/media behavior and AutoClicker output are not available in this build.
 
 ## Support and contributions
 

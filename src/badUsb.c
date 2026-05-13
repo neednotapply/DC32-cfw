@@ -37,9 +37,11 @@ static struct BadUsbScratch mScratch;
 static const struct BadUsbKey mSpecialKeys[] = {
 	{"DOWNARROW", 0x51}, {"DOWN", 0x51}, {"LEFTARROW", 0x50}, {"LEFT", 0x50},
 	{"RIGHTARROW", 0x4f}, {"RIGHT", 0x4f}, {"UPARROW", 0x52}, {"UP", 0x52},
-	{"ENTER", 0x28}, {"DELETE", 0x4c}, {"BACKSPACE", 0x2a}, {"END", 0x4d},
+	{"ENTER", 0x28}, {"RETURN", 0x28}, {"DELETE", 0x4c}, {"DEL", 0x4c},
+	{"BACKSPACE", 0x2a}, {"BKSP", 0x2a}, {"END", 0x4d},
 	{"HOME", 0x4a}, {"ESCAPE", 0x29}, {"ESC", 0x29}, {"INSERT", 0x49},
-	{"PAGEUP", 0x4b}, {"PAGEDOWN", 0x4e}, {"CAPSLOCK", 0x39}, {"NUMLOCK", 0x53},
+	{"INS", 0x49}, {"PAGEUP", 0x4b}, {"PGUP", 0x4b}, {"PAGEDOWN", 0x4e},
+	{"PGDN", 0x4e}, {"CAPSLOCK", 0x39}, {"CAPS", 0x39}, {"NUMLOCK", 0x53},
 	{"SCROLLLOCK", 0x47}, {"PRINTSCREEN", 0x46}, {"BREAK", 0x48}, {"PAUSE", 0x48},
 	{"SPACE", 0x2c}, {"TAB", 0x2b}, {"MENU", 0x65}, {"APP", 0x65},
 };
@@ -247,16 +249,24 @@ static bool badUsbPrvSetKey(uint8_t keys[6], uint8_t usage, bool hold)
 
 static uint8_t badUsbPrvModifier(const char *tok)
 {
-	if (badUsbPrvEq(tok, "CTRL") || badUsbPrvEq(tok, "CONTROL"))
+	if (badUsbPrvEq(tok, "CTRL") || badUsbPrvEq(tok, "CONTROL") || badUsbPrvEq(tok, "LCTRL") || badUsbPrvEq(tok, "LEFTCTRL"))
 		return USB_HID_MOD_LCTRL;
-	if (badUsbPrvEq(tok, "SHIFT"))
+	if (badUsbPrvEq(tok, "RCTRL") || badUsbPrvEq(tok, "RIGHTCTRL"))
+		return USB_HID_MOD_RCTRL;
+	if (badUsbPrvEq(tok, "SHIFT") || badUsbPrvEq(tok, "LSHIFT") || badUsbPrvEq(tok, "LEFTSHIFT"))
 		return USB_HID_MOD_LSHIFT;
-	if (badUsbPrvEq(tok, "ALT"))
+	if (badUsbPrvEq(tok, "RSHIFT") || badUsbPrvEq(tok, "RIGHTSHIFT"))
+		return USB_HID_MOD_RSHIFT;
+	if (badUsbPrvEq(tok, "ALT") || badUsbPrvEq(tok, "LALT") || badUsbPrvEq(tok, "LEFTALT"))
 		return USB_HID_MOD_LALT;
+	if (badUsbPrvEq(tok, "RALT") || badUsbPrvEq(tok, "RIGHTALT"))
+		return USB_HID_MOD_RALT;
 	if (badUsbPrvEq(tok, "OPTION"))
 		return USB_HID_MOD_LALT;
-	if (badUsbPrvEq(tok, "GUI") || badUsbPrvEq(tok, "WINDOWS") || badUsbPrvEq(tok, "COMMAND") || badUsbPrvEq(tok, "CMD"))
+	if (badUsbPrvEq(tok, "GUI") || badUsbPrvEq(tok, "WINDOWS") || badUsbPrvEq(tok, "COMMAND") || badUsbPrvEq(tok, "CMD") || badUsbPrvEq(tok, "LGUI") || badUsbPrvEq(tok, "LEFTGUI"))
 		return USB_HID_MOD_LGUI;
+	if (badUsbPrvEq(tok, "RGUI") || badUsbPrvEq(tok, "RIGHTGUI"))
+		return USB_HID_MOD_RGUI;
 	return 0;
 }
 
@@ -703,6 +713,7 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 	struct BadUsbState st;
 	struct UsbHidDeviceInfo info;
 	enum BadUsbResult ret;
+	bool usbStarted = false, reportsEnabled = false;
 
 	memset(&st, 0, sizeof(st));
 	st.statusF = statusF;
@@ -721,14 +732,22 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 		return BadUsbResultCancelled;
 	if (!usbHidBegin(&info))
 		return BadUsbResultUsbError;
+	usbStarted = true;
 	if (!badUsbPrvWaitReady(&st)) {
-		return BadUsbResultUsbError;
+		ret = BadUsbResultUsbError;
+		goto out_usb;
 	}
 
 	usbHidSetReportsEnabled(true);
+	reportsEnabled = true;
 	ret = badUsbPrvRunScript(fil, &st, false);
-	usbHidReleaseAll();
-	usbHidSetReportsEnabled(false);
+out_usb:
+	if (reportsEnabled) {
+		usbHidReleaseAll();
+		usbHidSetReportsEnabled(false);
+	}
+	if (usbStarted)
+		usbHidEnd();
 	if (ret != BadUsbResultDone)
 		return ret;
 	if (!badUsbPrvPoll(&st, "Done"))

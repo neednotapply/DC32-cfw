@@ -43,6 +43,7 @@
 #define USB_USB_PWR_VBUS_DETECT                 (1u << 2)
 #define USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN     (1u << 3)
 #define USB_HID_HW_WAIT_MS                              100
+#define USB_HID_DETACH_WAIT_MS                         100
 #define USB_HID_CONFIG_DESC_LEN                 34
 #define USB_HID_KEYBOARD_REPORT_SIZE            8
 
@@ -344,14 +345,21 @@ static bool usbHidPrvWaitBits(const volatile uint32_t *reg, uint32_t bits, bool 
         return false;
 }
 
+static void usbHidPrvWaitMs(uint32_t msec)
+{
+        uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
+
+        while (getTime() < end);
+}
+
 bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
 	struct UsbHidDeviceInfo defaultInfo;
 	uint32_t units;
 
 	if (mInited) {
-		usbHidTask();
-		return true;
+		usbHidEnd();
+		usbHidPrvWaitMs(USB_HID_DETACH_WAIT_MS);
 	}
 
 	if (!info) {
@@ -390,11 +398,12 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
         usb_hw->main_ctrl = 0;
         usb_hw->muxing = USB_USB_MUXING_TO_PHY | USB_USB_MUXING_SOFTCON;
         usb_hw->pwr = USB_USB_PWR_VBUS_DETECT | USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN;
-	usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF | USB_SIE_CTRL_PULLUP_EN;
+	usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF;
 	usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN;
 	usbHidPrvBusReset();
 	mReportsEnabled = false;
 	mInited = true;
+	usb_hw->sie_ctrl |= USB_SIE_CTRL_PULLUP_EN;
 	return true;
 }
 

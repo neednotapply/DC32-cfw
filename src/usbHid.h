@@ -24,6 +24,8 @@ struct UsbHidDeviceInfo {
 };
 
 void usbHidDefaultInfo(struct UsbHidDeviceInfo *info);
+bool usbHidPrepare(void);
+const char *usbHidLastError(void);
 bool usbHidBegin(const struct UsbHidDeviceInfo *info);
 void usbHidTask(void);
 bool usbHidReady(void);

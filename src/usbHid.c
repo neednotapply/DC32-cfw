@@ -59,7 +59,8 @@ static struct UsbHidDeviceInfo mInfo;
 static uint8_t mConfigured, mPendingAddress, mIdleRate, mProtocol = 1;
 static const uint8_t *mCtrlData;
 static uint16_t mCtrlRemaining;
-static bool mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid, mExpectSetReportOut;
+static bool mHwReady, mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid, mExpectSetReportOut;
+static const char *mLastError = "none";
 
 static const uint8_t mReportDesc[] = {
         0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x05, 0x07,
@@ -352,6 +353,46 @@ static void usbHidPrvWaitMs(uint32_t msec)
         while (getTime() < end);
 }
 
+bool usbHidPrepare(void)
+{
+	uint32_t units;
+
+	mLastError = "none";
+	if (mHwReady)
+		return true;
+
+        units = RESETS_RESET_PLL_USB_BITS;
+        resets_hw->reset |= units;
+        resets_hw->reset &=~ units;
+        if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true)) {
+		mLastError = "PLL reset timeout";
+                return false;
+	}
+
+        pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
+        pll_usb_hw->cs = (pll_usb_hw->cs &~ (PLL_CS_BYPASS_BITS | PLL_CS_REFDIV_BITS)) | (1 << PLL_CS_REFDIV_LSB);
+        pll_usb_hw->fbdiv_int = (pll_usb_hw->fbdiv_int &~ PLL_FBDIV_INT_BITS) | (100 << PLL_FBDIV_INT_LSB);
+        pll_usb_hw->prim = (pll_usb_hw->prim &~ (PLL_PRIM_POSTDIV1_BITS | PLL_PRIM_POSTDIV2_BITS)) | (5 << PLL_PRIM_POSTDIV1_LSB) | (5 << PLL_PRIM_POSTDIV2_LSB);
+        pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
+        if (!usbHidPrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true)) {
+		mLastError = "PLL lock timeout";
+                return false;
+	}
+        pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
+
+        clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;
+        clocks_hw->clk[clk_usb].div = 1 << CLOCKS_CLK_USB_DIV_INT_LSB;
+        clocks_hw->clk[clk_usb].ctrl = CLOCKS_CLK_USB_CTRL_ENABLE_BITS | (CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB << CLOCKS_CLK_USB_CTRL_AUXSRC_LSB);
+
+	mHwReady = true;
+	return true;
+}
+
+const char *usbHidLastError(void)
+{
+	return mLastError;
+}
+
 bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
 	struct UsbHidDeviceInfo defaultInfo;
@@ -376,23 +417,16 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 	if (!mInfo.product[0])
 		strcpy(mInfo.product, "DC32 HID");
 
-        units = RESETS_RESET_USBCTRL_BITS | RESETS_RESET_PLL_USB_BITS;
+	if (!usbHidPrepare())
+		return false;
+
+        units = RESETS_RESET_USBCTRL_BITS;
         resets_hw->reset |= units;
         resets_hw->reset &=~ units;
-        if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true))
+        if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true)) {
+		mLastError = "USB reset timeout";
                 return false;
-
-        pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
-        pll_usb_hw->fbdiv_int = (pll_usb_hw->fbdiv_int &~ PLL_FBDIV_INT_BITS) | (100 << PLL_FBDIV_INT_LSB);
-        pll_usb_hw->prim = (pll_usb_hw->prim &~ (PLL_PRIM_POSTDIV1_BITS | PLL_PRIM_POSTDIV2_BITS)) | (5 << PLL_PRIM_POSTDIV1_LSB) | (5 << PLL_PRIM_POSTDIV2_LSB);
-        pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
-        if (!usbHidPrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true))
-                return false;
-        pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
-
-        clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;
-        clocks_hw->clk[clk_usb].div = 1 << CLOCKS_CLK_USB_DIV_INT_LSB;
-        clocks_hw->clk[clk_usb].ctrl = CLOCKS_CLK_USB_CTRL_ENABLE_BITS | (CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB << CLOCKS_CLK_USB_CTRL_AUXSRC_LSB);
+	}
 
         memset((void*)usb_dpram, 0, USB_DPRAM_SIZE);
         usb_hw->main_ctrl = 0;

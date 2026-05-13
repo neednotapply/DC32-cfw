@@ -4880,7 +4880,10 @@ static void uiPrvHidTestTool(struct Canvas *cnv)
 	if (!uiAlert(cnv, "Focus a text field on the host, then start HID test?", DialogTypeYesNo))
 		return;
 	if (!usbHidBegin(NULL)) {
-		uiAlert(cnv, "USB HID failed to start", DialogTypeOk);
+		char msg[96];
+
+		(void)sprintf(msg, "USB HID failed to start\n%s", usbHidLastError());
+		uiAlert(cnv, msg, DialogTypeOk);
 		return;
 	}
 	if (!uiPrvHidTestWaitReady(cnv)) {

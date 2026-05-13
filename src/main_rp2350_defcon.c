@@ -1962,6 +1962,10 @@ void __attribute__((noreturn, used)) micromain(void)
         while (!(irdaSIRuartGetSta() & UART_STA_BIT_TX_FIFO_EMPTY));
         badgeIrdaInit(false);
 
+        pr("USB HID prepare...\n");
+        if (!usbHidPrepare())
+                pr("USB HID prepare failed\n");
+
         uiPrvSelfTestsIfNeeded();
 
         pr("UI...\n");

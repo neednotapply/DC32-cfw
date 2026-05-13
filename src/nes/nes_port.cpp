@@ -34,6 +34,11 @@ void nesPortInGameMenu(void);
 #define NES_SAFE_TOP 8u
 #define NES_SAFE_HEIGHT 224u
 #define NES_SAFE_BOTTOM (NES_SAFE_TOP + NES_SAFE_HEIGHT)
+#define NES_PRESENT_INVALID 0xffffu
+#define NES_PRESENT_NORMAL_WIDTH 288u
+#define NES_PRESENT_NORMAL_HEIGHT 216u
+#define NES_PRESENT_UPSCALED_WIDTH DISP_HEIGHT
+#define NES_PRESENT_UPSCALED_HEIGHT DISP_WIDTH
 
 static const uint8_t *mRom;
 static uint32_t mRomSize;
@@ -49,6 +54,12 @@ static uint16_t mDrawWidth;
 static uint16_t mDrawHeight;
 static bool mDrawFlipped;
 static uint8_t mFrame[NES_DISP_WIDTH * NES_SAFE_HEIGHT];
+static uint16_t mPresentSrcX[DISP_HEIGHT];
+static uint16_t mPresentSrcRow[DISP_WIDTH];
+static uint16_t mPresentRowFirst;
+static uint16_t mPresentRowEnd;
+static uint16_t mPresentColFirst;
+static uint16_t mPresentColEnd;
 static jmp_buf mAbort;
 
 bool IsNSF = false;
@@ -176,13 +187,54 @@ static void nesPortUpdateDrawOptions(void)
 	struct Settings settings;
 	uint32_t logicalW = DISP_HEIGHT;
 	uint32_t logicalH = DISP_WIDTH;
+	uint32_t i;
 
 	settingsGet(&settings);
-	mDrawWidth = settings.upscale ? logicalW : 288;
-	mDrawHeight = settings.upscale ? logicalH : 216;
+	mDrawWidth = settings.upscale ? NES_PRESENT_UPSCALED_WIDTH : NES_PRESENT_NORMAL_WIDTH;
+	mDrawHeight = settings.upscale ? NES_PRESENT_UPSCALED_HEIGHT : NES_PRESENT_NORMAL_HEIGHT;
 	mDrawLeft = (logicalW - mDrawWidth) / 2;
 	mDrawTop = (logicalH - mDrawHeight) / 2;
 	mDrawFlipped = settings.rotation;
+
+	mPresentRowFirst = DISP_HEIGHT;
+	mPresentRowEnd = 0;
+	for (i = 0; i < DISP_HEIGHT; i++) {
+		uint32_t logicalX = i;
+		uint16_t srcX = NES_PRESENT_INVALID;
+
+		if (logicalX >= mDrawLeft && logicalX < mDrawLeft + mDrawWidth) {
+			uint32_t dx = logicalX - mDrawLeft;
+
+			if (mDrawFlipped)
+				dx = mDrawWidth - 1 - dx;
+			srcX = (uint16_t)((dx * NES_DISP_WIDTH) / mDrawWidth);
+			if (mPresentRowFirst == DISP_HEIGHT)
+				mPresentRowFirst = (uint16_t)i;
+			mPresentRowEnd = (uint16_t)(i + 1);
+		}
+		mPresentSrcX[i] = srcX;
+	}
+
+	mPresentColFirst = DISP_WIDTH;
+	mPresentColEnd = 0;
+	for (i = 0; i < DISP_WIDTH; i++) {
+		uint32_t logicalY = DISP_WIDTH - 1 - i;
+		uint16_t srcRow = NES_PRESENT_INVALID;
+
+		if (logicalY >= mDrawTop && logicalY < mDrawTop + mDrawHeight) {
+			uint32_t dy = logicalY - mDrawTop;
+
+			if (mDrawFlipped)
+				dy = mDrawHeight - 1 - dy;
+			srcRow = (uint16_t)(((dy * NES_SAFE_HEIGHT) / mDrawHeight) * NES_DISP_WIDTH);
+			if (mPresentColFirst == DISP_WIDTH)
+				mPresentColFirst = (uint16_t)i;
+			mPresentColEnd = (uint16_t)(i + 1);
+		}
+		mPresentSrcRow[i] = srcRow;
+	}
+
+	memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
 }
 
 bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
@@ -307,32 +359,17 @@ void InfoNES_PostDrawLine(int line)
 static void nesPortPresentFrame(void)
 {
 	uint16_t *fb = (uint16_t*)dispGetFb();
-	uint32_t logicalH = DISP_WIDTH;
 
 	dispPrvWaitForScanoutStart();
 
-	for (uint32_t py = 0; py < DISP_HEIGHT; py++) {
-		uint32_t logicalX = py;
+	for (uint32_t py = mPresentRowFirst; py < mPresentRowEnd; py++) {
+		uint32_t sx = mPresentSrcX[py];
+		uint16_t *dst = fb + py * DISP_WIDTH + mPresentColFirst;
 
-		for (uint32_t px = 0; px < DISP_WIDTH; px++) {
-			uint32_t logicalY = logicalH - 1 - px;
-			uint16_t color = 0;
+		for (uint32_t px = mPresentColFirst; px < mPresentColEnd; px++) {
+			uint32_t srcOfst = mPresentSrcRow[px] + sx;
 
-			if (logicalX >= mDrawLeft && logicalX < mDrawLeft + mDrawWidth &&
-					logicalY >= mDrawTop && logicalY < mDrawTop + mDrawHeight) {
-				uint32_t dx = logicalX - mDrawLeft;
-				uint32_t dy = logicalY - mDrawTop;
-				uint32_t sx, sy;
-
-				if (mDrawFlipped) {
-					dx = mDrawWidth - 1 - dx;
-					dy = mDrawHeight - 1 - dy;
-				}
-				sx = (dx * NES_DISP_WIDTH) / mDrawWidth;
-				sy = (dy * NES_SAFE_HEIGHT) / mDrawHeight;
-				color = NesRgbPalette[mFrame[sy * NES_DISP_WIDTH + sx] & 0x3f];
-			}
-			*fb++ = color;
+			*dst++ = NesRgbPalette[mFrame[srcOfst] & 0x3f];
 		}
 	}
 }

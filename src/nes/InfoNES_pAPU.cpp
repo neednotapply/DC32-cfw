@@ -185,7 +185,7 @@ ApuQualityData_t ApuQualPal[] = {
 BYTE ApuC1a,
     ApuC1b, ApuC1c, ApuC1d;
 
-BYTE *ApuC1Wave;
+const BYTE *ApuC1Wave;
 DWORD ApuC1Skip;
 DWORD ApuC1Index;
 int32_t ApuC1EnvPhase;
@@ -199,7 +199,7 @@ DWORD ApuC1Freq;
 /*-------------------------------------------------------------------*/
 BYTE ApuC2a, ApuC2b, ApuC2c, ApuC2d;
 
-BYTE *ApuC2Wave;
+const BYTE *ApuC2Wave;
 DWORD ApuC2Skip;
 DWORD ApuC2Index;
 int32_t ApuC2EnvPhase;
@@ -256,7 +256,7 @@ BYTE ApuMmc5Enable = 0;
 
 /* MMC5 Pulse 1 */
 BYTE ApuMmc5P1a, ApuMmc5P1c, ApuMmc5P1d;
-BYTE *ApuMmc5P1Wave;
+const BYTE *ApuMmc5P1Wave;
 DWORD ApuMmc5P1Skip;
 DWORD ApuMmc5P1Index;
 int32_t ApuMmc5P1EnvPhase;
@@ -266,7 +266,7 @@ DWORD ApuMmc5P1Freq;
 
 /* MMC5 Pulse 2 */
 BYTE ApuMmc5P2a, ApuMmc5P2c, ApuMmc5P2d;
-BYTE *ApuMmc5P2Wave;
+const BYTE *ApuMmc5P2Wave;
 DWORD ApuMmc5P2Skip;
 DWORD ApuMmc5P2Index;
 int32_t ApuMmc5P2EnvPhase;
@@ -353,7 +353,7 @@ static const BYTE ApuS5B_VolTable[16] = {
 /*-------------------------------------------------------------------*/
 /*  Wave Data                                                        */
 /*-------------------------------------------------------------------*/
-BYTE __not_in_flash_func(pulse_25)[0x20] = {
+const BYTE __not_in_flash_func(pulse_25)[0x20] = {
     0x11,
     0x11,
     0x11,
@@ -388,7 +388,7 @@ BYTE __not_in_flash_func(pulse_25)[0x20] = {
     0x00,
 };
 
-BYTE __not_in_flash_func(pulse_50)[0x20] = {
+const BYTE __not_in_flash_func(pulse_50)[0x20] = {
     0x11,
     0x11,
     0x11,
@@ -423,7 +423,7 @@ BYTE __not_in_flash_func(pulse_50)[0x20] = {
     0x00,
 };
 
-BYTE __not_in_flash_func(pulse_75)[0x20] = {
+const BYTE __not_in_flash_func(pulse_75)[0x20] = {
     0x11,
     0x11,
     0x11,
@@ -458,7 +458,7 @@ BYTE __not_in_flash_func(pulse_75)[0x20] = {
     0x00,
 };
 
-BYTE __not_in_flash_func(pulse_87)[0x20] = {
+const BYTE __not_in_flash_func(pulse_87)[0x20] = {
     0x11,
     0x11,
     0x11,
@@ -493,7 +493,7 @@ BYTE __not_in_flash_func(pulse_87)[0x20] = {
     0x00,
 };
 
-BYTE __not_in_flash_func(triangle_50)[0x20] = {
+const BYTE __not_in_flash_func(triangle_50)[0x20] = {
     0x00,
     0x10,
     0x20,
@@ -528,7 +528,7 @@ BYTE __not_in_flash_func(triangle_50)[0x20] = {
     0x0f,
 };
 
-BYTE *__not_in_flash_func(pulse_waves)[4] = {
+static const BYTE * const __not_in_flash_func(pulse_waves)[4] = {
     pulse_87,
     pulse_75,
     pulse_50,
@@ -538,7 +538,7 @@ BYTE *__not_in_flash_func(pulse_waves)[4] = {
 /*-------------------------------------------------------------------*/
 /*  Active Time Left Data                                            */
 /*-------------------------------------------------------------------*/
-BYTE __not_in_flash_func(ApuAtl)[0x20] =
+const BYTE __not_in_flash_func(ApuAtl)[0x20] =
     {
         5,
         127,
@@ -577,7 +577,7 @@ BYTE __not_in_flash_func(ApuAtl)[0x20] =
 /*-------------------------------------------------------------------*/
 /* Frequency Limit of Rectangle Channels                             */
 /*-------------------------------------------------------------------*/
-WORD __not_in_flash_func(ApuFreqLimit)[8] =
+const WORD __not_in_flash_func(ApuFreqLimit)[8] =
     {
         0x3FF, 0x555, 0x666, 0x71C, 0x787, 0x7C1, 0x7E0, 0x7F0};
 
@@ -600,18 +600,18 @@ DWORD *ApuNoiseFreq = ApuNoiseFreqNtsc;
 /*-------------------------------------------------------------------*/
 /* DMC Transfer Clocks Tables (NTSC + PAL)                           */
 /*-------------------------------------------------------------------*/
-static DWORD __not_in_flash_func(ApuDpcmCyclesNtsc)[16] =
+static const DWORD __not_in_flash_func(ApuDpcmCyclesNtsc)[16] =
     {
         428, 380, 340, 320, 286, 254, 226, 214,
         190, 160, 142, 128, 106, 85, 72, 54};
 
-static DWORD __not_in_flash_func(ApuDpcmCyclesPal)[16] =
+static const DWORD __not_in_flash_func(ApuDpcmCyclesPal)[16] =
     {
         398, 354, 316, 298, 276, 236, 210, 198,
         176, 148, 132, 118, 98, 78, 66, 50};
 
 /* Active DMC period table; selected by region in InfoNES_pAPUInit(). */
-DWORD *ApuDpcmCycles = ApuDpcmCyclesNtsc;
+const DWORD *ApuDpcmCycles = ApuDpcmCyclesNtsc;
 
 /*===================================================================*/
 /*                                                                   */

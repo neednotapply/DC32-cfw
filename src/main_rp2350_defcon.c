@@ -33,6 +33,25 @@ static bool mRotateGame;
 static bool mGameToolExitRequested;
 static enum GameRuntime mActiveGameRuntime;
 
+#define GB_SRC_WIDTH                   160u
+#define GB_SRC_HEIGHT                  144u
+#define GB_ASPECT_WIDTH                10u
+#define GB_ASPECT_HEIGHT               9u
+#ifdef UPSCALER_ROTATES
+#define GB_UPSCALED_HEIGHT             DISP_WIDTH
+#define GB_UPSCALED_WIDTH              ((GB_UPSCALED_HEIGHT * GB_ASPECT_WIDTH + GB_ASPECT_HEIGHT / 2u) / GB_ASPECT_HEIGHT)
+#define GB_UPSCALED_LEFT               ((DISP_HEIGHT - GB_UPSCALED_WIDTH) / 2u)
+#define GB_UPSCALED_TOP                0u
+#else
+#define GB_UPSCALED_WIDTH              DISP_WIDTH
+#define GB_UPSCALED_HEIGHT             ((GB_UPSCALED_WIDTH * GB_ASPECT_HEIGHT + GB_ASPECT_WIDTH / 2u) / GB_ASPECT_WIDTH)
+#define GB_UPSCALED_LEFT               0u
+#define GB_UPSCALED_TOP                ((DISP_HEIGHT - GB_UPSCALED_HEIGHT) / 2u)
+#endif
+
+static uint8_t mGbUpscaleSrcX[GB_UPSCALED_WIDTH];
+static uint16_t mGbUpscaleLineStart[GB_SRC_HEIGHT + 1];
+
 static uint64_t mRtcTickOffset;         //ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
 static uint8_t mI2CreadBuf[2];
@@ -231,8 +250,11 @@ static void exitGame(void)
 
                 case UiGameActionRestart:
                 case UiGameActionSelectGame:
-                        if (mActiveGameRuntime == GameRuntimeNes)
+                        if (mActiveGameRuntime == GameRuntimeNes) {
+                                if (action == UiGameActionSelectGame)
+                                        mGameToolExitRequested = true;
                                 nesAbort();
+                        }
                         else
                                 gbAbort();
                         return;
@@ -339,6 +361,39 @@ static uint32_t uiPrvFifoRx(void)
 {
         while (!(sio_hw->fifo_st & SIO_FIFO_ST_VLD_BITS));
         return sio_hw->fifo_rd;
+}
+
+static void uiPrvGbUpscalerBuildMaps(void)
+{
+        uint32_t i;
+
+        for (i = 0; i < GB_UPSCALED_WIDTH; i++) {
+                uint32_t srcX = (i * GB_SRC_WIDTH + GB_UPSCALED_WIDTH / 2u) / GB_UPSCALED_WIDTH;
+
+                if (srcX >= GB_SRC_WIDTH)
+                        srcX = GB_SRC_WIDTH - 1u;
+                mGbUpscaleSrcX[i] = (uint8_t)srcX;
+        }
+
+        for (i = 0; i <= GB_SRC_HEIGHT; i++)
+                mGbUpscaleLineStart[i] = (uint16_t)((i * GB_UPSCALED_HEIGHT + GB_SRC_HEIGHT - 1u) / GB_SRC_HEIGHT);
+}
+
+static void uiPrvOutputGbAspectFitLine(uint16_t *fb, const PIXFMT *src, bool flipScaleMap)
+{
+        uint32_t i;
+
+        for (i = 0; i < GB_UPSCALED_WIDTH; i++) {
+                uint32_t mapIdx = flipScaleMap ? GB_UPSCALED_WIDTH - 1u - i : i;
+
+                *fb = src[mGbUpscaleSrcX[mapIdx]] &~ BG_FLAG_UNDER_OBJS;
+
+        #ifdef UPSCALER_ROTATES
+                fb += DISP_WIDTH;
+        #else
+                fb++;
+        #endif
+        }
 }
 
 static void __attribute__((naked)) uiPrvHorizStretch(uint32_t *dst, uint16_t *src)
@@ -505,50 +560,35 @@ static void uiPrvUpscalerMain(void)
         
         while (1) {
                 
-                static uint32_t lines[2][240], prevLineIdx = 0;
-                static PIXFMT __attribute__((aligned(4))) pixelsIn[160];
-                uint32_t *pixTwice = (uint32_t*)pixelsIn;
+                static PIXFMT __attribute__((aligned(4))) pixelsIn[GB_SRC_WIDTH];
                 uint16_t *fb = dispGetFb();
-                uint32_t *dataIn, lineNum, sourceLineNum;
-                uint_fast8_t i, j;
-                PIXFMT* pixels;
+                uint32_t *dataIn, sourceLineNum, dstLine, dstStart, dstEnd;
                 
                 dataIn = (uint32_t*)uiPrvFifoRx();
                 
                 memcpy(pixelsIn, (PIXFMT*)dataIn[0], sizeof(pixelsIn));
-                lineNum = dataIn[1];
                 sourceLineNum = dataIn[2];
                 
                 uiPrvFifoTx(0);
 
-        #ifdef UPSCALER_ROTATES
-                fb += ((DISP_HEIGHT - 240) / 2) * DISP_WIDTH;
-                fb += DISP_WIDTH - 1 - ((DISP_WIDTH - 216) / 2 + lineNum * 3 / 2);
-                if (mRotateGame && !(sourceLineNum & 1))
-                        fb--;
-        #else
-                fb += DISP_WIDTH * ((DISP_HEIGHT - 216) / 2 + lineNum * 3 / 2) + (DISP_WIDTH - 240) / 2;
-        #endif
+                dstStart = mGbUpscaleLineStart[sourceLineNum];
+                dstEnd = mGbUpscaleLineStart[sourceLineNum + 1u];
+                if (mRotateGame) {
+                        uint32_t flippedStart = GB_UPSCALED_HEIGHT - dstEnd;
+                        uint32_t flippedEnd = GB_UPSCALED_HEIGHT - dstStart;
 
-                if (sourceLineNum & 1) {                //mix and output mix
-
-                        uiPrvHorizStretch(lines[1], pixelsIn);
-                        uiPrvMix(lines[0], lines[1]);
-                #ifdef UPSCALER_ROTATES
-                        if (mRotateGame) {
-                                fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
-                                fb = uiPrvOuputStretchedOnly(fb, lines[0]);
-                        }
-                        else
-                #endif
-                        {
-                                fb = uiPrvOuputStretchedOnly(fb, lines[0]);
-                                fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
-                        }
+                        dstStart = flippedStart;
+                        dstEnd = flippedEnd;
                 }
-                else {
-                        uiPrvHorizStretch(lines[0], pixelsIn);
-                        fb = uiPrvOuputStretchedWithSource(fb, lines[0], pixelsIn);
+
+                for (dstLine = dstStart; dstLine < dstEnd; dstLine++) {
+                #ifdef UPSCALER_ROTATES
+                        fb = dispGetFb() + GB_UPSCALED_LEFT * DISP_WIDTH;
+                        fb += DISP_WIDTH - 1u - (GB_UPSCALED_TOP + dstLine);
+                #else
+                        fb = dispGetFb() + DISP_WIDTH * (GB_UPSCALED_TOP + dstLine) + GB_UPSCALED_LEFT;
+                #endif
+                        uiPrvOutputGbAspectFitLine(fb, pixelsIn, mRotateGame);
                 }
         }
 }
@@ -558,6 +598,8 @@ static void uiPrvUpscalerInit(void)
         static uint32_t mUpscalerStack[32];
         uint32_t cmds[] = {0, 0, 1, SCB->VTOR, ((uintptr_t)mUpscalerStack) + sizeof(mUpscalerStack), (uintptr_t)&uiPrvUpscalerMain};
         uint32_t idx = 0;
+
+        uiPrvGbUpscalerBuildMaps();
         
         //first, reset the core
         psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;

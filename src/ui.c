@@ -641,6 +641,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 }
 
 #ifndef NO_SD_CARD
+	static void uiPrvCardStreamReset(void)
+	{
+		if (mCurCardOp == CurrentlyWriting)
+			(void)sdWriteStop();
+		else if (mCurCardOp == CurrentlyReading)
+			(void)sdReadStop();
+		mCurCardOp = CurentlyIdle;
+	}
+
 	static bool uiPrvCardReadSec(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
 	{
 		uint8_t *dst = (uint8_t*)dstP;
@@ -650,17 +659,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		
 		if (mCurCardOp == CurrentlyWriting) {
 			
+			mCurCardOp = CurentlyIdle;
 			if (!sdWriteStop())
 				return false;
-			
-			mCurCardOp = CurentlyIdle;
 		}
 		else if (mCurCardOp == CurrentlyReading && mCurCardSec != sec) {
 			
+			mCurCardOp = CurentlyIdle;
 			if (!sdReadStop())
 				return false;
-			
-			mCurCardOp = CurentlyIdle;
 		}
 		
 		if (mCurCardOp == CurentlyIdle) {
@@ -675,8 +682,10 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		//we are now in the reading state
 		while (numSec) {
 			
-			if (!sdReadNext(dst))
+			if (!sdReadNext(dst)) {
+				uiPrvCardStreamReset();
 				return false;
+			}
 			
 			dst += SD_BLOCK_SIZE;
 			numSec--;
@@ -695,17 +704,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		
 		if (mCurCardOp == CurrentlyReading) {
 			
+			mCurCardOp = CurentlyIdle;
 			if (!sdReadStop())
 				return false;
-			
-			mCurCardOp = CurentlyIdle;
 		}
 		else if (mCurCardOp == CurrentlyWriting && mCurCardSec != sec) {
 			
+			mCurCardOp = CurentlyIdle;
 			if (!sdWriteStop())
 				return false;
-			
-			mCurCardOp = CurentlyIdle;
 		}
 		
 		if (mCurCardOp == CurentlyIdle) {
@@ -720,8 +727,10 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		//we are now in the writing state
 		while (numSec) {
 			
-			if (!sdWriteNext(src))
+			if (!sdWriteNext(src)) {
+				uiPrvCardStreamReset();
 				return false;
+			}
 			
 			src += SD_BLOCK_SIZE;
 			numSec--;
@@ -751,14 +760,18 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		}
 	}
 	
-	static struct FatfsVol* uiPrvMountCard(struct Canvas *cnv, bool quiet)
+	static struct FatfsVol* uiPrvMountCardEx(struct Canvas *cnv, bool quiet, bool forceReinit)
 	{
 		struct FatfsVol *vol;
-		
-		if (!sdGetNumSecs()) {
-			
+
+		if (forceReinit)
+			uiPrvCardStreamReset();
+
+		if (forceReinit || !sdGetNumSecs()) {
+
 			if (!sdCardInit() || !sdGetNumSecs()) {
 				(void)uiPrvCardPreUnmount();
+				sdReportLastError();
 				if (!quiet)
 					uiAlert(cnv, "Insert an SD card, or check that the card can be read", DialogTypeOk);
 				return NULL;	
@@ -770,9 +783,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 			return vol;
 		
 		(void)uiPrvCardPreUnmount();
+		sdReportLastError();
 		if (!quiet)
 			uiAlert(cnv, "Cannot find a valid FAT filesystem on the SD card", DialogTypeOk);
 		return NULL;
+	}
+
+	static struct FatfsVol* uiPrvMountCard(struct Canvas *cnv, bool quiet)
+	{
+		return uiPrvMountCardEx(cnv, quiet, false);
 	}
 	
 	static int strsCaselesslyCompareUtf(const char *aP, const char *bP, unsigned n)
@@ -2343,14 +2362,14 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 	
-	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz)	//corrupts GB's RAM, returns true if a selection was made
+	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
 	{
 		struct FatFileLocator locator;
 		struct FatfsVol *vol;
 		char name[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ret = false;
 		
-		vol = uiPrvMountCard(cnv, false);
+		vol = uiPrvMountCardEx(cnv, false, forceSdReinit);
 		if (!vol)
 			return false;
 		
@@ -4925,19 +4944,48 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 #endif
 
 static enum UiGameAction mLastGameMenuAction = UiGameActionResume;
+static bool mDeferredGameSelect;
+
+static bool uiPrvCurrentGameIsNes(void)
+{
+	struct GameSelection selection;
+
+	return uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes;
+}
 
 static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
-	mLastGameMenuAction = UiGameActionResume;
-	uiPrvEnterTool(UiToolGame);
-	toolWorkspaceEnd();
-	uiPrvLoadSavestate();
-	runGameF(userData);
-	if (!uiSaveSavestate())
-		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
-	toolWorkspaceBegin();
-	uiPrvExitTool(UiToolGame);
-	return mLastGameMenuAction;
+	while (1) {
+		mLastGameMenuAction = UiGameActionResume;
+		mDeferredGameSelect = false;
+		uiPrvEnterTool(UiToolGame);
+		toolWorkspaceEnd();
+		uiPrvLoadSavestate();
+		runGameF(userData);
+		if (!uiSaveSavestate())
+			uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
+		toolWorkspaceBegin();
+		uiPrvExitTool(UiToolGame);
+
+	#ifndef NO_SD_CARD
+		if (mDeferredGameSelect && mLastGameMenuAction == UiGameActionSelectGame) {
+			uint32_t ramSz = 0;
+			bool validRom = uiPrvHaveValidRom(NULL, NULL, &ramSz);
+
+			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0, true)) {
+				uiPrvLoadSavestate();
+				continue;
+			}
+			if (uiPrvHaveValidRom(NULL, NULL, NULL)) {
+				uiPrvLoadSavestate();
+				continue;
+			}
+			return UiGameActionSwitchTool;
+		}
+	#endif
+
+		return mLastGameMenuAction;
+	}
 }
 
 static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -4974,7 +5022,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		}
 	#ifndef NO_SD_CARD
 		else if (selOption == selectOption) {
-			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0)) {
+			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0, false)) {
 				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
 					return uiPrvToolSwitcher(cnv, UiToolGame);
 			}
@@ -5022,8 +5070,14 @@ enum UiGameAction uiGameMenu(void)
 	if (selOption == selectOption) {
 		bool selected;
 
+		if (uiPrvCurrentGameIsNes()) {
+			mDeferredGameSelect = true;
+			mLastGameMenuAction = UiGameActionSelectGame;
+			return mLastGameMenuAction;
+		}
+
 		toolWorkspaceBegin();
-		selected = uiPrvSelectRom(cnv, validRom ? ramSz : 0);
+		selected = uiPrvSelectRom(cnv, validRom ? ramSz : 0, false);
 		if (selected) {
 			uiPrvLoadSavestate();
 			mLastGameMenuAction = UiGameActionSelectGame;

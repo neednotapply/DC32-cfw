@@ -522,11 +522,12 @@ static void uiPrvUpscalerMain(void)
                 uiPrvFifoTx(0);
 
         #ifdef UPSCALER_ROTATES
-                fb += DISP_WIDTH - 1 - (lineNum * 3 / 2);
+                fb += ((DISP_HEIGHT - 240) / 2) * DISP_WIDTH;
+                fb += DISP_WIDTH - 1 - ((DISP_WIDTH - 216) / 2 + lineNum * 3 / 2);
                 if (mRotateGame && !(sourceLineNum & 1))
                         fb--;
         #else
-                fb += DISP_WIDTH * (lineNum * 3 / 2);
+                fb += DISP_WIDTH * ((DISP_HEIGHT - 216) / 2 + lineNum * 3 / 2) + (DISP_WIDTH - 240) / 2;
         #endif
 
                 if (sourceLineNum & 1) {                //mix and output mix
@@ -1581,12 +1582,8 @@ static void uiPrvSelfTestsIfNeeded(void)
 
                                         uiSelfTestSetText(&cnv, 25, 50, "(%5u %5u) = (%6d %6d)            ", xi, yi, x, y);
 
-                                        if (x >= (320 - 240) / 2 && x - (320 - 240) / 2 < 240 && y >= (240 - 216) / 2 && y - (240 - 216) / 2 < 216) {
-
-                                                x -= (320 - 240) / 2;
-                                                y -= (240 - 216) / 2;
-
-                                                uiSelfTestSetText(&cnv, 215 - y, 239 - x, "*");
+                                        if (x >= 0 && x < (int32_t)cnv.w && y >= 0 && y < (int32_t)cnv.h) {
+                                                uiSelfTestSetText(&cnv, cnv.h - 1 - y, cnv.w - 1 - x, "*");
                                         }
                                 }
                                 else {

@@ -12,6 +12,7 @@ extern "C" {
 #include "mbc.h"
 #include "memMap.h"
 #include "pinoutRp2350defcon.h"
+#include "settings.h"
 #include "timebase.h"
 #include "ui.h"
 
@@ -28,15 +29,25 @@ void nesPortInGameMenu(void);
 #define NES_MAGIC2 'S'
 #define NES_MAGIC3 0x1a
 #define NES_LINE_WORDS 256
-#define NES_AUDIO_SAMPLE_RATE 11025
+#define NES_FRAME_BASE_NTSC 60u
+#define NES_FRAME_BASE_PAL 50u
+#define NES_SAFE_TOP 8u
+#define NES_SAFE_HEIGHT 224u
+#define NES_SAFE_BOTTOM (NES_SAFE_TOP + NES_SAFE_HEIGHT)
 
 static const uint8_t *mRom;
 static uint32_t mRomSize;
+static enum NesRegion mRegion;
 static uint8_t *mSaveRam;
 static uint32_t mSaveRamSize;
 static uint8_t *mPool;
 static uint32_t mPoolPos;
 static uint16_t *mLine;
+static uint16_t mDrawLeft;
+static uint16_t mDrawTop;
+static uint16_t mDrawWidth;
+static uint16_t mDrawHeight;
+static bool mDrawFlipped;
 static jmp_buf mAbort;
 
 bool IsNSF = false;
@@ -49,15 +60,25 @@ BYTE (*mmc5_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 BYTE (*vrc6_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 BYTE (*s5b_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 
+#define RGB565(r, g, b) (WORD)((((r) & 0xf8) << 8) | (((g) & 0xfc) << 3) | ((b) >> 3))
+
 const WORD NesPalette[64] = {
-	0x39ce, 0x1071, 0x0015, 0x2013, 0x440e, 0x5402, 0x5000, 0x3c20,
-	0x20a0, 0x0100, 0x0140, 0x00e2, 0x0ceb, 0x0000, 0x0000, 0x0000,
-	0x5ef7, 0x01dd, 0x10fd, 0x401e, 0x5c17, 0x700b, 0x6ca0, 0x6521,
-	0x45c0, 0x0240, 0x02a0, 0x0247, 0x0211, 0x0000, 0x0000, 0x0000,
-	0x7fff, 0x1eff, 0x2e5f, 0x223f, 0x79ff, 0x7dd6, 0x7dcc, 0x7e67,
-	0x7ae7, 0x4342, 0x2769, 0x2ff3, 0x03bb, 0x0000, 0x0000, 0x0000,
-	0x7fff, 0x579f, 0x635f, 0x6b3f, 0x7f1f, 0x7f1b, 0x7ef6, 0x7f75,
-	0x7f94, 0x73f4, 0x57d7, 0x5bf9, 0x4ffe, 0x0000, 0x0000, 0x0000,
+	RGB565(0x66, 0x66, 0x66), RGB565(0x00, 0x2a, 0x88), RGB565(0x14, 0x12, 0xa7), RGB565(0x3b, 0x00, 0xa4),
+	RGB565(0x5c, 0x00, 0x7e), RGB565(0x6e, 0x00, 0x40), RGB565(0x6c, 0x07, 0x00), RGB565(0x56, 0x1d, 0x00),
+	RGB565(0x33, 0x35, 0x00), RGB565(0x0b, 0x48, 0x00), RGB565(0x00, 0x52, 0x00), RGB565(0x00, 0x4f, 0x08),
+	RGB565(0x00, 0x40, 0x4d), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00),
+	RGB565(0xad, 0xad, 0xad), RGB565(0x15, 0x5f, 0xd9), RGB565(0x42, 0x40, 0xff), RGB565(0x75, 0x27, 0xfe),
+	RGB565(0xa0, 0x1a, 0xcc), RGB565(0xb7, 0x1e, 0x7b), RGB565(0xb5, 0x31, 0x20), RGB565(0x99, 0x4e, 0x00),
+	RGB565(0x6b, 0x6d, 0x00), RGB565(0x38, 0x87, 0x00), RGB565(0x0c, 0x93, 0x00), RGB565(0x00, 0x8f, 0x32),
+	RGB565(0x00, 0x7c, 0x8d), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00),
+	RGB565(0xff, 0xfe, 0xff), RGB565(0x64, 0xb0, 0xff), RGB565(0x92, 0x90, 0xff), RGB565(0xc6, 0x76, 0xff),
+	RGB565(0xf3, 0x6a, 0xff), RGB565(0xfe, 0x6e, 0xcc), RGB565(0xfe, 0x81, 0x70), RGB565(0xea, 0x9e, 0x22),
+	RGB565(0xbc, 0xbe, 0x00), RGB565(0x88, 0xd8, 0x00), RGB565(0x5c, 0xe4, 0x30), RGB565(0x45, 0xe0, 0x82),
+	RGB565(0x48, 0xcd, 0xde), RGB565(0x4f, 0x4f, 0x4f), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00),
+	RGB565(0xff, 0xfe, 0xff), RGB565(0xc0, 0xdf, 0xff), RGB565(0xd3, 0xd2, 0xff), RGB565(0xe8, 0xc8, 0xff),
+	RGB565(0xfb, 0xc2, 0xff), RGB565(0xfe, 0xc4, 0xea), RGB565(0xfe, 0xcc, 0xc5), RGB565(0xf7, 0xd8, 0xa5),
+	RGB565(0xe4, 0xe5, 0x94), RGB565(0xcf, 0xef, 0x96), RGB565(0xbd, 0xf4, 0xab), RGB565(0xb3, 0xf3, 0xcc),
+	RGB565(0xb5, 0xeb, 0xf2), RGB565(0xb8, 0xb8, 0xb8), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00),
 };
 
 static void *nesPortAllocAligned(uint32_t size, uint32_t align)
@@ -110,6 +131,48 @@ uint32_t nesGetLoadedRomSize(void)
 	return mRomSize;
 }
 
+static enum NesRegion nesPortDetectRegion(const uint8_t *bytes)
+{
+	if ((bytes[7] & 0x0c) == 0x08) {
+		switch (bytes[12] & 0x03) {
+			case 1:
+				return NesRegionPal;
+			case 3:
+				return NesRegionDendy;
+			default:
+				return NesRegionNtsc;
+		}
+	}
+
+	return (bytes[9] & 0x01) ? NesRegionPal : NesRegionNtsc;
+}
+
+static uint32_t nesPortDesiredFramerate(enum NesRegion region)
+{
+	static const uint8_t fpsVals[] = DISP_SPEED_SETTINGS;
+	struct Settings settings;
+	uint32_t base = (region == NesRegionNtsc) ? NES_FRAME_BASE_NTSC : NES_FRAME_BASE_PAL;
+
+	settingsGet(&settings);
+	if (settings.speed >= sizeof(fpsVals) / sizeof(*fpsVals))
+		settings.speed = 1;
+	return (base * fpsVals[settings.speed] + NES_FRAME_BASE_NTSC / 2) / NES_FRAME_BASE_NTSC;
+}
+
+static void nesPortUpdateDrawOptions(void)
+{
+	struct Settings settings;
+	uint32_t logicalW = DISP_HEIGHT;
+	uint32_t logicalH = DISP_WIDTH;
+
+	settingsGet(&settings);
+	mDrawWidth = settings.upscale ? logicalW : 288;
+	mDrawHeight = settings.upscale ? logicalH : 216;
+	mDrawLeft = (logicalW - mDrawWidth) / 2;
+	mDrawTop = (logicalH - mDrawHeight) / 2;
+	mDrawFlipped = settings.rotation;
+}
+
 bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
 {
 	const uint8_t *bytes = (const uint8_t*)rom;
@@ -137,6 +200,7 @@ bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
 		info->romSize = expectedSize;
 		info->saveRamSize = NES_SAVE_RAM_SIZE;
 		info->mapper = mapper;
+		info->region = nesPortDetectRegion(bytes);
 		info->hasSaveRam = (bytes[6] & 0x02) != 0;
 		info->name[0] = 'N';
 		info->name[1] = 'E';
@@ -267,29 +331,18 @@ void InfoNES_SoundClose(void)
 
 int InfoNES_GetSoundBufferSize(void)
 {
-	return APU_MAX_SAMPLES_PER_SYNC;
+	return 0;
 }
 
 void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3, BYTE *wave4, BYTE *wave5, BYTE *wave6)
 {
-	int32_t accum = 0;
-
-	if (samples <= 0 || !wave1 || !wave2 || !wave3 || !wave4 || !wave5)
-		return;
-	for (int i = 0; i < samples; i++) {
-		accum += wave1[i];
-		accum += wave2[i];
-		accum += wave3[i];
-		accum += wave4[i];
-		accum += wave5[i];
-		if (wave6)
-			accum += wave6[i];
-	}
-	accum /= samples;
-	if (accum < 4)
-		audioPwmStop();
-	else
-		(void)audioPwmTone(120 + (uint32_t)accum * 12u);
+	(void)samples;
+	(void)wave1;
+	(void)wave2;
+	(void)wave3;
+	(void)wave4;
+	(void)wave5;
+	(void)wave6;
 }
 
 void nesAbort(void)
@@ -306,6 +359,7 @@ void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSi
 
 	mRom = (const uint8_t*)rom;
 	mRomSize = info.romSize;
+	mRegion = info.region;
 	mSaveRam = (uint8_t*)saveRam;
 	mSaveRamSize = saveRamSize;
 	mPool = (uint8_t*)CART_RAM_ADDR_IN_RAM;
@@ -319,26 +373,56 @@ void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSi
 	if (!mLine)
 		return;
 
+	APU_Mute = 1;
+	audioPwmStop();
+	nesPortUpdateDrawOptions();
+	dispSetFramerate(nesPortDesiredFramerate(mRegion));
+	dispPrvFrameCtrReset();
+
 	if (setjmp(mAbort)) {
 		InfoNES_Fin();
 		audioPwmStop();
+		dispSetFramerate(nesPortDesiredFramerate(NesRegionNtsc));
 		return;
 	}
 
-	InfoNES_Main(INFONES_REGION_NTSC);
+	InfoNES_Main(mRegion == NesRegionPal ? INFONES_REGION_PAL : (mRegion == NesRegionDendy ? INFONES_REGION_DENDY : INFONES_REGION_NTSC));
 	audioPwmStop();
+	dispSetFramerate(nesPortDesiredFramerate(NesRegionNtsc));
 }
 
 void nesPortDrawLine(uint16_t line, const uint16_t *pixels256)
 {
 	uint16_t *fb = (uint16_t*)dispGetFb();
-	uint32_t y = line;
+	uint32_t srcY = line;
+	uint32_t cropY;
+	uint32_t y0, y1;
 
-	if (!pixels256 || y >= DISP_HEIGHT)
+	if (!pixels256 || srcY >= NES_DISP_HEIGHT || !mDrawWidth || !mDrawHeight)
 		return;
 
-	for (uint32_t x = 0; x < DISP_WIDTH; x++) {
-		uint32_t sx = (x * NES_DISP_WIDTH) / DISP_WIDTH;
-		fb[(DISP_HEIGHT - 1 - y) + x * DISP_WIDTH] = pixels256[sx] & 0x7fff;
+	if (!srcY)
+		memset(fb, 0, DISP_WIDTH * DISP_HEIGHT * sizeof(*fb));
+
+	if (srcY < NES_SAFE_TOP || srcY >= NES_SAFE_BOTTOM)
+		return;
+
+	cropY = srcY - NES_SAFE_TOP;
+	y0 = (cropY * mDrawHeight) / NES_SAFE_HEIGHT;
+	y1 = ((cropY + 1) * mDrawHeight) / NES_SAFE_HEIGHT;
+	for (uint32_t dy = y0; dy < y1; dy++) {
+		uint32_t logicalY = mDrawTop + dy;
+		uint32_t outY = mDrawFlipped ? (mDrawTop + mDrawHeight - 1 - dy) : logicalY;
+
+		if (outY >= DISP_WIDTH)
+			continue;
+
+		for (uint32_t dx = 0; dx < mDrawWidth; dx++) {
+			uint32_t sx = (dx * NES_DISP_WIDTH) / mDrawWidth;
+			uint32_t outX = mDrawFlipped ? (mDrawLeft + mDrawWidth - 1 - dx) : (mDrawLeft + dx);
+
+			if (outX < DISP_HEIGHT)
+				fb[outX * DISP_WIDTH + (DISP_WIDTH - 1 - outY)] = pixels256[sx];
+		}
 	}
 }

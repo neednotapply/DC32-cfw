@@ -804,7 +804,8 @@ int __not_in_flash_func(InfoNES_HSync)()
    *   -1 : Exit an emulation
    */
 
-  InfoNES_pAPUHsync(!APU_Mute);
+  if (!APU_Mute)
+    InfoNES_pAPUHsync(true);
   util::WorkMeterMark(MARKER_SOUND);
 
   // int tmpv = (PPU_Addr >> 12) + ((PPU_Addr >> 5) << 3);
@@ -820,12 +821,9 @@ int __not_in_flash_func(InfoNES_HSync)()
   if (FrameCnt == 0 &&
       PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
   {
-    if (PPU_Scanline >= 4 && PPU_Scanline < 240 - 4)
-    {
-      InfoNES_PreDrawLine(PPU_Scanline);
-      InfoNES_DrawLine();
-      InfoNES_PostDrawLine(PPU_Scanline);
-    }
+    InfoNES_PreDrawLine(PPU_Scanline);
+    InfoNES_DrawLine();
+    InfoNES_PostDrawLine(PPU_Scanline);
     // todo: 描画しないラインにもスプライトオーバーレジスタとかは反映する必要がある
   }
 
@@ -916,7 +914,8 @@ int __not_in_flash_func(InfoNES_HSync)()
     PPU_R2 |= R2_IN_VBLANK;
 
     // pAPU Sound function in V-Sync
-    InfoNES_pAPUVsync();
+    if (!APU_Mute)
+      InfoNES_pAPUVsync();
 
     // A mapper function in V-Sync
     MapperVSync();

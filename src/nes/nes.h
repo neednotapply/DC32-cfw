@@ -10,11 +10,18 @@ extern "C" {
 
 #define NES_SAVE_RAM_SIZE 0x2000u
 
+enum NesRegion {
+	NesRegionNtsc = 0,
+	NesRegionPal = 1,
+	NesRegionDendy = 2,
+};
+
 struct NesRomInfo {
 	char name[16];
 	uint32_t romSize;
 	uint32_t saveRamSize;
 	uint8_t mapper;
+	enum NesRegion region;
 	bool hasSaveRam;
 };
 

@@ -365,7 +365,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         PPURAM[0x3f10] = PPURAM[0x3f14] = PPURAM[0x3f18] = PPURAM[0x3f1c] =
             PPURAM[0x3f00] = PPURAM[0x3f04] = PPURAM[0x3f08] = PPURAM[0x3f0c] = byData;
         PalTable[0x00] = PalTable[0x04] = PalTable[0x08] = PalTable[0x0c] =
-            PalTable[0x10] = PalTable[0x14] = PalTable[0x18] = PalTable[0x1c] = NesPalette[byData] | 0x8000;
+            PalTable[0x10] = PalTable[0x14] = PalTable[0x18] = PalTable[0x1c] = NesPalette[byData];
       }
       else if (addr & 3)
       {
@@ -439,7 +439,8 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 0x15: /* 0x4015 */
-      InfoNES_pAPUWriteControl(wAddr, byData);
+      if (!APU_Mute)
+        InfoNES_pAPUWriteControl(wAddr, byData);
 #if 0
           /* Unknown */
           if ( byData & 0x10 ) 

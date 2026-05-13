@@ -9,8 +9,8 @@
 #define HARDWARE_WIDTH		240	//hardware
 #define HARDWARE_HEIGHT		320
 
-#define DISP_WIDTH 			216	//window
-#define DISP_HEIGHT			240
+#define DISP_WIDTH 			HARDWARE_WIDTH
+#define DISP_HEIGHT			HARDWARE_HEIGHT
 
 #define DISP_INDEXED_LE		1		//does not matter
 
@@ -26,6 +26,7 @@
 bool dispInit(uint32_t desiredFramerate);
 bool dispOn(void);
 bool dispOff(void);
+void dispSetFramerate(uint32_t desiredFramerate);
 
 void* dispGetFb(void);
 

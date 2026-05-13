@@ -79,6 +79,19 @@ enum CurOp {
 static enum CurOp mCurCardOp = CurentlyIdle;
 static uint32_t mCurCardSec;
 
+static const char *uiPrvNesRegionName(enum NesRegion region)
+{
+	switch (region) {
+		case NesRegionPal:
+			return "PAL";
+		case NesRegionDendy:
+			return "DENDY";
+		case NesRegionNtsc:
+		default:
+			return "NTSC";
+	}
+}
+
 
 enum DialogType {
 	DialogTypeOk,
@@ -2226,6 +2239,12 @@ bool uiSaveSavestate(void)
 			uiPuts(cnv, row, col, "MAPPER:", -1);
 			cnv->foreColor = 15;
 			uiPrintf(cnv, row, col + 55, "%u", nesInfo.mapper);
+			row += 1 + uiPrvGlyphHeight(cnv);
+
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "REGION:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, row, col + 55, uiPrvNesRegionName(nesInfo.region), -1);
 			row += 1 + uiPrvGlyphHeight(cnv);
 		}
 		else {

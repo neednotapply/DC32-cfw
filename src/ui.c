@@ -80,6 +80,8 @@ static enum CurOp mCurCardOp = CurentlyIdle;
 static uint32_t mCurCardSec;
 static bool mToolExitEnabled;
 static bool mToolExitRequested;
+static const char mUiAppTitle[] = "DC32-cfw";
+static const char *mUiHeaderTitle = "Main Menu";
 
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
@@ -126,6 +128,27 @@ struct BitBufferR {
 static uint_fast8_t uiPrvGlyphHeight(const struct Canvas *cnv)
 {
 	return fontGetHeight((enum Font)cnv->font);
+}
+
+static uint_fast8_t uiPrvContentTop(struct Canvas *cnv)
+{
+	(void)cnv;
+	return fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
+}
+
+static uint_fast8_t uiPrvMenuItemHeight(struct Canvas *cnv)
+{
+	return uiPrvGlyphHeight(cnv) + 1;
+}
+
+static uint_fast8_t uiPrvMenuRow(struct Canvas *cnv, uint_fast8_t idx)
+{
+	return uiPrvContentTop(cnv) + idx * uiPrvMenuItemHeight(cnv);
+}
+
+static void uiPrvSetHeaderTitle(const char *title)
+{
+	mUiHeaderTitle = title ? title : mUiAppTitle;
 }
 
 static uint_fast8_t uiPrvDrawOneChar(struct Canvas *cnv, int32_t r, int32_t c, wchar_t chr)	//return char width
@@ -449,6 +472,86 @@ static void uiPrintf(struct Canvas *cnv, int32_t r, int32_t c, const char *forma
 
 #endif
 
+static uint32_t uiPrvDrawOneCharScaled(struct Canvas *cnv, int32_t r, int32_t c, wchar_t chr, uint_fast8_t scale)
+{
+	struct FontGlyphInfo gi;
+	uint_fast8_t dr, dc;
+	int8_t foreColor = cnv->foreColor;
+
+	if (!fontGetGlyphInfo(&gi, (enum Font)cnv->font, chr))
+		return 0;
+	if (!gi.src)
+		return (uint32_t)gi.width * scale;
+
+	for (dr = 0; dr < gi.height; dr++) {
+		for (dc = 0; dc < gi.width; dc++) {
+			if (fontGetGlyphPixel(&gi, dr, dc)) {
+				cnv->foreColor = foreColor;
+				uiPrvFillRect(cnv, c + dc * scale, r + dr * scale, c + (dc + 1) * scale - 1, r + (dr + 1) * scale - 1);
+			}
+		}
+	}
+
+	cnv->foreColor = foreColor;
+	return (uint32_t)gi.width * scale;
+}
+
+static uint32_t uiPrvScaledCharsWidth(struct Canvas *cnv, const char *chars, uint_fast8_t scale)
+{
+	struct FontGlyphInfo gi;
+	bool needsPreSpace = false;
+	uint32_t width = 0;
+	char ch;
+
+	while ((ch = *chars++) != 0) {
+		if (needsPreSpace && fontGetGlyphInfo(&gi, (enum Font)cnv->font, 0x2009))
+			width += (uint32_t)gi.width * scale;
+		needsPreSpace = ch != ' ';
+		if (fontGetGlyphInfo(&gi, (enum Font)cnv->font, (unsigned char)ch))
+			width += (uint32_t)gi.width * scale;
+	}
+
+	return width;
+}
+
+static void uiPrvDrawScaledText(struct Canvas *cnv, int32_t r, int32_t c, const char *str, uint_fast8_t scale)
+{
+	struct FontGlyphInfo gi;
+	bool needsPreSpace = false;
+	char ch;
+
+	while ((ch = *str++) != 0) {
+		if (needsPreSpace && fontGetGlyphInfo(&gi, (enum Font)cnv->font, 0x2009))
+			c += (uint32_t)gi.width * scale;
+		needsPreSpace = ch != ' ';
+		c += uiPrvDrawOneCharScaled(cnv, r, c, (unsigned char)ch, scale);
+	}
+}
+
+static void uiPrvSplash(struct Canvas *cnv)
+{
+	uint_fast8_t scale;
+	uint32_t width, height;
+	uint64_t end;
+
+	memset(cnv->framebuffer, 0, cnv->w * cnv->h * DISP_BPP / 8);
+	cnv->font = FontLarge;
+	cnv->foreColor = 9;
+	cnv->backColor = 0;
+
+	for (scale = 4; scale > 1; scale--) {
+		width = uiPrvScaledCharsWidth(cnv, mUiAppTitle, scale);
+		if (width <= cnv->w - 10)
+			break;
+	}
+	width = uiPrvScaledCharsWidth(cnv, mUiAppTitle, scale);
+	height = (uint32_t)uiPrvGlyphHeight(cnv) * scale;
+	uiPrvDrawScaledText(cnv, (cnv->h - height) / 2, (cnv->w - width) / 2, mUiAppTitle, scale);
+
+	end = getTime() + TICKS_PER_SECOND;
+	while (getTime() < end);
+}
+
 static uint_fast16_t uiPrvRecvKeypress(void)
 {
 	uint_fast16_t val, prevVal = 0;
@@ -508,7 +611,7 @@ static bool uiPrvCenterExitPressedRaw(void)
 
 static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint_fast16_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
 {
-	uint_fast8_t i, itemHeight = uiPrvGlyphHeight(cnv) + 1, row = cnv->h - numChoices * itemHeight, fore = cnv->foreColor, back = cnv->backColor;
+	uint_fast8_t i, itemHeight = uiPrvMenuItemHeight(cnv), row = uiPrvContentTop(cnv), fore = cnv->foreColor, back = cnv->backColor;
 	uint_fast16_t gotKey;
 	uint_fast16_t btnsMask = btnsMaskP ? *btnsMaskP : KEY_BIT_A;
 	
@@ -554,7 +657,8 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 
 static void uiPrvReset(struct Canvas *cnv, bool invert)
 {
-	static const char windowTitle[] = "DC32-cfw v1.69.6.7";
+	const char *windowTitle = mUiHeaderTitle;
+	uint32_t titleLen, titleWidth;
 	memset(cnv->framebuffer, invert ? 0xff : 0, cnv->w * cnv->h * DISP_BPP / 8);
 	
 	//draw title
@@ -563,7 +667,9 @@ static void uiPrvReset(struct Canvas *cnv, bool invert)
 	uiPrvFillRect(cnv, 0, 0, cnv->w - 1, uiPrvGlyphHeight(cnv));
 	cnv->foreColor = invert ? 9 : 0;
 	cnv->backColor = invert ? 0 : 9;
-	uiPrintf(cnv, 0, (cnv->w - uiPrvCharsWidth(cnv, windowTitle, sizeof(windowTitle) - 1)) / 2, windowTitle);
+	titleLen = uiPrvCharsFit(cnv, windowTitle, strlen(windowTitle), cnv->w > 2 ? cnv->w - 2 : cnv->w);
+	titleWidth = uiPrvCharsWidth(cnv, windowTitle, titleLen);
+	uiPuts(cnv, 0, titleWidth < cnv->w ? (cnv->w - titleWidth) / 2 : 0, windowTitle, titleLen);
 
 	//set colors for ui
 	cnv->font = FontMedium;
@@ -872,6 +978,11 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		}
 		return 0;
 	}
+
+	static bool uiPrvHiddenEntry(const char *name, uint8_t attrs)
+	{
+		return (attrs & FATFS_ATTR_HIDDEN) || name[0] == '.';
+	}
 	
 	static void sortNames(struct RomOption **headP, struct RomOption **tailP, uint32_t count)
 	{
@@ -940,7 +1051,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 			
 			//pr(" file '%s', %lu bytes, attr %02xh\n", fname, fileSz, attrs);
 			
-			if (attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR))
+			if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || uiPrvHiddenEntry(fname, attrs))
 				continue;
 			
 			//roms are a power of 2 in size and must be at laest 8K
@@ -1131,9 +1242,11 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 	#define UI_BROWSER_MAX_DEPTH		16
 	#define UI_PICK_FILE_NAME_BUF_SZ		64
 
-	static bool uiPrvIsDotDir(const char *name)
+	static bool uiPrvFileListComesBefore(const struct MusicOption *option, const char *name, bool isDir)
 	{
-		return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
+		if (option->isDir != isDir)
+			return option->isDir;
+		return strsCaselesslyCompareUtf(option->name, name, 0xffffffff) <= 0;
 	}
 
 	static bool uiPrvFileListAppend(struct UiFileListCtx *ctx, const char *fname, uint32_t fileSz, bool isDir, const struct FatFileLocator *locator)
@@ -1152,7 +1265,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		option->isDir = isDir;
 		memcpy(option->name, fname, nameLen + 1);
 
-		while (before && strsCaselesslyCompareUtf(before->name, fname, 0xffffffff) <= 0) {
+		while (before && uiPrvFileListComesBefore(before, fname, isDir)) {
 			after = before;
 			before = before->next;
 		}
@@ -1236,14 +1349,11 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		uint8_t attrs;
 
 		while (fatfsDirRead(dir, entry->name, &entry->size, &attrs, &entry->locator)) {
-			if (attrs & FATFS_ATTR_VOL_LBL)
+			if ((attrs & FATFS_ATTR_VOL_LBL) || uiPrvHiddenEntry(entry->name, attrs))
 				continue;
 			if (attrs & FATFS_ATTR_DIR) {
-				if (!uiPrvIsDotDir(entry->name)) {
-					entry->isDir = true;
-					return true;
-				}
-				continue;
+				entry->isDir = true;
+				return true;
 			}
 			if (!filterF || filterF(entry->name)) {
 				entry->isDir = false;
@@ -1393,7 +1503,7 @@ reload_dir:
 		selectedItem = 0;
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
 		itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
-		pathTop = fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
+		pathTop = uiPrvContentTop(cnv);
 		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
 		if (!itemsOnscreen) {
@@ -1584,8 +1694,8 @@ static uint8_t uiPrvLedColorFromMenu(uint_fast8_t color)
 static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
-	uint_fast8_t itemHeight;
 
+	uiPrvSetHeaderTitle("LEDs");
 	if (settings->ledMode >= LedModeNumModes)
 		settings->ledMode = LedModeOff;
 	if (settings->ledSpeed < LED_SPEED_MENU_MIN || settings->ledSpeed > LED_SPEED_MENU_MAX)
@@ -1593,7 +1703,6 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 	settings->ledBrightness = uiPrvLedBrightnessFromMenu(uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
 	uiPrvReset(cnv, false);
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 	while (1) {
 
@@ -1604,53 +1713,55 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 
 		doneOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 
 		ledPatternOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "PATTERN:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, ledPatternOption), 10, "PATTERN:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%s        ", badgeLedsModeName(settings->ledMode));
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ledPatternOption), 111, "%s        ", badgeLedsModeName(settings->ledMode));
 
 		ledColorOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "COLOR:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, ledColorOption), 10, "COLOR:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%s        ", badgeLedsColorName(settings->ledColor));
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ledColorOption), 111, "%s        ", badgeLedsColorName(settings->ledColor));
 
 		if (settings->ledColor == LedColorCustom) {
 			ledRedOption = numOptions++;
 			cnv->foreColor = 11;
-			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED RED:", -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, ledRedOption), 10, "LED RED:", -1);
 			cnv->foreColor = 15;
-			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledRed));
+			uiPrintf(cnv, uiPrvMenuRow(cnv, ledRedOption), 111, "%u         ", uiPrvLedColorToMenu(settings->ledRed));
 
 			ledGreenOption = numOptions++;
 			cnv->foreColor = 11;
-			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED GREEN:", -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, ledGreenOption), 10, "LED GREEN:", -1);
 			cnv->foreColor = 15;
-			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledGreen));
+			uiPrintf(cnv, uiPrvMenuRow(cnv, ledGreenOption), 111, "%u         ", uiPrvLedColorToMenu(settings->ledGreen));
 
 			ledBlueOption = numOptions++;
 			cnv->foreColor = 11;
-			uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BLUE:", -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, ledBlueOption), 10, "LED BLUE:", -1);
 			cnv->foreColor = 15;
-			uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
+			uiPrintf(cnv, uiPrvMenuRow(cnv, ledBlueOption), 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
 		}
 
 		ledSpeedOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED SPEED:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, ledSpeedOption), 10, "LED SPEED:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->ledSpeed);
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ledSpeedOption), 111, "%u         ", settings->ledSpeed);
 
 		ledBrightnessOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "LED BRIGHT:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, ledBrightnessOption), 10, "LED BRIGHT:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedBrightnessToMenu(settings->ledBrightness));
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ledBrightnessOption), 111, "%u         ", uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
-		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		if (selOption >= numOptions)
+			selOption = numOptions - 1;
+		selOption = uiPrvMenu(cnv, selOption, numOptions, &button);
 		if (uiPrvToolExitRequested())
 			return;
 		if (button == KEY_BIT_B || selOption == doneOption)
@@ -1754,10 +1865,9 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
-	uint_fast8_t itemHeight;
 
+	uiPrvSetHeaderTitle("Screen");
 	uiPrvReset(cnv, false);
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 	while (1) {
 
@@ -1768,31 +1878,31 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 
 		doneOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 
 	#ifdef DISP_CONTRAST_ADJUSTABLE
 		contrastOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "CONTRAST:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, contrastOption), 10, "CONTRAST:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->contrast);
+		uiPrintf(cnv, uiPrvMenuRow(cnv, contrastOption), 111, "%u         ", settings->contrast);
 	#endif
 
 		rotationOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "ROTATION:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, rotationOption), 10, "ROTATION:", -1);
 		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->rotation ? "FLIPPED  " : "NORMAL   ", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, rotationOption), 111, settings->rotation ? "FLIPPED  " : "NORMAL   ", -1);
 
 	#ifdef DISP_BRIGHTNESS_ADJUSTABLE
 		brightnessOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "BRIGHTNESS:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, brightnessOption), 10, "BRIGHTNESS:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", settings->brightness);
+		uiPrintf(cnv, uiPrvMenuRow(cnv, brightnessOption), 111, "%u         ", settings->brightness);
 	#endif
 
-		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		selOption = uiPrvMenu(cnv, selOption, numOptions, &button);
 		if (uiPrvToolExitRequested())
 			return;
 		if (button == KEY_BIT_B || selOption == doneOption)
@@ -1844,10 +1954,9 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 {
 	bool restartCurGame = false;
 	int_fast8_t selOption = 0;
-	uint_fast8_t itemHeight;
 
+	uiPrvSetHeaderTitle("Game Settings");
 	uiPrvReset(cnv, false);
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 	while (1) {
 
@@ -1864,27 +1973,27 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 
 		doneOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 
 		cgbOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "COLOR:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 10, "COLOR:", -1);
 		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->actLikeGBC ? "YES       " : "NO       ", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 111, settings->actLikeGBC ? "YES       " : "NO       ", -1);
 
 		upscaleOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "UPSCALE:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 10, "UPSCALE:", -1);
 		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, settings->upscale ? "YES       " : "NO       ", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 111, settings->upscale ? "YES       " : "NO       ", -1);
 
 		speedOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 10, "SPEED:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 10, "SPEED:", -1);
 		cnv->foreColor = 15;
-		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, speedNames[settings->speed], sizeof(speedNames[settings->speed]));
+		uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 111, speedNames[settings->speed], sizeof(speedNames[settings->speed]));
 
-		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		selOption = uiPrvMenu(cnv, selOption, numOptions, &button);
 		if (uiPrvToolExitRequested())
 			return restartCurGame;
 		if (button == KEY_BIT_B || selOption == doneOption)
@@ -1927,9 +2036,9 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 {
 	bool restartCurGame = false;
 	struct Settings settings;
-	uint_fast8_t itemHeight;
 	uint_fast8_t numOptions = exitOnDone ? 4 : 3;
 
+	uiPrvSetHeaderTitle("Settings");
 	settingsGet(&settings);
 	if (settings.ledMode >= LedModeNumModes)
 		settings.ledMode = LedModeOff;
@@ -1937,18 +2046,18 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 		settings.ledSpeed = 4;
 
 	uiPrvReset(cnv, false);
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 	while (1) {
 		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, ledSettingsOption = exitOnDone ? 2 : 1, screenOption = exitOnDone ? 3 : 2, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
+		uiPrvSetHeaderTitle("Settings");
 		uiPrvReset(cnv, false);
 		if (exitOnDone)
-			uiPuts(cnv, cnv->h - (numOptions - doneOption) * itemHeight, 10, "DONE", -1);
-		uiPuts(cnv, cnv->h - (numOptions - gameOption) * itemHeight, 10, "Game", -1);
-		uiPuts(cnv, cnv->h - (numOptions - ledSettingsOption) * itemHeight, 10, "LEDs", -1);
-		uiPuts(cnv, cnv->h - (numOptions - screenOption) * itemHeight, 10, "Screen", -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, gameOption), 10, "Game", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, screenOption), 10, "Screen", -1);
 
 		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
 		if (uiPrvToolExitRequested()) {
@@ -2169,6 +2278,7 @@ bool uiSaveSavestate(void)
 			bufSz = bufMem.size;
 		bufSz &=~ (QSPI_ERASE_GRANULARITY - 1);
 		
+		uiPrvSetHeaderTitle("Loading");
 		cnv->font = FontLarge;
 		row = uiPrvGlyphHeight(cnv) + 1;
 		uiPrvReset(cnv, false);
@@ -2350,6 +2460,7 @@ bool uiSaveSavestate(void)
 			goto out_close_file;
 		}
 
+		uiPrvSetHeaderTitle("Select Game");
 		cnv->font = FontLarge;
 		row = uiPrvGlyphHeight(cnv) + 1;
 		uiPrvReset(cnv, false);
@@ -2487,6 +2598,7 @@ bool uiSaveSavestate(void)
 		char name[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ret = false;
 		
+		uiPrvSetHeaderTitle("Select Game");
 		vol = uiPrvMountCardEx(cnv, false, forceSdReinit);
 		if (!vol)
 			return false;
@@ -2720,13 +2832,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	{
 		uint32_t row;
 
+		uiPrvSetHeaderTitle(title);
 		uiPrvReset(cnv, false);
-		cnv->font = FontLarge;
-		row = uiPrvGlyphHeight(cnv) + 1;
-		uiPuts(cnv, row, 10, title, -1);
-		row += uiPrvGlyphHeight(cnv) + 2;
-
 		cnv->font = FontMedium;
+		row = uiPrvContentTop(cnv);
 		cnv->foreColor = 11;
 		uiPrintf(cnv, row, 10, "Code %u", codeIdx);
 		row += uiPrvGlyphHeight(cnv) + 1;
@@ -3762,17 +3871,17 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static const char *uiPrvIrKnownActionMenu(struct Canvas *cnv, const struct IrUniversalRemote *remote)
 	{
-		uint_fast8_t itemHeight, i, selOption;
+		uint_fast8_t i, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		if (!remote->numButtons)
 			return NULL;
 
+		uiPrvSetHeaderTitle(remote->name);
 		uiPrvReset(cnv, false);
-		itemHeight = uiPrvGlyphHeight(cnv) + 1;
 		for (i = 0; i < remote->numButtons; i++)
-			uiPuts(cnv, cnv->h - (remote->numButtons + 1 - i) * itemHeight, 10, remote->buttons[i], -1);
-		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, remote->buttons[i], -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, remote->numButtons), 10, "Back", -1);
 
 		selOption = uiPrvMenu(cnv, 0, remote->numButtons + 1, &button);
 		if (uiPrvToolExitRequested())
@@ -3919,15 +4028,15 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	static bool uiPrvIrTools(struct Canvas *cnv)
 	{
 		while (1) {
-			uint_fast8_t itemHeight, selOption, i;
+			uint_fast8_t selOption, i;
 			uint_fast8_t numRemotes = sizeof(mIrUniversalRemotes) / sizeof(*mIrUniversalRemotes);
 			uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
+			uiPrvSetHeaderTitle("Universal IR");
 			uiPrvReset(cnv, false);
-			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 			for (i = 0; i < numRemotes; i++)
-				uiPuts(cnv, cnv->h - (numRemotes - i) * itemHeight, 10, mIrUniversalRemotes[i].name, -1);
+				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, mIrUniversalRemotes[i].name, -1);
 
 			selOption = uiPrvMenu(cnv, 0, numRemotes, &button);
 			if (uiPrvToolExitRequested())
@@ -3945,11 +4054,6 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt");
 	}
 
-	static uint_fast8_t uiPrvContentTop(struct Canvas *cnv)
-	{
-		return fontGetHeight(FontLarge) + fontGetHeight(FontMedium) / 4;
-	}
-
 	struct MusicListCtx {
 		struct FatfsVol *vol;
 		struct MusicOption *nextAvail;
@@ -3960,11 +4064,6 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool overflow;
 		char fname[FATFS_NAME_BUF_LEN];
 	};
-
-	static bool uiPrvMusicIsDotDir(const char *name)
-	{
-		return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
-	}
 
 	static bool uiPrvMusicListAppend(struct MusicListCtx *ctx, const char *fname, uint32_t fileSz, bool isDir, const struct FatFileLocator *locator)
 	{
@@ -3983,7 +4082,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		option->isDir = isDir;
 		memcpy(option->name, fname, nameLen + 1);
 
-		while (before && strsCaselesslyCompareUtf(before->name, fname, 0xffffffff) <= 0) {
+		while (before && uiPrvFileListComesBefore(before, fname, isDir)) {
 			after = before;
 			before = before->next;
 		}
@@ -4015,12 +4114,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		while (fatfsDirRead(dir, ctx->fname, &fileSz, &attrs, &locator)) {
 			if (!(++seen & 0x0f))
 				badgeLedsTick();
-			if (attrs & FATFS_ATTR_VOL_LBL)
+			if ((attrs & FATFS_ATTR_VOL_LBL) || uiPrvHiddenEntry(ctx->fname, attrs))
 				continue;
 
 			if (attrs & FATFS_ATTR_DIR) {
-				if (uiPrvMusicIsDotDir(ctx->fname))
-					continue;
 				if (!uiPrvMusicListAppend(ctx, ctx->fname, fileSz, true, &locator))
 					break;
 				continue;
@@ -4324,6 +4421,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool overflow = false, haveDirLoc = false;
 		struct FontGlyphInfo gi;
 
+		uiPrvSetHeaderTitle("Music");
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
 		audioPwmSetVolume(settings.musicVolume);
@@ -4372,6 +4470,7 @@ reload_dir:
 				uint_fast8_t firstRow = 0, scrollWidth;
 				uint32_t skipItems;
 
+				uiPrvSetHeaderTitle("Music");
 				uiPrvReset(cnv, false);
 				uiPrvDrawTruncText(cnv, pathTop, 10, cnv->w - 10, path);
 				scrollWidth = totalItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, totalItems, topItem, itemsOnscreen) : 0;
@@ -4539,12 +4638,10 @@ reload_dir:
 		if (data->forceDraw || status->lineNo != data->lastLine || now - data->lastDraw > TICKS_PER_SECOND / 4) {
 			uint32_t row, pct = status->fileSize ? status->bytesRead * 100 / status->fileSize : 0;
 
+			uiPrvSetHeaderTitle("BadUSB");
 			uiPrvReset(cnv, false);
-			cnv->font = FontLarge;
-			row = uiPrvGlyphHeight(cnv) + 1;
-			uiPuts(cnv, row, 10, "BadUSB", -1);
-			row += uiPrvGlyphHeight(cnv) + 2;
 			cnv->font = FontMedium;
+			row = uiPrvContentTop(cnv);
 			uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
 			row += uiPrvGlyphHeight(cnv) + 2;
 			uiPrintf(cnv, row, 10, "Line %u  %u%%", (unsigned)status->lineNo, (unsigned)pct);
@@ -4564,9 +4661,8 @@ reload_dir:
 		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
 		struct Canvas *cnv = data->cnv;
 
+		uiPrvSetHeaderTitle("BadUSB Paused");
 		uiPrvReset(cnv, false);
-		cnv->font = FontLarge;
-		uiPuts(cnv, uiPrvGlyphHeight(cnv) + 1, 10, "BadUSB Paused", -1);
 		cnv->font = FontMedium;
 		uiPuts(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "A = Continue", -1);
 		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Cancel", -1);
@@ -4599,6 +4695,7 @@ reload_dir:
 		char msg[96];
 		bool ok = false;
 
+		uiPrvSetHeaderTitle("BadUSB");
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
 			uiAlert(cnv, "Cannot open BadUSB script", DialogTypeOk);
@@ -4642,6 +4739,7 @@ reload_dir:
 		char name[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ok = false;
 
+		uiPrvSetHeaderTitle("BadUSB");
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
@@ -4679,12 +4777,10 @@ static void uiPrvAutoClickerSettingsDraw(struct Canvas *cnv, uint_fast8_t select
 {
 	uint_fast8_t row;
 
+	uiPrvSetHeaderTitle("AutoClicker");
 	uiPrvReset(cnv, false);
-	cnv->font = FontLarge;
-	row = uiPrvGlyphHeight(cnv) + 1;
-	uiPuts(cnv, row, 10, "AutoClicker", -1);
-	row += uiPrvGlyphHeight(cnv) + 3;
 	cnv->font = FontMedium;
+	row = uiPrvContentTop(cnv);
 	cnv->foreColor = 15;
 	uiPrintf(cnv, row, 18, "Speed: %s", mAutoClickerSpeeds[speedIdx].name);
 	uiPrvDrawOneChar(cnv, row, 2, selected == 0 ? MENU_SELECTION_CHAR : ' ');
@@ -4745,12 +4841,10 @@ static void uiPrvAutoClickerDrawRun(struct Canvas *cnv, const char *status, cons
 {
 	uint_fast8_t row;
 
+	uiPrvSetHeaderTitle("AutoClicker");
 	uiPrvReset(cnv, false);
-	cnv->font = FontLarge;
-	row = uiPrvGlyphHeight(cnv) + 1;
-	uiPuts(cnv, row, 10, "AutoClicker", -1);
-	row += uiPrvGlyphHeight(cnv) + 3;
 	cnv->font = FontMedium;
+	row = uiPrvContentTop(cnv);
 	cnv->foreColor = 15;
 	uiPuts(cnv, row, 10, status, -1);
 	row += uiPrvGlyphHeight(cnv) + 1;
@@ -4843,6 +4937,23 @@ enum UiToolId {
 	UiToolNum,
 	UiToolRunGame,
 };
+
+static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
+{
+	switch (tool) {
+		case UiToolBrowser: return "File Browser";
+		case UiToolIr: return "Universal IR";
+		case UiToolBadUsb: return "BadUSB";
+		case UiToolAutoClicker: return "AutoClicker";
+		case UiToolMusic: return "Music";
+		case UiToolGame:
+		case UiToolRunGame:
+			return "Game";
+		case UiToolSettings: return "Settings";
+		case UiToolPowerOff: return "Power Off";
+		default: return "Main Menu";
+	}
+}
 
 static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 {
@@ -4971,13 +5082,13 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	mToolExitEnabled = false;
 	uiPrvClearToolExit();
 
+	uiPrvSetHeaderTitle("Main Menu");
 	uiPrvReset(cnv, false);
-	uiPuts(cnv, uiPrvContentTop(cnv), 10, "Main Menu", -1);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 	for (i = 0; i < UiToolNum; i++) {
 		if (toolOrder[i] == curTool)
 			curOption = i;
-		uiPuts(cnv, cnv->h - (UiToolNum - i) * itemHeight, 10, names[toolOrder[i]], -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, names[toolOrder[i]], -1);
 	}
 
 	selOption = uiPrvMenu(cnv, curOption, UiToolNum, &button);
@@ -4988,7 +5099,7 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 {
 	enum UiBrowserOpenWithId ids[8];
 	const char *labels[8];
-	uint_fast8_t numOptions = 0, itemHeight, i, selOption;
+	uint_fast8_t numOptions = 0, i, selOption;
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 	if (uiPrvIrRemoteFileName(ref->name)) {
@@ -5016,29 +5127,12 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 		return UiBrowserOpenNone;
 	if (numOptions == 1)
 		return ids[0];
-	{
-		uint_fast8_t a, b;
 
-		for (a = 0; a + 1 < numOptions; a++) {
-			for (b = a + 1; b < numOptions; b++) {
-				if (strsCaselesslyCompareUtf(labels[a], labels[b], 0xffffffff) > 0) {
-					const char *label = labels[a];
-					enum UiBrowserOpenWithId id = ids[a];
-
-					labels[a] = labels[b];
-					ids[a] = ids[b];
-					labels[b] = label;
-					ids[b] = id;
-				}
-			}
-		}
-	}
-
+	uiPrvSetHeaderTitle("Open With");
 	uiPrvReset(cnv, false);
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 	for (i = 0; i < numOptions; i++)
-		uiPuts(cnv, cnv->h - (numOptions + 1 - i) * itemHeight, 10, labels[i], -1);
-	uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+	uiPuts(cnv, uiPrvMenuRow(cnv, numOptions), 10, "Cancel", -1);
 
 	selOption = uiPrvMenu(cnv, 0, numOptions + 1, &button);
 	if (uiPrvToolExitRequested())
@@ -5059,24 +5153,29 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 
 	switch (uiPrvBrowserOpenWith(cnv, ref)) {
 	case UiBrowserOpenIrButtonSpam:
+		uiPrvSetHeaderTitle("Universal IR");
 		(void)uiPrvIrButtonSpamLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
 
 	case UiBrowserOpenIrPowerSpam:
+		uiPrvSetHeaderTitle("Power");
 		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, NULL, "Power");
 		return UiToolBrowser;
 
 	case UiBrowserOpenIrMuteSpam:
+		uiPrvSetHeaderTitle("Mute");
 		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, "Mute", "Mute");
 		return UiToolBrowser;
 
 	case UiBrowserOpenBadUsb:
+		uiPrvSetHeaderTitle("BadUSB");
 		(void)uiPrvRunBadUsbLocator(cnv, vol, &ref->locator, ref->name);
 		return UiToolBrowser;
 
 	case UiBrowserOpenMusic: {
 		struct Settings settings;
 
+		uiPrvSetHeaderTitle("Music");
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
 		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings);
@@ -5085,6 +5184,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	}
 
 	case UiBrowserOpenGame:
+		uiPrvSetHeaderTitle("Select Game");
 		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
 		return UiToolBrowser;
@@ -5121,6 +5221,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	browserPath[0] = '/';
 	browserPath[1] = 0;
 
+	uiPrvSetHeaderTitle("File Browser");
 	uiPrvReset(cnv, false);
 	uiPrvDrawWrappedString(cnv, "Opening File Browser...", 32, 10);
 	vol = uiPrvMountCard(cnv, false);
@@ -5128,6 +5229,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 		return UiToolBrowser;
 
 	while (1) {
+		uiPrvSetHeaderTitle("File Browser");
 		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", true, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
 			break;
 		}
@@ -5203,9 +5305,8 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 			GameToolOptionSelect,
 			GameToolOptionSwitch,
 		};
-		uint_fast8_t optionIds[3], numOptions = 0, selOption, i, a, b;
+		uint_fast8_t optionIds[3], numOptions = 0, selOption, i;
 		const char *labels[3];
-		uint_fast8_t itemHeight;
 		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
 		uint32_t ramSz = 0;
@@ -5215,8 +5316,8 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (uiPrvToolExitRequested())
 			return UiToolBrowser;
 
+		uiPrvSetHeaderTitle("Game");
 		uiPrvReset(cnv, false);
-		itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 		if (validRom) {
 			labels[numOptions] = "Run game";
@@ -5229,24 +5330,11 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		labels[numOptions] = "Main Menu";
 		optionIds[numOptions++] = GameToolOptionSwitch;
 
-		for (a = 0; a + 1 < numOptions; a++) {
-			for (b = a + 1; b < numOptions; b++) {
-				if (strsCaselesslyCompareUtf(labels[a], labels[b], 0xffffffff) > 0) {
-					const char *label = labels[a];
-					uint_fast8_t id = optionIds[a];
-
-					labels[a] = labels[b];
-					optionIds[a] = optionIds[b];
-					labels[b] = label;
-					optionIds[b] = id;
-				}
-			}
-		}
 		for (i = 0; i < numOptions; i++) {
 			if (optionIds[i] == GameToolOptionRun)
-				uiPrintf(cnv, cnv->h - (numOptions - i) * itemHeight, 10, "Run game '%s'", name);
+				uiPrintf(cnv, uiPrvMenuRow(cnv, i), 10, "Run game '%s'", name);
 			else
-				uiPuts(cnv, cnv->h - (numOptions - i) * itemHeight, 10, labels[i], -1);
+				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
 		}
 
 		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
@@ -5276,26 +5364,25 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 enum UiGameAction uiGameMenu(void)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	uint_fast8_t itemHeight;
 	enum {
 		GameMenuOptionRun,
 		GameMenuOptionSelect,
 		GameMenuOptionSettings,
 		GameMenuOptionSwitch,
 	};
-	uint_fast8_t optionIds[4], numOptions = 0, selOption, i, a, b;
+	uint_fast8_t optionIds[4], numOptions = 0, selOption, i;
 	const char *labels[4];
 	char name[ROM_NAME_LEN + 1];
 	uint32_t ramSz = 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
+	uiPrvSetHeaderTitle("Game");
 	uiPrvReset(cnv, false);
 
 	if (!uiSaveSavestate())
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 
-	itemHeight = uiPrvGlyphHeight(cnv) + 1;
 	if (validRom) {
 		labels[numOptions] = "Run game";
 		optionIds[numOptions++] = GameMenuOptionRun;
@@ -5309,24 +5396,11 @@ enum UiGameAction uiGameMenu(void)
 	labels[numOptions] = "Main Menu";
 	optionIds[numOptions++] = GameMenuOptionSwitch;
 
-	for (a = 0; a + 1 < numOptions; a++) {
-		for (b = a + 1; b < numOptions; b++) {
-			if (strsCaselesslyCompareUtf(labels[a], labels[b], 0xffffffff) > 0) {
-				const char *label = labels[a];
-				uint_fast8_t id = optionIds[a];
-
-				labels[a] = labels[b];
-				optionIds[a] = optionIds[b];
-				labels[b] = label;
-				optionIds[b] = id;
-			}
-		}
-	}
 	for (i = 0; i < numOptions; i++) {
 		if (optionIds[i] == GameMenuOptionRun)
-			uiPrintf(cnv, cnv->h - (numOptions - i) * itemHeight, 10, "Run game '%s'", name);
+			uiPrintf(cnv, uiPrvMenuRow(cnv, i), 10, "Run game '%s'", name);
 		else
-			uiPuts(cnv, cnv->h - (numOptions - i) * itemHeight, 10, labels[i], -1);
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
 	}
 
 	selOption = uiPrvMenu(cnv, 0, numOptions, &button);
@@ -5386,6 +5460,8 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
 	enum UiToolId activeTool = UiToolBrowser;
 
+	uiPrvSplash(cnv);
+	uiPrvSetHeaderTitle("Main Menu");
 	uiPrvReset(cnv, false);
 	toolWorkspaceBegin();
 	if (bootGuardRecoveredMode() != BootGuardModeNone) {
@@ -5394,6 +5470,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 	}
 	while (1) {
 		activeTool = uiPrvToolSwitcher(cnv, activeTool);
+		uiPrvSetHeaderTitle(uiPrvToolHeaderTitle(activeTool));
 		mToolExitEnabled = true;
 		uiPrvClearToolExit();
 

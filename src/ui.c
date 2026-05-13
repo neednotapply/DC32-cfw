@@ -27,6 +27,7 @@
 #include "gb.h"
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
+#define UI_GAME_TITLE_BUF_SZ			64
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -4413,6 +4414,114 @@ static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorS
 	return true;
 }
 
+static void uiPrvCopyGameTitleFallback(char *dst, uint32_t dstLen, const char *fallbackName)
+{
+	if (!dstLen)
+		return;
+
+	if (!fallbackName)
+		fallbackName = "";
+
+	while (--dstLen && *fallbackName)
+		*dst++ = *fallbackName++;
+	*dst = 0;
+}
+
+#ifndef NO_SD_CARD
+static void uiPrvTitleFromGamePath(char *dst, uint32_t dstLen, const char *path, const char *fallbackName)
+{
+	const char *base = uiPrvBaseName(path);
+	const char *end = base + strlen(base);
+	const char *dot, *src;
+	uint32_t outLen = 0, parenDepth = 0;
+	bool pendingSpace = false;
+
+	if (!dstLen)
+		return;
+
+	for (dot = end; dot != base; dot--) {
+		if (dot[-1] == '.') {
+			end = dot - 1;
+			break;
+		}
+	}
+
+	while (base != end && (*base == ' ' || *base == '\t'))
+		base++;
+	while (end != base && (end[-1] == ' ' || end[-1] == '\t'))
+		end--;
+
+	for (src = base; src != end; src++) {
+		char ch = *src;
+
+		if (ch == '(') {
+			parenDepth++;
+			continue;
+		}
+		if (ch == ')') {
+			if (parenDepth)
+				parenDepth--;
+			continue;
+		}
+		if (parenDepth)
+			continue;
+
+		if (ch == ' ' || ch == '\t') {
+			if (outLen)
+				pendingSpace = true;
+			continue;
+		}
+
+		if (pendingSpace) {
+			if (outLen + 2 >= dstLen)
+				break;
+			dst[outLen++] = ' ';
+		}
+		else if (outLen + 1 >= dstLen)
+			break;
+
+		pendingSpace = false;
+		dst[outLen++] = ch;
+	}
+
+	dst[outLen] = 0;
+	if (!outLen)
+		uiPrvCopyGameTitleFallback(dst, dstLen, fallbackName);
+}
+#endif
+
+static void uiPrvCurrentGameTitle(char *dst, uint32_t dstLen, const char *fallbackName)
+{
+#ifndef NO_SD_CARD
+	if (uiPrvHaveGamePath()) {
+		uiPrvTitleFromGamePath(dst, dstLen, (const char*)QSPI_FILENAME_START, fallbackName);
+		return;
+	}
+#endif
+
+	uiPrvCopyGameTitleFallback(dst, dstLen, fallbackName);
+}
+
+static const char *uiPrvCurrentGameConsoleName(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+	return settings.actLikeGBC ? "GBC" : "GB";
+}
+
+static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *title, bool resume)
+{
+	char label[96];
+
+	if (resume)
+		(void)sprintf(label, "Resume %s (%s)", title, uiPrvCurrentGameConsoleName());
+	else
+		(void)sprintf(label, "Play '%s'", title);
+
+	uiPrvDrawTruncText(cnv, row, 10, cnv->w - 10, label);
+}
+
 enum UiToolId {
 	UiToolBrowser,
 	UiToolIr,
@@ -4532,7 +4641,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolBadUsb] = "BadUSB",
 		[UiToolAutoClicker] = "AutoClicker",
 		[UiToolMusic] = "Music",
-		[UiToolGame] = "Game",
+		[UiToolGame] = "Emulation",
 		[UiToolSettings] = "Settings",
 		[UiToolPowerOff] = "Power Off",
 	};
@@ -4575,7 +4684,7 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	}
 	if (uiPrvRomFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenGame;
-		labels[numOptions++] = "Game";
+		labels[numOptions++] = "Emulation";
 	}
 
 	if (!numOptions)
@@ -4721,6 +4830,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		uint_fast8_t itemHeight;
 		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
+		char title[UI_GAME_TITLE_BUF_SZ];
 		uint32_t ramSz = 0;
 		bool validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
 		uint8_t button = KEY_BIT_A | KEY_BIT_B;
@@ -4729,12 +4839,13 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 		if (validRom) {
-			uiPrintf(cnv, cnv->h - 3 * itemHeight, 10, "Run game '%s'", name);
+			uiPrvCurrentGameTitle(title, sizeof(title), name);
+			uiPrvDrawGameAction(cnv, cnv->h - 3 * itemHeight, title, false);
 			runOption = numOptions++;
 		}
 	#ifndef NO_SD_CARD
 		selectOption = numOptions++;
-		uiPuts(cnv, cnv->h - (validRom ? 2 : 2) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
+		uiPuts(cnv, cnv->h - (validRom ? 2 : 2) * itemHeight, 10, validRom ? "Select game" : "Load game", -1);
 	#endif
 		switchOption = numOptions++;
 		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Switch Tool", -1);
@@ -4763,6 +4874,7 @@ enum UiGameAction uiGameMenu(void)
 	uint_fast8_t itemHeight;
 	int_fast8_t runOption = -1, selectOption = -1, settingsOption, switchOption, numOptions = 0, selOption;
 	char name[ROM_NAME_LEN + 1];
+	char title[UI_GAME_TITLE_BUF_SZ];
 	uint32_t ramSz = 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint8_t button = KEY_BIT_A | KEY_BIT_B;
@@ -4781,10 +4893,12 @@ enum UiGameAction uiGameMenu(void)
 	settingsOption = numOptions++;
 	switchOption = numOptions++;
 
-	if (validRom)
-		uiPrintf(cnv, cnv->h - (numOptions - runOption) * itemHeight, 10, "Run game '%s'", name);
+	if (validRom) {
+		uiPrvCurrentGameTitle(title, sizeof(title), name);
+		uiPrvDrawGameAction(cnv, cnv->h - (numOptions - runOption) * itemHeight, title, true);
+	}
 #ifndef NO_SD_CARD
-	uiPuts(cnv, cnv->h - (numOptions - selectOption) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
+	uiPuts(cnv, cnv->h - (numOptions - selectOption) * itemHeight, 10, validRom ? "Select game" : "Load game", -1);
 #endif
 	uiPuts(cnv, cnv->h - (numOptions - settingsOption) * itemHeight, 10, "Settings", -1);
 	uiPuts(cnv, cnv->h - (numOptions - switchOption) * itemHeight, 10, "Switch Tool", -1);

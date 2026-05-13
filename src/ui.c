@@ -1883,7 +1883,7 @@ static void uiPrvLoadSavestate(void)
 		return;
 	}
 	
-	if (mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL) && ramSzExpected < QSPI_RAM_SIZE_MAX)
+	if (mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL) && ramSzExpected <= QSPI_RAM_SIZE_MAX)
 		memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, ramSzExpected);
 	else
 		memset(CART_RAM_ADDR_IN_RAM, 0xff, QSPI_RAM_SIZE_MAX);
@@ -2007,12 +2007,15 @@ bool uiSaveSavestate(void)
 		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, NULL, 0);
 	}
 	
-	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)		//buf may be over-read, also marks ROM as possibly valid
+	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)		//also marks ROM as possibly valid
 	{
+		static uint8_t pathBuf[GAME_META_OFFSET];
 		uint8_t metaBuf[QSPI_WRITE_GRANULARITY];
 		struct GameSelectionFlashMeta *meta = (struct GameSelectionFlashMeta*)metaBuf;
+		uint32_t pathLen = 0, writeSz;
 		bool ret;
 
+		memset(pathBuf, 0xff, sizeof(pathBuf));
 		memset(metaBuf, 0xff, sizeof(metaBuf));
 		*meta = (struct GameSelectionFlashMeta){
 			.magic = GAME_META_MAGIC,
@@ -2021,7 +2024,14 @@ bool uiSaveSavestate(void)
 			.saveRamSize = saveRamSize,
 		};
 
-		ret = flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, buf, (strlen(buf) + 1 + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY);
+		while (pathLen + 1 < sizeof(pathBuf) && buf[pathLen]) {
+			pathBuf[pathLen] = buf[pathLen];
+			pathLen++;
+		}
+		pathBuf[pathLen] = 0;
+		writeSz = (pathLen + 1 + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
+
+		ret = flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, pathBuf, writeSz);
 		if (!ret)
 			return false;
 		return flashWrite(QSPI_FILENAME_START + GAME_META_OFFSET, 0, metaBuf, QSPI_WRITE_GRANULARITY);
@@ -2068,16 +2078,16 @@ bool uiSaveSavestate(void)
 			if (now > bufSz)
 				now = bufSz;
 			
-			if (now < QSPI_WRITE_GRANULARITY)	//only possible at the end - do not leak garbage
-				memset(buf + now, 0, QSPI_WRITE_GRANULARITY - now);
-
 			if (!fatfsFileRead(fil, buf, now, &nowDone) || now != nowDone) {
 				uiAlert(cnv, "File reading failure", DialogTypeOk);
 				goto out_release;
 			}
 	
 			//over-erasing up to boundary is safe, same for writing
-			if (!flashWrite(flashAddr, (now + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY, buf, (now + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY)) {
+			nowDone = (now + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
+			if (nowDone != now)
+				memset(buf + now, 0, nowDone - now);
+			if (!flashWrite(flashAddr, (now + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY, buf, nowDone)) {
 				uiAlert(cnv, "Flash writing failure", DialogTypeOk);
 				goto out_release;
 			}

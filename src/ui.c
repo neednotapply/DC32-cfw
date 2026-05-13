@@ -5018,7 +5018,11 @@ static void uiPrvCurrentGameTitle(char *dst, uint32_t dstLen, const char *fallba
 
 static const char *uiPrvCurrentGameConsoleName(void)
 {
+	struct GameSelection selection;
 	struct Settings settings;
+
+	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes)
+		return "NES";
 
 	settingsGet(&settings);
 	return settings.actLikeGBC ? "GBC" : "GB";
@@ -5428,23 +5432,25 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (uiPrvToolExitRequested())
 			return UiToolBrowser;
 
-		uiPrvSetHeaderTitle("Game");
+		uiPrvSetHeaderTitle("Emulation");
 		uiPrvReset(cnv, false);
 
 		if (validRom) {
-			labels[numOptions] = "Run game";
+			labels[numOptions] = NULL;
 			optionIds[numOptions++] = GameToolOptionRun;
 		}
 	#ifndef NO_SD_CARD
-		labels[numOptions] = validRom ? "Select Game" : "Load Game";
+		labels[numOptions] = validRom ? "Select game" : "Load game";
 		optionIds[numOptions++] = GameToolOptionSelect;
 	#endif
 		labels[numOptions] = "Main Menu";
 		optionIds[numOptions++] = GameToolOptionSwitch;
 
 		for (i = 0; i < numOptions; i++) {
-			if (optionIds[i] == GameToolOptionRun)
-				uiPrintf(cnv, uiPrvMenuRow(cnv, i), 10, "Run game '%s'", name);
+			if (optionIds[i] == GameToolOptionRun) {
+				uiPrvCurrentGameTitle(title, sizeof(title), name);
+				uiPrvDrawGameAction(cnv, uiPrvMenuRow(cnv, i), title, false);
+			}
 			else
 				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
 		}
@@ -5490,18 +5496,18 @@ enum UiGameAction uiGameMenu(void)
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
-	uiPrvSetHeaderTitle("Game");
+	uiPrvSetHeaderTitle("Emulation");
 	uiPrvReset(cnv, false);
 
 	if (!uiSaveSavestate())
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 
 	if (validRom) {
-		labels[numOptions] = "Run game";
+		labels[numOptions] = NULL;
 		optionIds[numOptions++] = GameMenuOptionRun;
 	}
 #ifndef NO_SD_CARD
-	labels[numOptions] = validRom ? "Select Game" : "Load Game";
+	labels[numOptions] = validRom ? "Select game" : "Load game";
 	optionIds[numOptions++] = GameMenuOptionSelect;
 #endif
 	labels[numOptions] = "Settings";
@@ -5510,8 +5516,10 @@ enum UiGameAction uiGameMenu(void)
 	optionIds[numOptions++] = GameMenuOptionSwitch;
 
 	for (i = 0; i < numOptions; i++) {
-		if (optionIds[i] == GameMenuOptionRun)
-			uiPrintf(cnv, uiPrvMenuRow(cnv, i), 10, "Run game '%s'", name);
+		if (optionIds[i] == GameMenuOptionRun) {
+			uiPrvCurrentGameTitle(title, sizeof(title), name);
+			uiPrvDrawGameAction(cnv, uiPrvMenuRow(cnv, i), title, true);
+		}
 		else
 			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
 	}

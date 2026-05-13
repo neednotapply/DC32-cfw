@@ -548,7 +548,7 @@ static void uiPrvSplash(struct Canvas *cnv)
 	height = (uint32_t)uiPrvGlyphHeight(cnv) * scale;
 	uiPrvDrawScaledText(cnv, (cnv->h - height) / 2, (cnv->w - width) / 2, mUiAppTitle, scale);
 
-	end = getTime() + TICKS_PER_SECOND;
+	end = getTime() + TICKS_PER_SECOND * 2;
 	while (getTime() < end);
 }
 
@@ -1301,17 +1301,16 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 
 	static void uiPrvDrawDirLabel(struct Canvas *cnv, int32_t r, int32_t c, uint32_t maxWidth, const char *name)
 	{
-		uint32_t openWidth, closeWidth, stringLen, nameMaxWidth, nameWidth, numCharsFit;
-		static const char open[] = "/", close[] = "/", truncInd[] = "...";
+		uint32_t openWidth, stringLen, nameMaxWidth, nameWidth, numCharsFit;
+		static const char open[] = "/", truncInd[] = "...";
 
 		openWidth = uiPrvCharsWidth(cnv, open, sizeof(open) - 1);
-		closeWidth = uiPrvCharsWidth(cnv, close, sizeof(close) - 1);
-		if (maxWidth <= openWidth + closeWidth)
+		if (maxWidth <= openWidth)
 			return;
 
 		uiPuts(cnv, r, c, open, sizeof(open) - 1);
 		c += openWidth;
-		nameMaxWidth = maxWidth - openWidth - closeWidth;
+		nameMaxWidth = maxWidth - openWidth;
 		stringLen = strlen(name);
 		nameWidth = uiPrvCharsMeasure(cnv, name, stringLen, nameMaxWidth, &numCharsFit);
 		if (numCharsFit == stringLen) {
@@ -1329,7 +1328,6 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 				c += truncWidth;
 			}
 		}
-		uiPuts(cnv, r, c, close, sizeof(close) - 1);
 	}
 
 	struct UiPickEntry {
@@ -1529,7 +1527,7 @@ reload_dir:
 
 				if (depth && !topItem) {
 					cnv->foreColor = 12;
-					uiPrvDrawDirLabel(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "..");
+					uiPrvDrawDirLabel(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "...");
 					firstRow = 1;
 					skipItems = 0;
 				}
@@ -2064,11 +2062,9 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			settingsSet(&settings);
 			return restartCurGame;
 		}
-		if (button == KEY_BIT_B || selOption == doneOption) {
+		if (button == KEY_BIT_B || (exitOnDone && selOption == doneOption)) {
 			settingsSet(&settings);
-			if (exitOnDone)
-				return restartCurGame;
-			continue;
+			return restartCurGame;
 		}
 		if (selOption == screenOption)
 			uiPrvScreenSettings(cnv, &settings);
@@ -4372,10 +4368,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return MusicPlayerControlNone;
 	}
 
-	static enum MusicPlayerResult uiPrvPlayMusicLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, struct Settings *settings)
+	static enum MusicPlayerResult uiPrvPlayMusicLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, struct Settings *settings, uint8_t *focusP)
 	{
 		struct FatfsFil *fil;
-		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = name, .focus = MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
+		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = name, .focus = focusP ? *focusP : MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
 		enum MusicPlayerResult ret;
 
 		audioPwmSetVolume(settings->musicVolume);
@@ -4389,6 +4385,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		data.prevKeys = uiGetUiKeysRaw();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
 		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
+		if (focusP)
+			*focusP = data.focus;
 		audioPwmStop();
 		fatfsFileClose(fil);
 		if (data.settingsDirty)
@@ -4403,9 +4401,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return ret;
 	}
 
-	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings)
+	static enum MusicPlayerResult uiPrvPlayMusic(struct Canvas *cnv, struct FatfsVol *vol, struct MusicOption *song, struct Settings *settings, uint8_t *focusP)
 	{
-		return uiPrvPlayMusicLocator(cnv, vol, &song->locator, song->name, settings);
+		return uiPrvPlayMusicLocator(cnv, vol, &song->locator, song->name, settings, focusP);
 	}
 
 	static void uiPrvMusicPlayer(struct Canvas *cnv)
@@ -4477,7 +4475,7 @@ reload_dir:
 
 				if (depth && !topItem) {
 					cnv->foreColor = 12;
-					uiPrvDrawDirLabel(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "..");
+					uiPrvDrawDirLabel(cnv, listTop, itemLeft, cnv->w - scrollWidth - itemLeft, "...");
 					firstRow = 1;
 					skipItems = 0;
 				}
@@ -4532,32 +4530,36 @@ reload_dir:
 						prevTopItem = topItem + 1;
 						break;
 					}
-					while (cur && !cur->isDir) {
-						enum MusicPlayerResult playRet = uiPrvPlayMusic(cnv, vol, cur, &settings);
+					{
+						uint8_t playbackFocus = MusicPlaybackControlPlay;
 
-						if (playRet == MusicPlayerResultDone && settings.musicLoopTrack)
-							continue;
+						while (cur && !cur->isDir) {
+							enum MusicPlayerResult playRet = uiPrvPlayMusic(cnv, vol, cur, &settings, &playbackFocus);
 
-						if ((playRet == MusicPlayerResultNext || playRet == MusicPlayerResultDone) && uiPrvMusicNextSong(cur->next)) {
-							do {
-								cur = cur->next;
-								selectedItem++;
-							} while (cur && cur->isDir);
-						}
-						else if (playRet == MusicPlayerResultPrev && uiPrvMusicPrevSong(cur->prev)) {
-							do {
-								cur = cur->prev;
-								selectedItem--;
-							} while (cur && cur->isDir);
-						}
-						else {
-							break;
-						}
+							if (playRet == MusicPlayerResultDone && settings.musicLoopTrack)
+								continue;
 
-						if (selectedItem < topItem)
-							topItem = selectedItem;
-						if (selectedItem >= topItem + itemsOnscreen)
-							topItem = selectedItem + 1 - itemsOnscreen;
+							if ((playRet == MusicPlayerResultNext || playRet == MusicPlayerResultDone) && uiPrvMusicNextSong(cur->next)) {
+								do {
+									cur = cur->next;
+									selectedItem++;
+								} while (cur && cur->isDir);
+							}
+							else if (playRet == MusicPlayerResultPrev && uiPrvMusicPrevSong(cur->prev)) {
+								do {
+									cur = cur->prev;
+									selectedItem--;
+								} while (cur && cur->isDir);
+							}
+							else {
+								break;
+							}
+
+							if (selectedItem < topItem)
+								topItem = selectedItem;
+							if (selectedItem >= topItem + itemsOnscreen)
+								topItem = selectedItem + 1 - itemsOnscreen;
+						}
 					}
 					prevTopItem = topItem + 1;
 					break;
@@ -5066,14 +5068,14 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolPowerOff] = "Power Off",
 	};
 	static const enum UiToolId toolOrder[UiToolNum] = {
-		UiToolAutoClicker,
-		UiToolBadUsb,
 		UiToolBrowser,
-		UiToolGame,
-		UiToolMusic,
-		UiToolPowerOff,
-		UiToolSettings,
 		UiToolIr,
+		UiToolBadUsb,
+		UiToolAutoClicker,
+		UiToolMusic,
+		UiToolGame,
+		UiToolSettings,
+		UiToolPowerOff,
 	};
 	uint_fast8_t itemHeight, i, selOption;
 	uint_fast8_t curOption = 0;
@@ -5178,7 +5180,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		uiPrvSetHeaderTitle("Music");
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
-		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings);
+		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings, NULL);
 		settingsSet(&settings);
 		return UiToolBrowser;
 	}

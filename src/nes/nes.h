@@ -28,6 +28,7 @@ struct NesRomInfo {
 bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info);
 void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize);
 void nesAbort(void);
+void nesRefreshDisplayOptions(void);
 void nesPortDrawLine(uint16_t line, const uint16_t *pixels256);
 uint32_t nesGetLoadedRomSize(void);
 

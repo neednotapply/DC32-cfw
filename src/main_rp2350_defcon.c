@@ -307,6 +307,7 @@ static void exitGame(void)
         if (mActiveGameRuntime == GameRuntimeNes) {
                 mUpscaling = false;
                 mRotateGame = false;
+                nesRefreshDisplayOptions();
                 return;
         }
         mUpscaling = shouldUpscale();

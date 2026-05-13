@@ -237,6 +237,11 @@ static void nesPortUpdateDrawOptions(void)
 	memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
 }
 
+void nesRefreshDisplayOptions(void)
+{
+	nesPortUpdateDrawOptions();
+}
+
 bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
 {
 	const uint8_t *bytes = (const uint8_t*)rom;

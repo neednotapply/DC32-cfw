@@ -48,6 +48,7 @@ static uint16_t mDrawTop;
 static uint16_t mDrawWidth;
 static uint16_t mDrawHeight;
 static bool mDrawFlipped;
+static uint8_t mFrame[NES_DISP_WIDTH * NES_SAFE_HEIGHT];
 static jmp_buf mAbort;
 
 bool IsNSF = false;
@@ -60,9 +61,20 @@ BYTE (*mmc5_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 BYTE (*vrc6_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 BYTE (*s5b_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 
-#define RGB565(r, g, b) (WORD)((((r) & 0xf8) << 8) | (((g) & 0xfc) << 3) | ((b) >> 3))
-
 const WORD NesPalette[64] = {
+	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+	0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+	0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+	0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+	0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+};
+
+#define RGB565(r, g, b) (uint16_t)((((r) & 0xf8) << 8) | (((g) & 0xfc) << 3) | ((b) >> 3))
+
+static const uint16_t NesRgbPalette[64] = {
 	RGB565(0x66, 0x66, 0x66), RGB565(0x00, 0x2a, 0x88), RGB565(0x14, 0x12, 0xa7), RGB565(0x3b, 0x00, 0xa4),
 	RGB565(0x5c, 0x00, 0x7e), RGB565(0x6e, 0x00, 0x40), RGB565(0x6c, 0x07, 0x00), RGB565(0x56, 0x1d, 0x00),
 	RGB565(0x33, 0x35, 0x00), RGB565(0x0b, 0x48, 0x00), RGB565(0x00, 0x52, 0x00), RGB565(0x00, 0x4f, 0x08),
@@ -292,9 +304,43 @@ void InfoNES_PostDrawLine(int line)
 	nesPortDrawLine((uint16_t)line, mLine);
 }
 
+static void nesPortPresentFrame(void)
+{
+	uint16_t *fb = (uint16_t*)dispGetFb();
+	uint32_t logicalH = DISP_WIDTH;
+
+	dispPrvWaitForScanoutStart();
+
+	for (uint32_t py = 0; py < DISP_HEIGHT; py++) {
+		uint32_t logicalX = py;
+
+		for (uint32_t px = 0; px < DISP_WIDTH; px++) {
+			uint32_t logicalY = logicalH - 1 - px;
+			uint16_t color = 0;
+
+			if (logicalX >= mDrawLeft && logicalX < mDrawLeft + mDrawWidth &&
+					logicalY >= mDrawTop && logicalY < mDrawTop + mDrawHeight) {
+				uint32_t dx = logicalX - mDrawLeft;
+				uint32_t dy = logicalY - mDrawTop;
+				uint32_t sx, sy;
+
+				if (mDrawFlipped) {
+					dx = mDrawWidth - 1 - dx;
+					dy = mDrawHeight - 1 - dy;
+				}
+				sx = (dx * NES_DISP_WIDTH) / mDrawWidth;
+				sy = (dy * NES_SAFE_HEIGHT) / mDrawHeight;
+				color = NesRgbPalette[mFrame[sy * NES_DISP_WIDTH + sx] & 0x3f];
+			}
+			*fb++ = color;
+		}
+	}
+}
+
 int InfoNES_LoadFrame(void)
 {
 	dispPrvFrameCtrWait();
+	nesPortPresentFrame();
 	return 0;
 }
 
@@ -393,36 +439,19 @@ void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSi
 
 void nesPortDrawLine(uint16_t line, const uint16_t *pixels256)
 {
-	uint16_t *fb = (uint16_t*)dispGetFb();
 	uint32_t srcY = line;
 	uint32_t cropY;
-	uint32_t y0, y1;
 
-	if (!pixels256 || srcY >= NES_DISP_HEIGHT || !mDrawWidth || !mDrawHeight)
+	if (!pixels256 || srcY >= NES_DISP_HEIGHT)
 		return;
 
 	if (!srcY)
-		memset(fb, 0, DISP_WIDTH * DISP_HEIGHT * sizeof(*fb));
+		memset(mFrame, 0, sizeof(mFrame));
 
 	if (srcY < NES_SAFE_TOP || srcY >= NES_SAFE_BOTTOM)
 		return;
 
 	cropY = srcY - NES_SAFE_TOP;
-	y0 = (cropY * mDrawHeight) / NES_SAFE_HEIGHT;
-	y1 = ((cropY + 1) * mDrawHeight) / NES_SAFE_HEIGHT;
-	for (uint32_t dy = y0; dy < y1; dy++) {
-		uint32_t logicalY = mDrawTop + dy;
-		uint32_t outY = mDrawFlipped ? (mDrawTop + mDrawHeight - 1 - dy) : logicalY;
-
-		if (outY >= DISP_WIDTH)
-			continue;
-
-		for (uint32_t dx = 0; dx < mDrawWidth; dx++) {
-			uint32_t sx = (dx * NES_DISP_WIDTH) / mDrawWidth;
-			uint32_t outX = mDrawFlipped ? (mDrawLeft + mDrawWidth - 1 - dx) : (mDrawLeft + dx);
-
-			if (outX < DISP_HEIGHT)
-				fb[outX * DISP_WIDTH + (DISP_WIDTH - 1 - outY)] = pixels256[sx];
-		}
-	}
+	for (uint32_t x = 0; x < NES_DISP_WIDTH; x++)
+		mFrame[cropY * NES_DISP_WIDTH + x] = (uint8_t)(pixels256[x] & 0x3f);
 }

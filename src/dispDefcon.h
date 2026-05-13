@@ -32,6 +32,7 @@ void* dispGetFb(void);
 
 void dispPrvFrameCtrReset(void);
 void dispPrvFrameCtrWait(void);
+void dispPrvWaitForScanoutStart(void);
 
 void dispSetBrightness(uint_fast8_t val);
 void dispSetContrast(uint_fast8_t val);

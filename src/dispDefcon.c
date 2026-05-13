@@ -251,6 +251,21 @@ void dispPrvFrameCtrWait(void)
 	mNextFrame += mPerFrameSpace;
 }
 
+void dispPrvWaitForScanoutStart(void)
+{
+	uint32_t last = dma_hw->ch[DISP_DMA_XFER_CH].transfer_count, cur;
+	uint32_t guard = DISP_WIDTH * DISP_HEIGHT * 2;
+
+	do {
+		cur = dma_hw->ch[DISP_DMA_XFER_CH].transfer_count;
+		if (cur > last)
+			break;
+		last = cur;
+	} while (--guard);
+	guard = DISP_WIDTH * 2;
+	while (guard-- && dma_hw->ch[DISP_DMA_XFER_CH].transfer_count > DISP_WIDTH * DISP_HEIGHT - DISP_WIDTH);
+}
+
 void dispSetContrast(uint_fast8_t val)
 {
 	//nothing

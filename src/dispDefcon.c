@@ -143,9 +143,9 @@ static bool dispPrvTurnOff(void)
 bool dispInit(uint32_t desiredFramerate)
 {
 	uint_fast8_t pc = DISP_PIO_FIRST_USED_PC, sm0Start, sm0LoopTo, sm0LoopFrom;
-	uint32_t i, j, maxClk = 70000000, divClk;	//in hz
+	uint32_t maxClk = 70000000, divClk;	//in hz
 
-	mPerFrameSpace = TICKS_PER_SECOND / desiredFramerate;
+	dispSetFramerate(desiredFramerate);
 
 	sm0Start = sm0LoopTo = pc;
 	MY_PIO->instr_mem[pc++] = I_OUT(0, 0, OUT_DST_PINS, 1);
@@ -206,29 +206,13 @@ bool dispInit(uint32_t desiredFramerate)
 	lcdDelayMs(10);
 
 
-	//erase the screen
 	lcdCmd(0x2c, false, -1);	//write data command
-
-	//dear reader, i do not know why we need to send an extra frame minus a pixel here. no part of this display has matched spec when running full-res. luckily sub-full-res works well
-	for (i = 0; i < HARDWARE_HEIGHT * HARDWARE_WIDTH * 2 - 2; i++)
-		lcdByte(0);
-
-	//data needs to be endian flipped AND v-flipped (which is really an h-flip since display is 90 degrees rotated)
-	for (i = 0; i < HARDWARE_HEIGHT; i++) {
-		for (j = 0; j < HARDWARE_WIDTH; j++) {
-			
-			uint32_t idx = i * HARDWARE_WIDTH + (HARDWARE_WIDTH - j - 1);
-
-			lcdByte(lcdFrame[idx * 2 + 1]);
-			lcdByte(lcdFrame[idx * 2 + 0]);
-		}
-	}
 	sio_hw->gpio_set = 1 << PIN_LCD_CS;
 
 
 	pr("inited display at %u fps\n", desiredFramerate);
 
-	lcdSetRegion((HARDWARE_WIDTH - DISP_WIDTH) / 2, (HARDWARE_HEIGHT - DISP_HEIGHT) / 2, DISP_WIDTH, DISP_HEIGHT, 0, 0);
+	lcdSetRegion(0, 0, DISP_WIDTH, DISP_HEIGHT, 0, 0);
 
 	return dispPrvTurnOn(true);
 }
@@ -248,6 +232,14 @@ void* dispGetFb(void)
 	return mFb;
 }
 
+void dispSetFramerate(uint32_t desiredFramerate)
+{
+	if (!desiredFramerate)
+		desiredFramerate = 60;
+	mPerFrameSpace = TICKS_PER_SECOND / desiredFramerate;
+	dispPrvFrameCtrReset();
+}
+
 void dispPrvFrameCtrReset(void)
 {
 	mNextFrame = getTime() + mPerFrameSpace;
@@ -257,6 +249,21 @@ void dispPrvFrameCtrWait(void)
 {
 	while (getTime() < mNextFrame);
 	mNextFrame += mPerFrameSpace;
+}
+
+void dispPrvWaitForScanoutStart(void)
+{
+	uint32_t last = dma_hw->ch[DISP_DMA_XFER_CH].transfer_count, cur;
+	uint32_t guard = DISP_WIDTH * DISP_HEIGHT * 2;
+
+	do {
+		cur = dma_hw->ch[DISP_DMA_XFER_CH].transfer_count;
+		if (cur > last)
+			break;
+		last = cur;
+	} while (--guard);
+	guard = DISP_WIDTH * 2;
+	while (guard-- && dma_hw->ch[DISP_DMA_XFER_CH].transfer_count > DISP_WIDTH * DISP_HEIGHT - DISP_WIDTH);
 }
 
 void dispSetContrast(uint_fast8_t val)
@@ -13271,4 +13278,3 @@ const uint8_t lcdFrame[] = {		//i could compress this, but why bother, we have t
 	0xb1, 0x55, 0x14, 0x10, 0xd2, 0xdf, 0x7d, 0x20, 0xd6, 0x34, 0xf4, 0x16,
 	0x50, 0x2c, 0xbb
 };
-

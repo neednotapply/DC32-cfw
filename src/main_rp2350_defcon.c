@@ -21,6 +21,7 @@
 #include "qspi.h"
 #include "mbc.h"
 #include "gb.h"
+#include "nes/nes.h"
 #include "ui.h"
 
 static void uiPrvUpscalerInit(void);
@@ -30,6 +31,26 @@ static bool shouldRotateGame(void);
 static bool mUpscaling;
 static bool mRotateGame;
 static bool mGameToolExitRequested;
+static enum GameRuntime mActiveGameRuntime;
+
+#define GB_SRC_WIDTH                   160u
+#define GB_SRC_HEIGHT                  144u
+#define GB_ASPECT_WIDTH                10u
+#define GB_ASPECT_HEIGHT               9u
+#ifdef UPSCALER_ROTATES
+#define GB_UPSCALED_HEIGHT             DISP_WIDTH
+#define GB_UPSCALED_WIDTH              ((GB_UPSCALED_HEIGHT * GB_ASPECT_WIDTH + GB_ASPECT_HEIGHT / 2u) / GB_ASPECT_HEIGHT)
+#define GB_UPSCALED_LEFT               ((DISP_HEIGHT - GB_UPSCALED_WIDTH) / 2u)
+#define GB_UPSCALED_TOP                0u
+#else
+#define GB_UPSCALED_WIDTH              DISP_WIDTH
+#define GB_UPSCALED_HEIGHT             ((GB_UPSCALED_WIDTH * GB_ASPECT_HEIGHT + GB_ASPECT_WIDTH / 2u) / GB_ASPECT_WIDTH)
+#define GB_UPSCALED_LEFT               0u
+#define GB_UPSCALED_TOP                ((DISP_HEIGHT - GB_UPSCALED_HEIGHT) / 2u)
+#endif
+
+static uint8_t mGbUpscaleSrcX[GB_UPSCALED_WIDTH];
+static uint16_t mGbUpscaleLineStart[GB_SRC_HEIGHT + 1];
 
 static uint64_t mRtcTickOffset;         //ticks to add to our ticks to represent RTC
 static volatile uint8_t mDefconExtraIoData[3];
@@ -192,6 +213,15 @@ static uint_fast8_t prvKeysMap(uint32_t sta)
         return ret;
 }
 
+static uint_fast16_t prvUiKeysMap(uint32_t sta)
+{
+        uint_fast16_t ret = prvKeysMap(sta);
+
+        if (!(sta & (1 << PIN_BTN_CENTER)))     ret |= UI_KEY_BIT_CENTER;
+
+        return ret;
+}
+
 uint_fast8_t uiGetKeys(void)
 {
         uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
@@ -215,12 +245,38 @@ uint_fast8_t uiGetKeysRaw(void)
 	return prvKeysMap(sio_hw->gpio_in);
 }
 
+uint_fast16_t uiGetUiKeys(void)
+{
+        uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
+
+	while(1) {
+		usbHidTask();
+		badgeLedsTick();
+		val = sio_hw->gpio_in & ourKeysMask;
+		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+			usbHidTask();
+			badgeLedsTick();
+		}
+		if (count == countUntil)
+			return prvUiKeysMap(val);
+	}
+}
+
+uint_fast16_t uiGetUiKeysRaw(void)
+{
+	usbHidTask();
+	return prvUiKeysMap(sio_hw->gpio_in);
+}
+
 static void exitGame(void)
 {
         enum UiGameAction action;
 
         if (mUpscaling)
                         uiPrvUpscalerDeinit();
+
+        while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
+        }
 
         action = uiGameMenu();
         switch (action) {
@@ -229,20 +285,39 @@ static void exitGame(void)
 
                 case UiGameActionRestart:
                 case UiGameActionSelectGame:
-                        gbAbort();
+                        if (mActiveGameRuntime == GameRuntimeNes) {
+                                if (action == UiGameActionSelectGame)
+                                        mGameToolExitRequested = true;
+                                nesAbort();
+                        }
+                        else
+                                gbAbort();
                         return;
 
                 case UiGameActionSwitchTool:
                         mGameToolExitRequested = true;
-                        gbAbort();
+                        if (mActiveGameRuntime == GameRuntimeNes)
+                                nesAbort();
+                        else
+                                gbAbort();
                         return;
         }
 
         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
+        if (mActiveGameRuntime == GameRuntimeNes) {
+                mUpscaling = false;
+                mRotateGame = false;
+                return;
+        }
         mUpscaling = shouldUpscale();
         mRotateGame = shouldRotateGame();
         if (mUpscaling)
                 uiPrvUpscalerInit();
+}
+
+void nesPortInGameMenu(void)
+{
+        exitGame();
 }
 
 uint8_t gbExtGetKeys(void)      //arrow keys, f1=a, f2=b, f3=start, f4=select
@@ -321,6 +396,39 @@ static uint32_t uiPrvFifoRx(void)
 {
         while (!(sio_hw->fifo_st & SIO_FIFO_ST_VLD_BITS));
         return sio_hw->fifo_rd;
+}
+
+static void uiPrvGbUpscalerBuildMaps(void)
+{
+        uint32_t i;
+
+        for (i = 0; i < GB_UPSCALED_WIDTH; i++) {
+                uint32_t srcX = (i * GB_SRC_WIDTH + GB_UPSCALED_WIDTH / 2u) / GB_UPSCALED_WIDTH;
+
+                if (srcX >= GB_SRC_WIDTH)
+                        srcX = GB_SRC_WIDTH - 1u;
+                mGbUpscaleSrcX[i] = (uint8_t)srcX;
+        }
+
+        for (i = 0; i <= GB_SRC_HEIGHT; i++)
+                mGbUpscaleLineStart[i] = (uint16_t)((i * GB_UPSCALED_HEIGHT + GB_SRC_HEIGHT - 1u) / GB_SRC_HEIGHT);
+}
+
+static void uiPrvOutputGbAspectFitLine(uint16_t *fb, const PIXFMT *src, bool flipScaleMap)
+{
+        uint32_t i;
+
+        for (i = 0; i < GB_UPSCALED_WIDTH; i++) {
+                uint32_t mapIdx = flipScaleMap ? GB_UPSCALED_WIDTH - 1u - i : i;
+
+                *fb = src[mGbUpscaleSrcX[mapIdx]] &~ BG_FLAG_UNDER_OBJS;
+
+        #ifdef UPSCALER_ROTATES
+                fb += DISP_WIDTH;
+        #else
+                fb++;
+        #endif
+        }
 }
 
 static void __attribute__((naked)) uiPrvHorizStretch(uint32_t *dst, uint16_t *src)
@@ -487,49 +595,35 @@ static void uiPrvUpscalerMain(void)
         
         while (1) {
                 
-                static uint32_t lines[2][240], prevLineIdx = 0;
-                static PIXFMT __attribute__((aligned(4))) pixelsIn[160];
-                uint32_t *pixTwice = (uint32_t*)pixelsIn;
+                static PIXFMT __attribute__((aligned(4))) pixelsIn[GB_SRC_WIDTH];
                 uint16_t *fb = dispGetFb();
-                uint32_t *dataIn, lineNum, sourceLineNum;
-                uint_fast8_t i, j;
-                PIXFMT* pixels;
+                uint32_t *dataIn, sourceLineNum, dstLine, dstStart, dstEnd;
                 
                 dataIn = (uint32_t*)uiPrvFifoRx();
                 
                 memcpy(pixelsIn, (PIXFMT*)dataIn[0], sizeof(pixelsIn));
-                lineNum = dataIn[1];
                 sourceLineNum = dataIn[2];
                 
                 uiPrvFifoTx(0);
 
-        #ifdef UPSCALER_ROTATES
-                fb += DISP_WIDTH - 1 - (lineNum * 3 / 2);
-                if (mRotateGame && !(sourceLineNum & 1))
-                        fb--;
-        #else
-                fb += DISP_WIDTH * (lineNum * 3 / 2);
-        #endif
+                dstStart = mGbUpscaleLineStart[sourceLineNum];
+                dstEnd = mGbUpscaleLineStart[sourceLineNum + 1u];
+                if (mRotateGame) {
+                        uint32_t flippedStart = GB_UPSCALED_HEIGHT - dstEnd;
+                        uint32_t flippedEnd = GB_UPSCALED_HEIGHT - dstStart;
 
-                if (sourceLineNum & 1) {                //mix and output mix
-
-                        uiPrvHorizStretch(lines[1], pixelsIn);
-                        uiPrvMix(lines[0], lines[1]);
-                #ifdef UPSCALER_ROTATES
-                        if (mRotateGame) {
-                                fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
-                                fb = uiPrvOuputStretchedOnly(fb, lines[0]);
-                        }
-                        else
-                #endif
-                        {
-                                fb = uiPrvOuputStretchedOnly(fb, lines[0]);
-                                fb = uiPrvOuputStretchedWithSource(fb, lines[1], pixelsIn);
-                        }
+                        dstStart = flippedStart;
+                        dstEnd = flippedEnd;
                 }
-                else {
-                        uiPrvHorizStretch(lines[0], pixelsIn);
-                        fb = uiPrvOuputStretchedWithSource(fb, lines[0], pixelsIn);
+
+                for (dstLine = dstStart; dstLine < dstEnd; dstLine++) {
+                #ifdef UPSCALER_ROTATES
+                        fb = dispGetFb() + GB_UPSCALED_LEFT * DISP_WIDTH;
+                        fb += DISP_WIDTH - 1u - (GB_UPSCALED_TOP + dstLine);
+                #else
+                        fb = dispGetFb() + DISP_WIDTH * (GB_UPSCALED_TOP + dstLine) + GB_UPSCALED_LEFT;
+                #endif
+                        uiPrvOutputGbAspectFitLine(fb, pixelsIn, mRotateGame);
                 }
         }
 }
@@ -539,6 +633,8 @@ static void uiPrvUpscalerInit(void)
         static uint32_t mUpscalerStack[32];
         uint32_t cmds[] = {0, 0, 1, SCB->VTOR, ((uintptr_t)mUpscalerStack) + sizeof(mUpscalerStack), (uintptr_t)&uiPrvUpscalerMain};
         uint32_t idx = 0;
+
+        uiPrvGbUpscalerBuildMaps();
         
         //first, reset the core
         psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;
@@ -698,16 +794,30 @@ static void applySavedLeds(void)
         badgeLedsApplySettings(&settings, true);
 }
 
-static void runGameTool(void *userData)
+static void runSelectedGameTool(void *userData)
 {
+        struct GameSelection selection;
         uint32_t romSzExpected, ramSzExpected;
 
         (void)userData;
         mGameToolExitRequested = false;
         
         while(!mGameToolExitRequested) {
-                
-                if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
+
+                if (!uiGetGameSelection(&selection)) {
+                        pr("Failed to identify selected game\n");
+                        mGameToolExitRequested = true;
+                }
+                else if (selection.runtime == GameRuntimeNes) {
+                        dispPrvFrameCtrReset();
+                        mUpscaling = false;
+                        mRotateGame = false;
+                        memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
+                        mActiveGameRuntime = GameRuntimeNes;
+                        nesRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
+                        mActiveGameRuntime = GameRuntimeNone;
+                }
+                else if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
                         pr("Failed to init the MBC\n");
                         mGameToolExitRequested = true;
                 }
@@ -724,7 +834,9 @@ static void runGameTool(void *userData)
                                 uiPrvUpscalerInit();
                         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);        
                         gbSetFrameDithering(1);
+                        mActiveGameRuntime = GameRuntimeGb;
                         gbRun(shouldActAsCgb());
+                        mActiveGameRuntime = GameRuntimeNone;
                         //if we are aborted by gbAbort, we'll return here and restart or leave the game tool
                 }
         }
@@ -1547,12 +1659,8 @@ static void uiPrvSelfTestsIfNeeded(void)
 
                                         uiSelfTestSetText(&cnv, 25, 50, "(%5u %5u) = (%6d %6d)            ", xi, yi, x, y);
 
-                                        if (x >= (320 - 240) / 2 && x - (320 - 240) / 2 < 240 && y >= (240 - 216) / 2 && y - (240 - 216) / 2 < 216) {
-
-                                                x -= (320 - 240) / 2;
-                                                y -= (240 - 216) / 2;
-
-                                                uiSelfTestSetText(&cnv, 215 - y, 239 - x, "*");
+                                        if (x >= 0 && x < (int32_t)cnv.w && y >= 0 && y < (int32_t)cnv.h) {
+                                                uiSelfTestSetText(&cnv, cnv.h - 1 - y, cnv.w - 1 - x, "*");
                                         }
                                 }
                                 else {
@@ -1861,7 +1969,7 @@ void __attribute__((noreturn, used)) micromain(void)
         uiPrvSelfTestsIfNeeded();
 
         pr("UI...\n");
-        uiRunToolShell(runGameTool, NULL);
+        uiRunToolShell(runSelectedGameTool, NULL);
 
         while(1);
 }

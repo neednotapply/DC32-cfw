@@ -162,6 +162,7 @@ static struct FatfsVol mVolumes[FATFS_MAX_VOLUMES];
 static struct FatfsFil mFiles[FATFS_MAX_FILES_REAL];
 
 static bool fatfsPrvSomethingFind(struct FatfsVol *vol, const char *name, uint32_t nameMaxLen, bool wantDir, struct FatFileLocator *locP);
+static bool fatfsPrvChainFree(struct FatfsVol* vol, uint32_t firstClus);
 static bool fatfsPrvSomethingSeek(struct FatfsFil* fil, uint32_t pos);
 static bool fatfsPrvSomethingFindAt(struct FatfsDir* dir, const char *name, uint32_t nameMaxLen, bool wantDir, struct FatFileLocator *locatorP, uint32_t *firstEntryPosInDirP, uint8_t *numEntriesTotalP);
 static bool fatfsPrvDirRead(struct FatfsDir *dir, char *name, uint32_t *sizeP, uint8_t *attrsP, uint32_t *clusP, uint32_t *dirEntSecP, uint8_t *dirEntIdxInSecP, bool allowDotEntries);
@@ -1039,26 +1040,25 @@ static bool fatfsPrvNewlyOpenedFileApplyMode(struct FatfsFil *fil, uint_fast8_t 
 	fil->writeAllowed = !!(mode & OPEN_MODE_WRITE);
 	if (mode & OPEN_MODE_TRUNCATE) {												//any failures here may corrupt the FA (lose clusters)
 		
-		uint32_t clus, nextClus;
+		uint32_t oldFirstClus = fil->firstClus;
 		struct FatDirEntry de;
 		
 		if (!fatfsPrvDirEntrySpecificRead(&de, fil->vol, fil->dirEntSec, fil->dirEntIdxInSec))
 			return false;
-		de.clusNumHi = 0;
-		de.clusNumHi = 0;
-		de.fileSz = 0;
+		fatfsPrvSetLE16(&de.clusNumHi, 0);
+		fatfsPrvSetLE16(&de.clusNum, 0);
+		fatfsPrvSetLE32(&de.fileSz, 0);
 		if (!fatfsPrvDirEntrySpecificWrite(&de, fil->vol, fil->dirEntSec, fil->dirEntIdxInSec))
 			return false;
 		
-		for (clus = fil->curClus; clus != 0 && clus != CLUS_EOC; clus = nextClus) {
-			
-			nextClus = fatfsPrvGetNextClus(fil->vol, clus);
-			if (!fatfsPrvSetNextClus(fil->vol, clus, CLUS_EOC))
-				return false;
-		}
+		if (oldFirstClus && !fatfsPrvChainFree(fil->vol, oldFirstClus))
+			return false;
 		
+		fil->firstClus = 0;
 		fil->curClus = 0;
 		fil->fileSz = 0;
+		fil->curPos = 0;
+		fil->atEnd = true;
 	}
 	
 	return true;
@@ -2164,6 +2164,9 @@ bool fatfsFileTruncate(struct FatfsFil* fil, uint32_t sz)
 	uint32_t sectorsKept, clustersKept, curClus, prevClus, i;
 	struct FatDirEntry de;
 	bool ret = true;
+
+	if (!fil->writeAllowed)
+		return false;
 	
 	if (!fil->fileSz || fil->fileSz < sz)		//dirs have a size of zero
 		return false;
@@ -2224,6 +2227,12 @@ bool fatfsFileWrite(struct FatfsFil* fil, const void *bufP, uint32_t bytesToWrit
 {
 	uint32_t numOriginallyWanted, curFileSzOnDisk, spaceAvailNow, numDone, now, bytesWritten;
 	const uint8_t *buf = (const uint8_t*)bufP;
+
+	if (!fil->writeAllowed) {
+		if (numWrittenP)
+			*numWrittenP = 0;
+		return false;
+	}
 	
 	//we have file size maximums to respect
 	if (bytesToWrite > 0xffffffff - fil->curPos)
@@ -3012,5 +3021,3 @@ bool fatfsDirRead(struct FatfsDir *dir, char *name, uint32_t *sizeP, uint8_t *at
 		return false;
 	}
 #endif
-
-

@@ -213,6 +213,15 @@ static uint_fast8_t prvKeysMap(uint32_t sta)
         return ret;
 }
 
+static uint_fast16_t prvUiKeysMap(uint32_t sta)
+{
+        uint_fast16_t ret = prvKeysMap(sta);
+
+        if (!(sta & (1 << PIN_BTN_CENTER)))     ret |= UI_KEY_BIT_CENTER;
+
+        return ret;
+}
+
 uint_fast8_t uiGetKeys(void)
 {
         uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
@@ -236,12 +245,38 @@ uint_fast8_t uiGetKeysRaw(void)
 	return prvKeysMap(sio_hw->gpio_in);
 }
 
+uint_fast16_t uiGetUiKeys(void)
+{
+        uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
+
+	while(1) {
+		usbHidTask();
+		badgeLedsTick();
+		val = sio_hw->gpio_in & ourKeysMask;
+		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+			usbHidTask();
+			badgeLedsTick();
+		}
+		if (count == countUntil)
+			return prvUiKeysMap(val);
+	}
+}
+
+uint_fast16_t uiGetUiKeysRaw(void)
+{
+	usbHidTask();
+	return prvUiKeysMap(sio_hw->gpio_in);
+}
+
 static void exitGame(void)
 {
         enum UiGameAction action;
 
         if (mUpscaling)
                         uiPrvUpscalerDeinit();
+
+        while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
+        }
 
         action = uiGameMenu();
         switch (action) {

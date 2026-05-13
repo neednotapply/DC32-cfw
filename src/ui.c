@@ -78,6 +78,8 @@ enum CurOp {
 
 static enum CurOp mCurCardOp = CurentlyIdle;
 static uint32_t mCurCardSec;
+static bool mToolExitEnabled;
+static bool mToolExitRequested;
 
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
@@ -447,14 +449,16 @@ static void uiPrintf(struct Canvas *cnv, int32_t r, int32_t c, const char *forma
 
 #endif
 
-static uint_fast8_t uiPrvRecvKeypress(void)
+static uint_fast16_t uiPrvRecvKeypress(void)
 {
-	uint_fast8_t val, prevVal = 0;
+	uint_fast16_t val, prevVal = 0;
 	
-	while (!uiGetKeys());
-	while ((val = uiGetKeys()) != 0)
+	while (!uiGetUiKeys());
+	while ((val = uiGetUiKeys()) != 0)
 		prevVal = val;
 
+	if (prevVal & UI_KEY_BIT_CENTER)
+		return UI_KEY_BIT_CENTER;
 	if (prevVal & KEY_BIT_A)
 		return KEY_BIT_A;
 	if (prevVal & KEY_BIT_B)
@@ -473,13 +477,40 @@ static uint_fast8_t uiPrvRecvKeypress(void)
 
 static void uiPrvWaitKeysReleased(void)
 {
-	while (uiGetKeys());
+	while (uiGetUiKeys());
 }
 
-static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint8_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
+static void uiPrvRequestToolExit(void)
 {
-	uint_fast8_t i, itemHeight = uiPrvGlyphHeight(cnv) + 1, row = cnv->h - numChoices * itemHeight, fore = cnv->foreColor, back = cnv->backColor, gotKey;
-	uint8_t btnsMask = btnsMaskP ? *btnsMaskP : KEY_BIT_A;
+	if (mToolExitEnabled)
+		mToolExitRequested = true;
+}
+
+static void uiPrvClearToolExit(void)
+{
+	mToolExitRequested = false;
+}
+
+static bool uiPrvToolExitRequested(void)
+{
+	return mToolExitRequested;
+}
+
+static bool uiPrvCenterExitPressedRaw(void)
+{
+	if (mToolExitEnabled && (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER)) {
+		mToolExitRequested = true;
+		return true;
+	}
+
+	return false;
+}
+
+static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint_fast16_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
+{
+	uint_fast8_t i, itemHeight = uiPrvGlyphHeight(cnv) + 1, row = cnv->h - numChoices * itemHeight, fore = cnv->foreColor, back = cnv->backColor;
+	uint_fast16_t gotKey;
+	uint_fast16_t btnsMask = btnsMaskP ? *btnsMaskP : KEY_BIT_A;
 	
 	while (1) {
 		
@@ -490,6 +521,15 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 		}
 		
 		switch (gotKey = uiPrvRecvKeypress()) {
+			case UI_KEY_BIT_CENTER:
+				if (mToolExitEnabled) {
+					uiPrvRequestToolExit();
+					if (btnsMaskP)
+						*btnsMaskP = gotKey;
+					return curChoice;
+				}
+				break;
+
 			case KEY_BIT_DOWN:
 				if (curChoice < numChoices - 1)
 					curChoice++;
@@ -600,7 +640,7 @@ static bool uiPrvGetSimpleAnswer(struct Canvas *cnv, enum DialogType dialogType)
 	};
 
 	const char *opts;
-	uint_fast8_t key;
+	uint_fast16_t key;
 
 	//get message
 	if ((unsigned)dialogType >= sizeof(textTypes) / sizeof(*textTypes) || !textTypes[dialogType])
@@ -620,6 +660,11 @@ static bool uiPrvGetSimpleAnswer(struct Canvas *cnv, enum DialogType dialogType)
 		
 		if (key & KEY_BIT_B)
 			return dialogType == DialogTypeOk;
+
+		if (key & UI_KEY_BIT_CENTER) {
+			uiPrvRequestToolExit();
+			return dialogType == DialogTypeOk;
+		}
 	}
 }
 
@@ -1277,7 +1322,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		*topItemP = topItem;
 	}
 
-	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
+	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, bool ignoreRootBack, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
 	{
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
 		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
@@ -1370,6 +1415,10 @@ reload_dir:
 			prevSelOnscreenItem = selectedOnscreenItem;
 
 			switch (uiPrvRecvKeypress()) {
+				case UI_KEY_BIT_CENTER:
+					uiPrvRequestToolExit();
+					return false;
+
 				case KEY_BIT_A:
 					if (depth && selectedItem == 0) {
 						depth--;
@@ -1407,6 +1456,8 @@ reload_dir:
 						path[pathLenStack[depth]] = 0;
 						goto reload_dir;
 					}
+					if (ignoreRootBack)
+						break;
 					return false;
 
 				case KEY_BIT_DOWN:
@@ -1508,7 +1559,7 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 	while (1) {
 
 		int_fast8_t numOptions = 0, doneOption, ledPatternOption, ledColorOption, ledRedOption = -1, ledGreenOption = -1, ledBlueOption = -1, ledSpeedOption, ledBrightnessOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 
 		uiPrvReset(cnv, false);
 
@@ -1561,6 +1612,8 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 		uiPrintf(cnv, cnv->h - numOptions * itemHeight, 111, "%u         ", uiPrvLedBrightnessToMenu(settings->ledBrightness));
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		if (uiPrvToolExitRequested())
+			return;
 		if (button == KEY_BIT_B || selOption == doneOption)
 			return;
 
@@ -1670,7 +1723,7 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 	while (1) {
 
 		int_fast8_t numOptions = 0, doneOption, contrastOption = -1, brightnessOption = -1, rotationOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 
 		uiPrvReset(cnv, false);
 
@@ -1701,6 +1754,8 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 	#endif
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		if (uiPrvToolExitRequested())
+			return;
 		if (button == KEY_BIT_B || selOption == doneOption)
 			return;
 
@@ -1758,7 +1813,7 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 	while (1) {
 
 		int_fast8_t numOptions = 0, doneOption, cgbOption, upscaleOption, speedOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speedNames[][8] = DISP_SPEED_NAMES;
 		static const uint8_t speedSettings[] = DISP_SPEED_SETTINGS;
 		uint_fast8_t numSpeeds = sizeof(speedSettings) / sizeof(*speedSettings);
@@ -1791,6 +1846,8 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 		uiPuts(cnv, cnv->h - numOptions * itemHeight, 111, speedNames[settings->speed], sizeof(speedNames[settings->speed]));
 
 		selOption = numOptions - 1 - uiPrvMenu(cnv,  numOptions - 1 - selOption, numOptions, &button);
+		if (uiPrvToolExitRequested())
+			return restartCurGame;
 		if (button == KEY_BIT_B || selOption == doneOption)
 			return restartCurGame;
 
@@ -1827,7 +1884,7 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 	}
 }
 
-static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//return true if anything for the current game may have changes
+static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exitOnDone)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
 	struct Settings settings;
@@ -1844,7 +1901,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 
 	while (1) {
 		uint_fast8_t screenOption = 0, gameOption = 1, ledSettingsOption = 2, doneOption = 3, selOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvReset(cnv, false);
 		uiPuts(cnv, cnv->h - 4 * itemHeight, 10, "Screen", -1);
@@ -1853,9 +1910,15 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "DONE", -1);
 
 		selOption = uiPrvMenu(cnv, 0, 4, &button);
-		if (button == KEY_BIT_B || selOption == doneOption) {
+		if (uiPrvToolExitRequested()) {
 			settingsSet(&settings);
 			return restartCurGame;
+		}
+		if (button == KEY_BIT_B || selOption == doneOption) {
+			settingsSet(&settings);
+			if (exitOnDone)
+				return restartCurGame;
+			continue;
 		}
 		if (selOption == screenOption)
 			uiPrvScreenSettings(cnv, &settings);
@@ -1863,6 +1926,10 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv)		//retur
 			restartCurGame = uiPrvGameSettings(cnv, &settings) || restartCurGame;
 		else if (selOption == ledSettingsOption)
 			uiPrvLedSettings(cnv, &settings);
+		if (uiPrvToolExitRequested()) {
+			settingsSet(&settings);
+			return restartCurGame;
+		}
 	}
 }
 
@@ -2387,7 +2454,7 @@ bool uiSaveSavestate(void)
 		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
-		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROM", &locator, name, sizeof(name), NULL, 0))
+		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROM", false, &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:
@@ -2630,6 +2697,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static bool uiPrvIrCancelRequested(void)
 	{
+		if (uiPrvCenterExitPressedRaw())
+			return true;
+
 		return !!(uiGetKeysRaw() & KEY_BIT_B);
 	}
 
@@ -3266,7 +3336,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "IR spam cancelled", DialogTypeOk);
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "IR spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
@@ -3335,7 +3406,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "Mute cancelled", DialogTypeOk);
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "Mute cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
@@ -3401,7 +3473,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "IR action cancelled", DialogTypeOk);
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "IR action cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
@@ -3543,6 +3616,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			prevSelOnscreenItem = selectedOnscreenItem;
 
 			switch (uiPrvRecvKeypress()) {
+				case UI_KEY_BIT_CENTER:
+					uiPrvRequestToolExit();
+					return NULL;
+
 				case KEY_BIT_A:
 					return uiPrvFileOptionAt(head, 0, selectedItem);
 
@@ -3609,7 +3686,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
 		else if (stats.cancelled) {
-			uiAlert(cnv, "IR button spam cancelled", DialogTypeOk);
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "IR button spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
@@ -3628,7 +3706,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	static const char *uiPrvIrKnownActionMenu(struct Canvas *cnv, const struct IrUniversalRemote *remote)
 	{
 		uint_fast8_t itemHeight, i, selOption;
-		uint8_t button = KEY_BIT_A | KEY_BIT_B;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		if (!remote->numButtons)
 			return NULL;
@@ -3640,6 +3718,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
 
 		selOption = uiPrvMenu(cnv, 0, remote->numButtons + 1, &button);
+		if (uiPrvToolExitRequested())
+			return NULL;
 		if (button == KEY_BIT_B || selOption == remote->numButtons)
 			return NULL;
 
@@ -3768,7 +3848,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		if (!vol)
 			return false;
 
-		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", &locator, fileName, sizeof(fileName), NULL, 0))
+		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", true, &locator, fileName, sizeof(fileName), NULL, 0))
 			goto out_unmount;
 
 		ret = uiPrvIrButtonSpamLocator(cnv, vol, &locator, fileName);
@@ -3784,19 +3864,22 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		while (1) {
 			uint_fast8_t itemHeight, selOption, i;
 			uint_fast8_t numRemotes = sizeof(mIrUniversalRemotes) / sizeof(*mIrUniversalRemotes);
-			uint8_t button = KEY_BIT_A | KEY_BIT_B;
+			uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 			uiPrvReset(cnv, false);
 			itemHeight = uiPrvGlyphHeight(cnv) + 1;
 
 			for (i = 0; i < numRemotes; i++)
-				uiPuts(cnv, cnv->h - (numRemotes + 1 - i) * itemHeight, 10, mIrUniversalRemotes[i].name, -1);
-			uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Back", -1);
+				uiPuts(cnv, cnv->h - (numRemotes - i) * itemHeight, 10, mIrUniversalRemotes[i].name, -1);
 
-			selOption = uiPrvMenu(cnv, 0, numRemotes + 1, &button);
-			if (button == KEY_BIT_B || selOption == numRemotes)
+			selOption = uiPrvMenu(cnv, 0, numRemotes, &button);
+			if (uiPrvToolExitRequested())
 				return false;
+			if (button == KEY_BIT_B)
+				continue;
 			(void)uiPrvIrUniversalRemote(cnv, &mIrUniversalRemotes[selOption]);
+			if (uiPrvToolExitRequested())
+				return false;
 		}
 	}
 
@@ -3936,7 +4019,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		struct Canvas *cnv;
 		struct Settings *settings;
 		const char *name;
-		uint8_t prevKeys;
+		uint_fast16_t prevKeys;
 		uint8_t focus;
 		uint8_t lastPct;
 		uint32_t lastProgressFillRight;
@@ -4053,10 +4136,14 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	static enum MusicPlayerControl uiPrvMusicControl(void *userData, const struct MusicPlayerStatus *status)
 	{
 		struct MusicUiData *data = (struct MusicUiData*)userData;
-		uint8_t keys = uiGetKeysRaw(), pressed = keys &~ data->prevKeys;
+		uint_fast16_t keys = uiGetUiKeysRaw(), pressed = keys &~ data->prevKeys;
 		uint64_t now = getTime();
 
 		data->prevKeys = keys;
+		if (pressed & UI_KEY_BIT_CENTER) {
+			uiPrvRequestToolExit();
+			return MusicPlayerControlStop;
+		}
 		if (pressed & KEY_BIT_LEFT) {
 			if (data->focus)
 				data->focus--;
@@ -4133,7 +4220,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			return MusicPlayerResultStopped;
 		}
 
-		data.prevKeys = uiGetKeysRaw();
+		data.prevKeys = uiGetUiKeysRaw();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
 		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		audioPwmStop();
@@ -4260,6 +4347,10 @@ reload_dir:
 			prevSelOnscreenItem = selectedOnscreenItem;
 
 			switch (uiPrvRecvKeypress()) {
+				case UI_KEY_BIT_CENTER:
+					uiPrvRequestToolExit();
+					goto out_unmount;
+
 				case KEY_BIT_A:
 					if (depth && selectedItem == 0) {
 						depth--;
@@ -4316,8 +4407,7 @@ reload_dir:
 						path[pathLenStack[depth]] = 0;
 						goto reload_dir;
 					}
-					else
-						goto out_unmount;
+					break;
 
 				case KEY_BIT_DOWN:
 					if (selectedItem + 1 < totalItems) {
@@ -4378,6 +4468,8 @@ reload_dir:
 		struct Canvas *cnv = data->cnv;
 		uint64_t now = getTime();
 
+		if (uiPrvCenterExitPressedRaw())
+			return false;
 		if (uiGetKeysRaw() & KEY_BIT_B)
 			return false;
 
@@ -4416,11 +4508,15 @@ reload_dir:
 		uiPuts(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "A = Continue", -1);
 		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Cancel", -1);
 		while (1) {
-			uint8_t key = uiPrvRecvKeypress();
+			uint_fast16_t key = uiPrvRecvKeypress();
 
 			if (key & KEY_BIT_A) {
 				data->forceDraw = true;
 				return true;
+			}
+			if (key & UI_KEY_BIT_CENTER) {
+				uiPrvRequestToolExit();
+				return false;
 			}
 			if (key & KEY_BIT_B)
 				return false;
@@ -4459,8 +4555,10 @@ reload_dir:
 			uiAlert(cnv, "BadUSB script complete", DialogTypeOk);
 			ok = true;
 		}
-		else if (ret == BadUsbResultCancelled)
-			uiAlert(cnv, "BadUSB script cancelled", DialogTypeOk);
+		else if (ret == BadUsbResultCancelled) {
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "BadUSB script cancelled", DialogTypeOk);
+		}
 		else if (ret == BadUsbResultUsbError)
 			uiAlert(cnv, "BadUSB USB device failed to enumerate", DialogTypeOk);
 		else if (ret == BadUsbResultFileError)
@@ -4484,12 +4582,14 @@ reload_dir:
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
 			return false;
-		if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", &locator, name, sizeof(name), NULL, 0))
-			goto out_unmount;
 
-		ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name);
+		while (!uiPrvToolExitRequested()) {
+			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", true, &locator, name, sizeof(name), NULL, 0))
+				break;
 
-	out_unmount:
+			ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name) || ok;
+		}
+
 		(void)uiPrvCardPreUnmount();
 		fatfsUnmount(vol);
 		return ok;
@@ -4538,7 +4638,7 @@ static bool uiPrvAutoClickerSettings(struct Canvas *cnv, uint_fast8_t *speedIdxP
 	uint_fast8_t selected = 0;
 
 	while (1) {
-		uint_fast8_t key;
+		uint_fast16_t key;
 
 		uiPrvAutoClickerSettingsDraw(cnv, selected, *speedIdxP, *jigglerP);
 		key = uiPrvRecvKeypress();
@@ -4792,7 +4892,10 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolPowerOff] = "Power Off",
 	};
 	uint_fast8_t itemHeight, i, selOption;
-	uint8_t button = KEY_BIT_A | KEY_BIT_B;
+	uint_fast16_t button = KEY_BIT_A;
+
+	mToolExitEnabled = false;
+	uiPrvClearToolExit();
 
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
@@ -4800,8 +4903,6 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		uiPuts(cnv, cnv->h - (UiToolNum - i) * itemHeight, 10, names[i], -1);
 
 	selOption = uiPrvMenu(cnv, curTool, UiToolNum, &button);
-	if (button == KEY_BIT_B)
-		return curTool;
 	return (enum UiToolId)selOption;
 }
 
@@ -4810,7 +4911,7 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	enum UiBrowserOpenWithId ids[8];
 	const char *labels[8];
 	uint_fast8_t numOptions = 0, itemHeight, i, selOption;
-	uint8_t button = KEY_BIT_A | KEY_BIT_B;
+	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 	if (uiPrvIrRemoteFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenIrButtonSpam;
@@ -4845,6 +4946,8 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Cancel", -1);
 
 	selOption = uiPrvMenu(cnv, 0, numOptions + 1, &button);
+	if (uiPrvToolExitRequested())
+		return UiBrowserOpenCancelled;
 	if (button == KEY_BIT_B || selOption == numOptions)
 		return UiBrowserOpenCancelled;
 	return ids[selOption];
@@ -4918,7 +5021,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 
 	if (!browserPath || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ) {
 		uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
-		return uiPrvToolSwitcher(cnv, UiToolBrowser);
+		return UiToolBrowser;
 	}
 	browserPath[0] = '/';
 	browserPath[1] = 0;
@@ -4927,20 +5030,19 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	uiPrvDrawWrappedString(cnv, "Opening Browser...", 32, 10);
 	vol = uiPrvMountCard(cnv, false);
 	if (!vol)
-		return uiPrvToolSwitcher(cnv, UiToolBrowser);
+		return UiToolBrowser;
 
 	while (1) {
-		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
-			nextTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
-			if (nextTool != UiToolBrowser)
-				break;
-			continue;
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", true, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
+			break;
 		}
 		memset(&ref, 0, sizeof(ref));
 		ref.locator = locator;
 		ref.name = name;
 		ref.parentPath = browserPath;
 		nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref);
+		if (uiPrvToolExitRequested())
+			break;
 		if (nextTool != UiToolBrowser)
 			break;
 		browserPath[0] = '/';
@@ -5007,7 +5109,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		char name[ROM_NAME_LEN + 1];
 		uint32_t ramSz = 0;
 		bool validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
-		uint8_t button = KEY_BIT_A | KEY_BIT_B;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvReset(cnv, false);
 		itemHeight = uiPrvGlyphHeight(cnv) + 1;
@@ -5021,21 +5123,27 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		uiPuts(cnv, cnv->h - (validRom ? 2 : 2) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
 	#endif
 		switchOption = numOptions++;
-		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "Switch Tool", -1);
+		uiPuts(cnv, cnv->h - 1 * itemHeight, 10, "App Picker", -1);
 
 		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
-		if (button == KEY_BIT_B || selOption == switchOption)
-			return uiPrvToolSwitcher(cnv, UiToolGame);
+		if (uiPrvToolExitRequested())
+			return UiToolBrowser;
+		if (button == KEY_BIT_B)
+			continue;
+		if (selOption == switchOption)
+			return UiToolBrowser;
 		if (selOption == runOption) {
 			if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
-				return uiPrvToolSwitcher(cnv, UiToolGame);
+				return UiToolBrowser;
 		}
 	#ifndef NO_SD_CARD
 		else if (selOption == selectOption) {
 			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0, false)) {
 				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
-					return uiPrvToolSwitcher(cnv, UiToolGame);
+					return UiToolBrowser;
 			}
+			if (uiPrvToolExitRequested())
+				return UiToolBrowser;
 		}
 	#endif
 	}
@@ -5049,7 +5157,7 @@ enum UiGameAction uiGameMenu(void)
 	char name[ROM_NAME_LEN + 1];
 	uint32_t ramSz = 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
-	uint8_t button = KEY_BIT_A | KEY_BIT_B;
+	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
 	uiPrvReset(cnv, false);
 
@@ -5071,9 +5179,11 @@ enum UiGameAction uiGameMenu(void)
 	uiPuts(cnv, cnv->h - (numOptions - selectOption) * itemHeight, 10, validRom ? "Select Game" : "Load Game", -1);
 #endif
 	uiPuts(cnv, cnv->h - (numOptions - settingsOption) * itemHeight, 10, "Settings", -1);
-	uiPuts(cnv, cnv->h - (numOptions - switchOption) * itemHeight, 10, "Switch Tool", -1);
+	uiPuts(cnv, cnv->h - (numOptions - switchOption) * itemHeight, 10, "App Picker", -1);
 
 	selOption = uiPrvMenu(cnv, 0, numOptions, &button);
+	if (uiPrvToolExitRequested())
+		return UiGameActionSwitchTool;
 	if (button == KEY_BIT_B || selOption == runOption)
 		return UiGameActionResume;
 #ifndef NO_SD_CARD
@@ -5088,6 +5198,11 @@ enum UiGameAction uiGameMenu(void)
 
 		toolWorkspaceBegin();
 		selected = uiPrvSelectRom(cnv, validRom ? ramSz : 0, false);
+		if (uiPrvToolExitRequested()) {
+			toolWorkspaceEnd();
+			mLastGameMenuAction = UiGameActionSwitchTool;
+			return mLastGameMenuAction;
+		}
 		if (selected) {
 			uiPrvLoadSavestate();
 			mLastGameMenuAction = UiGameActionSelectGame;
@@ -5103,7 +5218,9 @@ enum UiGameAction uiGameMenu(void)
 	}
 #endif
 	if (selOption == settingsOption) {
-		mLastGameMenuAction = uiPrvSettings(cnv) ? UiGameActionRestart : UiGameActionResume;
+		mLastGameMenuAction = uiPrvSettings(cnv, true) ? UiGameActionRestart : UiGameActionResume;
+		if (uiPrvToolExitRequested())
+			mLastGameMenuAction = UiGameActionSwitchTool;
 		return mLastGameMenuAction;
 	}
 	if (selOption == switchOption) {
@@ -5117,7 +5234,7 @@ enum UiGameAction uiGameMenu(void)
 void uiRunToolShell(UiRunGameF runGameF, void *userData)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
-	enum UiToolId activeTool;
+	enum UiToolId activeTool = UiToolBrowser;
 
 	uiPrvReset(cnv, false);
 	toolWorkspaceBegin();
@@ -5125,19 +5242,25 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 		pr("boot guard recovered mode %u; starting tool shell\n", bootGuardRecoveredMode());
 		uiPrvShowBootRecovery(cnv);
 	}
-	activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
-
 	while (1) {
+		activeTool = uiPrvToolSwitcher(cnv, activeTool);
+		mToolExitEnabled = true;
+		uiPrvClearToolExit();
+
 		switch (activeTool) {
 			case UiToolBrowser:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
 				activeTool = uiPrvBrowserTool(cnv, runGameF, userData);
 				uiPrvExitTool(UiToolBrowser);
+				if (activeTool == UiToolRunGame) {
+					(void)uiPrvRunLoadedGame(cnv, runGameF, userData);
+					activeTool = UiToolBrowser;
+				}
 			#else
-				activeTool = uiPrvToolSwitcher(cnv, UiToolBrowser);
+				uiAlert(cnv, "Browser requires SD card support", DialogTypeOk);
 			#endif
-				continue;
+				break;
 
 			case UiToolIr:
 			#ifndef NO_SD_CARD
@@ -5173,16 +5296,16 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvEnterTool(activeTool);
 				activeTool = uiPrvGameTool(cnv, runGameF, userData);
 				uiPrvExitTool(UiToolGame);
-				continue;
+				break;
 
 			case UiToolRunGame:
 				(void)uiPrvRunLoadedGame(cnv, runGameF, userData);
 				activeTool = UiToolBrowser;
-				continue;
+				break;
 
 			case UiToolSettings:
 				uiPrvEnterTool(activeTool);
-				(void)uiPrvSettings(cnv);
+				(void)uiPrvSettings(cnv, false);
 				uiPrvExitTool(activeTool);
 				break;
 
@@ -5192,9 +5315,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			default:
 				activeTool = UiToolBrowser;
-				continue;
+				break;
 		}
-		activeTool = uiPrvToolSwitcher(cnv, activeTool);
+		mToolExitEnabled = false;
+		uiPrvClearToolExit();
 	}
 	
 	//we might have changed FPS - reset the counter

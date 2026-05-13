@@ -7,10 +7,10 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 ## Current functionality
 
 - **Game Boy and Game Boy Color emulation** - Runs uGB on the DEF CON 32 badge hardware, including cartridge parsing, mapper support, save RAM handling, optional GBC behavior, display speed selection, and optional upscaling.
-- **Tool shell** - Boots into a badge-native launcher with Browser, IR, BadUSB, Music, Game, Settings, and Power Off entries. A boot guard records crashes or resets inside tools and restarts into a safe shell instead of immediately re-entering the failing mode.
+- **Main Menu** - Boots into a badge-native launcher with File Browser, Universal IR, BadUSB, Music, Game, Settings, and Power Off entries. A boot guard records crashes or resets inside tools and restarts into the Main Menu instead of immediately re-entering the failing mode.
 - **SD-card file browser** - Browses folders on the SD card and opens supported files with the right tool: `.gb`/`.gbc` games, `.ir` remotes, `.txt`/`.badusb` BadUSB scripts, and `.rtttl`/`.txt` RTTTL music.
 - **Game loading and saves** - Loads Game Boy ROMs from SD, confirms ROM metadata before flashing/loading, exports the current save when changing games, and keeps flash-backed save state support for the active game.
-- **IR tools** - Supports Flipper-style `.ir` files, DC32 IR library files, universal remote categories for TV, A/C, Audio, and Projector files on the SD card, individual button selection, and power/mute blast modes with cancellable progress screens.
+- **Universal IR** - Supports Flipper-style `.ir` files, DC32 IR library files, universal remote categories for TV, A/C, Audio, and Projector files on the SD card, individual button selection, and power/mute blast modes with cancellable progress screens.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as a boot-compatible USB HID keyboard. Supported commands include strings, delays, repeats, key chords, hold/release, Alt codes, SysRq, custom USB IDs, and wait-for-button pauses. Mouse and media-key commands are intentionally unsupported in the keyboard-only HID build.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, including folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
 - **LED controls** - Drives the badge WS2812 LEDs with off, all-on, front-on, rear-on, rainbow, pulse, dot, and random patterns; supports custom, rainbow, flame, and random colors; and exposes speed plus brightness controls.
@@ -27,7 +27,7 @@ The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://g
 | General SD file browser | ❌ | ✔️ |
 | BadUSB scripting | ❌ | ✔️ |
 | RTTTL music player | ❌ | ✔️ |
-| IR blast tools | ❌ | ✔️ |
+| Universal IR blast tools | ❌ | ✔️ |
 | Expanded LED pattern/color settings | Only DefconBadgeGame | Persistent |
 | Safe tool-shell recovery after crashes/resets | ❌ | ✔️ |
 

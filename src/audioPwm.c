@@ -47,10 +47,12 @@ static uint32_t audioPwmPrvInvertBit(void)
 
 static void audioPwmPrvWriteDuty(uint32_t duty)
 {
+	volatile uint16_t *cc = (volatile uint16_t*)&pwm_hw->slice[AUDIO_PWM_IDX].cc;
+
 	if (AUDIO_PWM_IS_B)
-		pwm_hw->slice[AUDIO_PWM_IDX].cc = (pwm_hw->slice[AUDIO_PWM_IDX].cc &~ PWM_CH0_CC_B_BITS) | (duty << PWM_CH0_CC_B_LSB);
+		cc[1] = (uint16_t)duty;
 	else
-		pwm_hw->slice[AUDIO_PWM_IDX].cc = (pwm_hw->slice[AUDIO_PWM_IDX].cc &~ PWM_CH0_CC_A_BITS) | (duty << PWM_CH0_CC_A_LSB);
+		cc[0] = (uint16_t)duty;
 }
 
 static void audioPwmPrvWriteToneDuty(void)

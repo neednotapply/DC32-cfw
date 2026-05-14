@@ -47,14 +47,6 @@
 #define USB_HID_CONFIG_DESC_LEN                 34
 #define USB_HID_KEYBOARD_REPORT_SIZE            8
 
-struct UsbSetup {
-        uint8_t bmRequestType;
-        uint8_t bRequest;
-        uint16_t wValue;
-        uint16_t wIndex;
-        uint16_t wLength;
-} __attribute__((packed));
-
 static struct UsbHidDeviceInfo mInfo;
 static uint8_t mConfigured, mPendingAddress, mIdleRate, mProtocol = 1;
 static const uint8_t *mCtrlData;
@@ -231,20 +223,25 @@ static void usbHidPrvControlRead(const void *data, uint16_t len, uint16_t wanted
 
 static void usbHidPrvSetup(void)
 {
-        struct UsbSetup setup;
         uint8_t tmp[64];
         const uint8_t *data = NULL;
+        const volatile uint8_t *pkt = usb_dpram->setup_packet;
+        uint8_t bmRequestType, bRequest;
+        uint16_t wValue, wLength;
         uint16_t len = 0;
 
-        memcpy(&setup, (const void*)usb_dpram->setup_packet, sizeof(setup));
+        bmRequestType = pkt[0];
+        bRequest = pkt[1];
+        wValue = (uint16_t)pkt[2] | ((uint16_t)pkt[3] << 8);
+        wLength = (uint16_t)pkt[6] | ((uint16_t)pkt[7] << 8);
         mEp0DataPid = true;
         mCtrlData = NULL;
         mCtrlRemaining = 0;
         mExpectSetReportOut = false;
 
-        if ((setup.bmRequestType & 0x60) == 0) {
-                if (setup.bRequest == USB_REQ_GET_DESCRIPTOR) {
-                        uint8_t descType = setup.wValue >> 8, descIdx = setup.wValue;
+        if ((bmRequestType & 0x60) == 0) {
+                if (bRequest == USB_REQ_GET_DESCRIPTOR) {
+                        uint8_t descType = wValue >> 8, descIdx = wValue;
 
                         if (descType == USB_DT_DEVICE)
                                 data = usbHidPrvDeviceDesc(&len);
@@ -262,63 +259,63 @@ static void usbHidPrvSetup(void)
                                 data = usbHidPrvHidDesc(&len);
 
                         if (data)
-                                usbHidPrvControlRead(data, len, setup.wLength);
+                                usbHidPrvControlRead(data, len, wLength);
                         else
                                 usbHidPrvEp0Stall();
                 }
-                else if (setup.bRequest == USB_REQ_SET_ADDRESS) {
-                        mPendingAddress = setup.wValue & 0x7f;
+                else if (bRequest == USB_REQ_SET_ADDRESS) {
+                        mPendingAddress = wValue & 0x7f;
                         usbHidPrvEp0In(NULL, 0);
                 }
-                else if (setup.bRequest == USB_REQ_SET_CONFIGURATION) {
-                        mConfigured = setup.wValue;
+                else if (bRequest == USB_REQ_SET_CONFIGURATION) {
+                        mConfigured = wValue;
                         usbHidPrvEp1Init();
                         usbHidPrvEp0In(NULL, 0);
                 }
-                else if (setup.bRequest == USB_REQ_GET_CONFIGURATION) {
+                else if (bRequest == USB_REQ_GET_CONFIGURATION) {
                         tmp[0] = mConfigured;
-                        usbHidPrvControlRead(tmp, 1, setup.wLength);
+                        usbHidPrvControlRead(tmp, 1, wLength);
                 }
-                else if (setup.bRequest == USB_REQ_GET_STATUS) {
+                else if (bRequest == USB_REQ_GET_STATUS) {
                         tmp[0] = tmp[1] = 0;
-                        usbHidPrvControlRead(tmp, 2, setup.wLength);
+                        usbHidPrvControlRead(tmp, 2, wLength);
                 }
-                else if (setup.bRequest == USB_REQ_CLEAR_FEATURE || setup.bRequest == USB_REQ_SET_DESCRIPTOR || setup.bRequest == USB_REQ_SET_INTERFACE) {
+                else if (bRequest == USB_REQ_CLEAR_FEATURE || bRequest == USB_REQ_SET_DESCRIPTOR || bRequest == USB_REQ_SET_INTERFACE) {
                         usbHidPrvEp0In(NULL, 0);
                 }
-                else if (setup.bRequest == USB_REQ_GET_INTERFACE) {
+                else if (bRequest == USB_REQ_GET_INTERFACE) {
                         tmp[0] = 0;
-                        usbHidPrvControlRead(tmp, 1, setup.wLength);
+                        usbHidPrvControlRead(tmp, 1, wLength);
                 }
                 else {
                         usbHidPrvEp0Stall();
                 }
         }
-        else if ((setup.bmRequestType & 0x60) == 0x20) {
-                if (setup.bRequest == HID_REQ_SET_IDLE) {
-                        mIdleRate = setup.wValue >> 8;
+        else if ((bmRequestType & 0x60) == 0x20) {
+                if (bRequest == HID_REQ_SET_IDLE) {
+                        mIdleRate = wValue >> 8;
                         usbHidPrvEp0In(NULL, 0);
                 }
-                else if (setup.bRequest == HID_REQ_GET_IDLE) {
+                else if (bRequest == HID_REQ_GET_IDLE) {
                         tmp[0] = mIdleRate;
-                        usbHidPrvControlRead(tmp, 1, setup.wLength);
+                        usbHidPrvControlRead(tmp, 1, wLength);
                 }
-                else if (setup.bRequest == HID_REQ_SET_PROTOCOL) {
-                        mProtocol = setup.wValue;
+                else if (bRequest == HID_REQ_SET_PROTOCOL) {
+                        mProtocol = wValue;
                         usbHidPrvEp0In(NULL, 0);
                 }
-                else if (setup.bRequest == HID_REQ_GET_PROTOCOL) {
+                else if (bRequest == HID_REQ_GET_PROTOCOL) {
                         tmp[0] = mProtocol;
-                        usbHidPrvControlRead(tmp, 1, setup.wLength);
+                        usbHidPrvControlRead(tmp, 1, wLength);
                 }
-                else if (setup.bRequest == HID_REQ_GET_REPORT) {
+                else if (bRequest == HID_REQ_GET_REPORT) {
                         memset(tmp, 0, sizeof(tmp));
-                        usbHidPrvControlRead(tmp, setup.wLength > sizeof(tmp) ? sizeof(tmp) : setup.wLength, setup.wLength);
+                        usbHidPrvControlRead(tmp, wLength > sizeof(tmp) ? sizeof(tmp) : wLength, wLength);
                 }
-                else if (setup.bRequest == HID_REQ_SET_REPORT) {
-                        if (setup.wLength) {
+                else if (bRequest == HID_REQ_SET_REPORT) {
+                        if (wLength) {
                                 mExpectSetReportOut = true;
-                                usbHidPrvEp0OutData(setup.wLength);
+                                usbHidPrvEp0OutData(wLength);
                         }
                         else {
                                 usbHidPrvEp0In(NULL, 0);

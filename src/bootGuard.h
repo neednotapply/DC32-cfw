@@ -28,7 +28,7 @@ void bootGuardEnter(enum BootGuardMode mode);
 void bootGuardExit(enum BootGuardMode mode);
 enum BootGuardMode bootGuardRecoveredMode(void);
 void bootGuardRecoveredCrashInfo(struct BootGuardCrashInfo *info);
-void bootGuardCaptureHardFault(uint32_t *regs, uint32_t retLr, uint32_t *userSp);
+void bootGuardCaptureHardFault(uint32_t *frame, uint32_t retLr);
 void bootGuardClear(void);
 
 #endif

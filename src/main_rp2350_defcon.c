@@ -2009,15 +2009,14 @@ void __attribute__((used)) report_hard_fault(uint32_t* regs, uint32_t ret_lr, ui
 void __attribute__((naked, used)) HardFault_Handler(void)
 {
         asm volatile(
-                        "push {r4-r7}                           \n\t"
-                        "mov  r0, r8                            \n\t"
-                        "mov  r1, r9                            \n\t"
-                        "mov  r2, r10                           \n\t"
-                        "mov  r3, r11                           \n\t"
-                        "push {r0-r3}                           \n\t"
-                        "mov  r0, sp                            \n\t"
-                        "mov  r1, lr                            \n\t"
-                        "mrs  r2, PSP                           \n\t"
-                        "bl   bootGuardCaptureHardFault          \n\t"
+                        "tst  lr, #4                            \n\t"
+                        "bne  1f                                \n\t"
+                        "mrs  r0, msp                           \n\t"
+                        "b    2f                                \n\t"
+                        "1:                                     \n\t"
+                        "mrs  r0, psp                           \n\t"
+                        "2:                                     \n\t"
+                        "mov  r1, lr                             \n\t"
+                        "b    bootGuardCaptureHardFault          \n\t"
                         :::"memory");
 }

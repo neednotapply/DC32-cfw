@@ -70,16 +70,18 @@ void bootGuardRecoveredCrashInfo(struct BootGuardCrashInfo *info)
 	info->bfar = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_BFAR];
 }
 
-void bootGuardCaptureHardFault(uint32_t *regs, uint32_t retLr, uint32_t *userSp)
+void bootGuardCaptureHardFault(uint32_t *frame, uint32_t retLr)
 {
-	uint32_t *push = (retLr == 0xFFFFFFFD) ? userSp : (regs + 8), *sp = push + 8;
+	uint32_t *sp = frame + 8;
+
+	(void)retLr;
 
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MAGIC] = BOOT_GUARD_MAGIC;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MODE] = BootGuardModeHardFault;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON] = BOOT_GUARD_MAGIC ^ watchdog_hw->reason;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_CFSR] = SCB->CFSR;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_HFSR] = SCB->HFSR;
-	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_PC] = push[6];
+	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_PC] = frame[6];
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_SP] = (uint32_t)sp;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_BFAR] = SCB->BFAR;
 

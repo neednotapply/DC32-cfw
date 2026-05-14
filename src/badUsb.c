@@ -2,9 +2,10 @@
 #include "badUsb.h"
 #include "timebase.h"
 
-#define BADUSB_LINE_BUF_SZ			512
+#define BADUSB_LINE_BUF_SZ			2048
 #define BADUSB_KEY_DELAY_MS			12
 #define BADUSB_ENUM_WAIT_MS			5000
+#define BADUSB_HOST_SETTLE_MS			1500
 
 struct BadUsbState {
 	struct BadUsbStatus status;
@@ -16,7 +17,6 @@ struct BadUsbState {
 	uint32_t nextStringDelay;
 	uint8_t heldMods;
 	uint8_t heldKeys[6];
-	bool validateOnly;
 };
 
 struct BadUsbKey {
@@ -150,26 +150,6 @@ static bool badUsbPrvAtEnd(const char *str)
 	return !*str;
 }
 
-static bool badUsbPrvParseI32(const char **strP, int32_t *valP)
-{
-	const char *str = *strP;
-	uint32_t val;
-	bool neg = false;
-
-	if (*str == '-') {
-		neg = true;
-		str++;
-	}
-	if (!badUsbPrvParseU32(&str, &val))
-		return false;
-	if ((!neg && val > 2147483647ul) || (neg && val > 2147483648ul))
-		return false;
-
-	*strP = str;
-	*valP = neg ? (val == 2147483648ul ? (int32_t)0x80000000ul : -(int32_t)val) : (int32_t)val;
-	return true;
-}
-
 static bool badUsbPrvParseHex4(const char *str, uint16_t *valP)
 {
 	uint32_t val = 0, i;
@@ -189,6 +169,12 @@ static bool badUsbPrvParseHex4(const char *str, uint16_t *valP)
 	return true;
 }
 
+static void badUsbPrvSetState(struct BadUsbState *st, enum BadUsbWorkerState state, const char *msg)
+{
+	st->status.state = state;
+	st->status.message = msg;
+}
+
 static void badUsbPrvCopy(char *dst, uint32_t dstLen, const char *src)
 {
 	if (!dstLen)
@@ -200,13 +186,17 @@ static void badUsbPrvCopy(char *dst, uint32_t dstLen, const char *src)
 
 static bool badUsbPrvPoll(struct BadUsbState *st, const char *msg)
 {
-	st->status.message = msg;
+	if (msg)
+		st->status.message = msg;
 	usbHidTask();
 	return !st->statusF || st->statusF(st->userData, &st->status);
 }
 
 static bool badUsbPrvFail(struct BadUsbState *st, const char *msg)
 {
+	badUsbPrvCopy(st->status.error, sizeof(st->status.error), msg);
+	st->status.errorLine = st->status.lineNo;
+	st->status.state = BadUsbStateScriptError;
 	(void)badUsbPrvPoll(st, msg);
 	return false;
 }
@@ -214,13 +204,21 @@ static bool badUsbPrvFail(struct BadUsbState *st, const char *msg)
 static bool badUsbPrvDelay(struct BadUsbState *st, uint32_t msec, const char *msg)
 {
 	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
+	enum BadUsbWorkerState prevState = st->status.state;
 
-	if (st->validateOnly)
-		return badUsbPrvPoll(st, "Parsing");
+	if (msec >= 1000)
+		badUsbPrvSetState(st, BadUsbStateDelay, msg);
 	while (getTime() < end) {
+		uint64_t now = getTime();
+
+		if (msec >= 1000)
+			st->status.delayRemainSec = (uint32_t)((end - now + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND);
 		if (!badUsbPrvPoll(st, msg))
 			return false;
 	}
+	st->status.delayRemainSec = 0;
+	if (msec >= 1000)
+		st->status.state = prevState;
 	return true;
 }
 
@@ -228,6 +226,7 @@ static bool badUsbPrvWaitReady(struct BadUsbState *st)
 {
 	uint64_t end = getTime() + (uint64_t)BADUSB_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
 
+	badUsbPrvSetState(st, BadUsbStateNotConnected, "Waiting for USB");
 	while (getTime() < end) {
 		if (!badUsbPrvPoll(st, "Waiting for USB"))
 			return false;
@@ -385,8 +384,6 @@ static bool badUsbPrvSendKeyboard(struct BadUsbState *st, uint8_t mods, uint8_t 
 	memcpy(keys, st->heldKeys, sizeof(keys));
 	if (!badUsbPrvSetKey(keys, usage, true))
 		return false;
-	if (st->validateOnly)
-		return true;
 	if (!usbHidKeyboardReport(st->heldMods | mods, keys))
 		return false;
 	if (!badUsbPrvDelay(st, BADUSB_KEY_DELAY_MS, "Sending keys"))
@@ -465,8 +462,6 @@ static bool badUsbPrvChord(struct BadUsbState *st, char *cmd)
 		tok = end;
 	}
 
-	if (st->validateOnly)
-		return true;
 	if (!usbHidKeyboardReport(st->heldMods | mods, keys))
 		return false;
 	if (!badUsbPrvDelay(st, BADUSB_KEY_DELAY_MS, "Sending keys"))
@@ -494,8 +489,6 @@ static bool badUsbPrvHoldRelease(struct BadUsbState *st, char *arg, bool hold)
 	}
 	else
 		return badUsbPrvFail(st, "Unknown key");
-	if (st->validateOnly)
-		return true;
 	return usbHidKeyboardReport(st->heldMods, st->heldKeys);
 }
 
@@ -618,11 +611,19 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		return badUsbPrvChord(st, chord);
 	}
 	if (badUsbPrvEq(cmd, "WAIT_FOR_BUTTON_PRESS")) {
-		if (st->validateOnly)
-			return true;
 		if (!st->waitButtonF)
 			return true;
+		badUsbPrvSetState(st, BadUsbStateWaitForButton, "Waiting for button");
 		return st->waitButtonF(st->userData, &st->status);
+	}
+	if (badUsbPrvEq(cmd, "MEDIA") ||
+	    badUsbPrvEq(cmd, "MOUSEMOVE") || badUsbPrvEq(cmd, "MOUSE_MOVE") ||
+	    badUsbPrvEq(cmd, "MOUSESCROLL") || badUsbPrvEq(cmd, "MOUSE_SCROLL")) {
+		st->status.unsupportedCommands++;
+		st->status.lastUnsupportedLine = st->status.lineNo;
+		badUsbPrvCopy(st->status.lastUnsupportedCommand, sizeof(st->status.lastUnsupportedCommand), cmd);
+		(void)badUsbPrvPoll(st, "Unsupported command skipped");
+		return true;
 	}
 	if (*arg) {
 		char *chord = mScratch.chord;
@@ -648,15 +649,66 @@ static bool badUsbPrvIsRepeat(char *trimmed, const char **argP)
 	return true;
 }
 
-static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbState *st, bool validateOnly)
+static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbState *st, struct UsbHidDeviceInfo *info)
+{
+	char *line = mScratch.line, *trimmed;
+	uint32_t bytesRead = 0;
+	bool truncated;
+
+	usbHidDefaultInfo(info);
+	st->status.lineNo = 0;
+	st->status.lineTotal = 0;
+	st->status.bytesRead = 0;
+	if (!fatfsFileSeek(fil, 0))
+		return BadUsbResultFileError;
+	while (badUsbPrvReadLine(fil, line, BADUSB_LINE_BUF_SZ, &bytesRead, &truncated)) {
+		st->status.lineTotal++;
+		st->status.bytesRead = bytesRead;
+		if (truncated) {
+			st->status.lineNo = st->status.lineTotal;
+			(void)badUsbPrvFail(st, "Line too long");
+			return BadUsbResultDecodeError;
+		}
+		if (st->status.lineTotal == 1) {
+			trimmed = badUsbPrvTrim(line);
+			if (badUsbPrvStarts(trimmed, "ID ")) {
+				char *p = badUsbPrvTrim(trimmed + 2);
+
+				if (badUsbPrvParseHex4(p, &info->vid) && p[4] == ':' && badUsbPrvParseHex4(p + 5, &info->pid)) {
+					p += 9;
+					while (*p == ' ' || *p == '\t')
+						p++;
+					if (*p) {
+						char *sep = p;
+
+						while (*sep && *sep != ':')
+							sep++;
+						if (*sep) {
+							*sep++ = 0;
+							badUsbPrvCopy(info->manufacturer, sizeof(info->manufacturer), badUsbPrvTrim(p));
+							badUsbPrvCopy(info->product, sizeof(info->product), badUsbPrvTrim(sep));
+						}
+					}
+				}
+			}
+		}
+		if (!badUsbPrvPoll(st, "Preloading"))
+			return BadUsbResultCancelled;
+	}
+	st->status.bytesRead = 0;
+	st->status.lineNo = 0;
+	return fatfsFileSeek(fil, 0) ? BadUsbResultDone : BadUsbResultFileError;
+}
+
+static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbState *st)
 {
 	char *line = mScratch.line, *prevLine = mScratch.prevLine;
 	bool truncated;
 
 	prevLine[0] = 0;
-	st->validateOnly = validateOnly;
 	st->status.lineNo = 0;
 	st->status.bytesRead = 0;
+	st->status.delayRemainSec = 0;
 	st->heldMods = 0;
 	st->defaultDelay = 0;
 	st->defaultStringDelay = 0;
@@ -670,9 +722,12 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 		const char *repeatArg;
 
 		st->status.lineNo++;
-		if (truncated)
-			return badUsbPrvFail(st, "Line too long"), BadUsbResultDecodeError;
-		if (!badUsbPrvPoll(st, validateOnly ? "Parsing" : "Running"))
+		if (truncated) {
+			(void)badUsbPrvFail(st, "Line too long");
+			return BadUsbResultDecodeError;
+		}
+		badUsbPrvSetState(st, BadUsbStateRunning, "Running");
+		if (!badUsbPrvPoll(st, "Running"))
 			return BadUsbResultCancelled;
 
 		badUsbPrvCopy(execLine, BADUSB_LINE_BUF_SZ, line);
@@ -749,26 +804,42 @@ enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, Bad
 	st.userData = userData;
 	st.status.fileSize = fatfsFileGetSize(fil);
 
-	if (!badUsbReadDeviceInfo(fil, &info))
-		return BadUsbResultFileError;
-	ret = badUsbPrvRunScript(fil, &st, true);
-	if (ret != BadUsbResultDone)
+	badUsbPrvSetState(&st, BadUsbStateInit, "Preloading");
+	ret = badUsbPrvPreload(fil, &st, &info);
+	if (ret != BadUsbResultDone) {
+		if (ret == BadUsbResultFileError)
+			st.status.state = BadUsbStateFileError;
 		return ret;
+	}
 
-	st.validateOnly = false;
+	badUsbPrvSetState(&st, BadUsbStateWillRun, "Starting USB");
 	if (!badUsbPrvPoll(&st, "Starting USB"))
 		return BadUsbResultCancelled;
-	if (!usbHidBegin(&info))
+	if (!usbHidBegin(&info)) {
+		badUsbPrvSetState(&st, BadUsbStateUsbError, usbHidLastError());
+		(void)badUsbPrvPoll(&st, usbHidLastError());
 		return BadUsbResultUsbError;
+	}
 	usbStarted = true;
 	if (!badUsbPrvWaitReady(&st)) {
+		badUsbPrvSetState(&st, BadUsbStateUsbError, "USB device failed to enumerate");
 		ret = BadUsbResultUsbError;
+		goto out_usb;
+	}
+
+	badUsbPrvSetState(&st, BadUsbStateIdle, "USB ready");
+	if (!badUsbPrvPoll(&st, "USB ready")) {
+		ret = BadUsbResultCancelled;
+		goto out_usb;
+	}
+	if (!badUsbPrvDelay(&st, BADUSB_HOST_SETTLE_MS, "Host settle")) {
+		ret = BadUsbResultCancelled;
 		goto out_usb;
 	}
 
 	usbHidSetReportsEnabled(true);
 	reportsEnabled = true;
-	ret = badUsbPrvRunScript(fil, &st, false);
+	ret = badUsbPrvRunScript(fil, &st);
 out_usb:
 	if (reportsEnabled) {
 		usbHidReleaseAll();
@@ -778,6 +849,7 @@ out_usb:
 		usbHidEnd();
 	if (ret != BadUsbResultDone)
 		return ret;
+	badUsbPrvSetState(&st, BadUsbStateDone, "Done");
 	if (!badUsbPrvPoll(&st, "Done"))
 		return BadUsbResultCancelled;
 	return BadUsbResultDone;

@@ -14,10 +14,33 @@ enum BadUsbResult {
 	BadUsbResultUsbError,
 };
 
+enum BadUsbWorkerState {
+	BadUsbStateInit,
+	BadUsbStateNotConnected,
+	BadUsbStateIdle,
+	BadUsbStateWillRun,
+	BadUsbStateRunning,
+	BadUsbStateDelay,
+	BadUsbStatePaused,
+	BadUsbStateWaitForButton,
+	BadUsbStateDone,
+	BadUsbStateScriptError,
+	BadUsbStateFileError,
+	BadUsbStateUsbError,
+};
+
 struct BadUsbStatus {
+	enum BadUsbWorkerState state;
 	uint32_t lineNo;
+	uint32_t lineTotal;
 	uint32_t fileSize;
 	uint32_t bytesRead;
+	uint32_t delayRemainSec;
+	uint32_t errorLine;
+	uint32_t unsupportedCommands;
+	uint32_t lastUnsupportedLine;
+	char error[64];
+	char lastUnsupportedCommand[32];
 	const char *message;
 };
 

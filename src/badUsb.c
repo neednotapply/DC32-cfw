@@ -5,8 +5,6 @@
 #define BADUSB_LINE_BUF_SZ			2048
 #define BADUSB_PRELOAD_BUF_SZ			128
 #define BADUSB_KEY_DELAY_MS			12
-#define BADUSB_ENUM_WAIT_MS			5000
-#define BADUSB_HOST_SETTLE_MS			1500
 
 struct BadUsbState {
 	struct BadUsbStatus status;
@@ -219,20 +217,6 @@ static bool badUsbPrvDelay(struct BadUsbState *st, uint32_t msec, const char *ms
 	if (msec >= 1000)
 		st->status.state = prevState;
 	return true;
-}
-
-static bool badUsbPrvWaitReady(struct BadUsbState *st)
-{
-	uint64_t end = getTime() + (uint64_t)BADUSB_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-
-	badUsbPrvSetState(st, BadUsbStateNotConnected, "Waiting for USB");
-	while (getTime() < end) {
-		if (!badUsbPrvPoll(st, "Waiting for USB"))
-			return false;
-		if (usbHidReady())
-			return true;
-	}
-	return usbHidReady();
 }
 
 static bool badUsbPrvKeyInHeld(const uint8_t keys[6], uint8_t usage)
@@ -686,7 +670,7 @@ static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbSta
 {
 	char *firstLine = mScratch.line;
 	char *buf = mScratch.preloadBuf;
-	uint32_t bytesRead = 0, lineLen = 0, firstLen = 0;
+	uint32_t bytesRead = 0, lineLen = 0, firstLen = 0, lastPollBytes = 0;
 	bool inFirstLine = true, firstLineParsed = false;
 
 	usbHidDefaultInfo(info);
@@ -730,8 +714,11 @@ static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbSta
 			lineLen++;
 		}
 		st->status.bytesRead = bytesRead;
-		if (!badUsbPrvPoll(st, "Preloading"))
-			return BadUsbResultCancelled;
+		if (bytesRead - lastPollBytes >= 512) {
+			lastPollBytes = bytesRead;
+			if (!badUsbPrvPoll(st, "Preloading"))
+				return BadUsbResultCancelled;
+		}
 	}
 	if (lineLen || (bytesRead && inFirstLine)) {
 		st->status.lineTotal++;
@@ -740,6 +727,9 @@ static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbSta
 			badUsbPrvParseIdLine(firstLine, info);
 		}
 	}
+	st->status.bytesRead = bytesRead;
+	if (!badUsbPrvPoll(st, "Preloading"))
+		return BadUsbResultCancelled;
 	st->status.bytesRead = 0;
 	st->status.lineNo = 0;
 	return fatfsFileSeek(fil, 0) ? BadUsbResultDone : BadUsbResultFileError;
@@ -835,62 +825,55 @@ bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info)
 	return fatfsFileSeek(fil, 0);
 }
 
-enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData)
+enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF, void *userData, struct BadUsbPreload *preload)
 {
 	struct BadUsbState st;
-	struct UsbHidDeviceInfo info;
 	enum BadUsbResult ret;
-	bool usbStarted = false, reportsEnabled = false;
 
 	memset(&st, 0, sizeof(st));
 	st.statusF = statusF;
-	st.waitButtonF = waitButtonF;
 	st.userData = userData;
 	st.status.fileSize = fatfsFileGetSize(fil);
 
 	badUsbPrvSetState(&st, BadUsbStateInit, "Preloading");
-	ret = badUsbPrvPreload(fil, &st, &info);
+	memset(preload, 0, sizeof(*preload));
+	ret = badUsbPrvPreload(fil, &st, &preload->info);
+	preload->fileSize = st.status.fileSize;
+	preload->lineTotal = st.status.lineTotal;
 	if (ret != BadUsbResultDone) {
 		if (ret == BadUsbResultFileError)
 			st.status.state = BadUsbStateFileError;
 		return ret;
 	}
+	if (preload->fileSize && preload->lineTotal > preload->fileSize + 1) {
+		st.status.lineNo = 0;
+		st.status.errorLine = 0;
+		badUsbPrvCopy(st.status.error, sizeof(st.status.error), "Status invalid");
+		st.status.state = BadUsbStateScriptError;
+		(void)badUsbPrvPoll(&st, "Status invalid");
+		return BadUsbResultDecodeError;
+	}
+	return BadUsbResultDone;
+}
 
-	badUsbPrvSetState(&st, BadUsbStateWillRun, "Starting USB");
-	if (!badUsbPrvPoll(&st, "Starting USB"))
-		return BadUsbResultCancelled;
-	if (!usbHidBegin(&info)) {
-		badUsbPrvSetState(&st, BadUsbStateUsbError, usbHidLastError());
-		(void)badUsbPrvPoll(&st, usbHidLastError());
-		return BadUsbResultUsbError;
+enum BadUsbResult badUsbRunPreparedFile(struct FatfsFil *fil, const struct BadUsbPreload *preload, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData)
+{
+	struct BadUsbState st;
+	enum BadUsbResult ret;
+
+	memset(&st, 0, sizeof(st));
+	st.statusF = statusF;
+	st.waitButtonF = waitButtonF;
+	st.userData = userData;
+	if (preload) {
+		st.status.fileSize = preload->fileSize;
+		st.status.lineTotal = preload->lineTotal;
 	}
-	usbStarted = true;
-	if (!badUsbPrvWaitReady(&st)) {
-		badUsbPrvSetState(&st, BadUsbStateUsbError, "USB device failed to enumerate");
-		ret = BadUsbResultUsbError;
-		goto out_usb;
+	else {
+		st.status.fileSize = fatfsFileGetSize(fil);
 	}
 
-	badUsbPrvSetState(&st, BadUsbStateIdle, "USB ready");
-	if (!badUsbPrvPoll(&st, "USB ready")) {
-		ret = BadUsbResultCancelled;
-		goto out_usb;
-	}
-	if (!badUsbPrvDelay(&st, BADUSB_HOST_SETTLE_MS, "Host settle")) {
-		ret = BadUsbResultCancelled;
-		goto out_usb;
-	}
-
-	usbHidSetReportsEnabled(true);
-	reportsEnabled = true;
 	ret = badUsbPrvRunScript(fil, &st);
-out_usb:
-	if (reportsEnabled) {
-		usbHidReleaseAll();
-		usbHidSetReportsEnabled(false);
-	}
-	if (usbStarted)
-		usbHidEnd();
 	if (ret != BadUsbResultDone)
 		return ret;
 	badUsbPrvSetState(&st, BadUsbStateDone, "Done");

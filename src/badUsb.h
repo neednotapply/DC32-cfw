@@ -44,10 +44,17 @@ struct BadUsbStatus {
 	const char *message;
 };
 
+struct BadUsbPreload {
+	struct UsbHidDeviceInfo info;
+	uint32_t fileSize;
+	uint32_t lineTotal;
+};
+
 typedef bool (*BadUsbStatusF)(void *userData, const struct BadUsbStatus *status);
 typedef bool (*BadUsbWaitButtonF)(void *userData, const struct BadUsbStatus *status);
 
 bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info);
-enum BadUsbResult badUsbRunFile(struct FatfsFil *fil, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData);
+enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF, void *userData, struct BadUsbPreload *preload);
+enum BadUsbResult badUsbRunPreparedFile(struct FatfsFil *fil, const struct BadUsbPreload *preload, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData);
 
 #endif

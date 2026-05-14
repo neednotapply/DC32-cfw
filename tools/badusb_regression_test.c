@@ -176,6 +176,7 @@ static char *readWholeFile(const char *path, uint32_t *sizeP)
 static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 {
 	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
+	struct BadUsbPreload preload;
 	enum BadUsbResult ret;
 
 	mNow = 0;
@@ -183,7 +184,25 @@ static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 	mReports = 0;
 	mSawStart = 0;
 	mSawDone = 0;
-	ret = badUsbRunFile(&fil, badusbStatus, badusbWaitButton, NULL);
+	ret = badUsbPreloadFile(&fil, badusbStatus, NULL, &preload);
+	if (ret != BadUsbResultDone) {
+		fprintf(stderr, "FAIL: %s preload returned %d\n", name, ret);
+		return false;
+	}
+	if (mUsbBegins) {
+		fprintf(stderr, "FAIL: %s preload touched USB\n", name);
+		return false;
+	}
+	if (!usbHidBegin(&preload.info)) {
+		fprintf(stderr, "FAIL: %s USB begin failed\n", name);
+		return false;
+	}
+	usbHidSetReportsEnabled(true);
+	mSawStart++;
+	ret = badUsbRunPreparedFile(&fil, &preload, badusbStatus, badusbWaitButton, NULL);
+	usbHidReleaseAll();
+	usbHidSetReportsEnabled(false);
+	usbHidEnd();
 	if (ret != BadUsbResultDone) {
 		fprintf(stderr, "FAIL: %s returned %d\n", name, ret);
 		return false;

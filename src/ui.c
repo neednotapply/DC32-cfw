@@ -4626,8 +4626,12 @@ reload_dir:
 		uint32_t lastLine;
 		enum BadUsbWorkerState lastState;
 		uint32_t lastUnsupportedCommands;
+		struct BadUsbStatus lastStatus;
 		bool forceDraw;
+		bool haveStatus;
 	};
+
+	#define BADUSB_UI_ENUM_WAIT_MS	5000
 
 	static const char *uiPrvBadUsbStateName(enum BadUsbWorkerState state)
 	{
@@ -4650,15 +4654,32 @@ reload_dir:
 
 	static uint32_t uiPrvBadUsbProgressPct(const struct BadUsbStatus *status)
 	{
+		uint32_t pct;
+
 		if (status->state == BadUsbStateDone)
 			return 100;
 		if (status->state == BadUsbStateInit && status->fileSize)
-			return status->bytesRead * 100 / status->fileSize;
+			pct = status->bytesRead >= status->fileSize ? 100 : status->bytesRead * 100 / status->fileSize;
+		else if (status->lineTotal)
+			pct = status->lineNo >= status->lineTotal ? 100 : status->lineNo * 100 / status->lineTotal;
+		else if (status->fileSize)
+			pct = status->bytesRead >= status->fileSize ? 100 : status->bytesRead * 100 / status->fileSize;
+		else
+			pct = 0;
+		return pct > 100 ? 100 : pct;
+	}
+
+	static bool uiPrvBadUsbStatusSane(const struct BadUsbStatus *status)
+	{
+		if (!status)
+			return false;
+		if (status->fileSize && status->bytesRead > status->fileSize)
+			return false;
+		if (status->fileSize && status->lineTotal > status->fileSize + 1)
+			return false;
 		if (status->lineTotal)
-			return status->lineNo * 100 / status->lineTotal;
-		if (status->fileSize)
-			return status->bytesRead * 100 / status->fileSize;
-		return 0;
+			return status->lineNo <= status->lineTotal;
+		return true;
 	}
 
 	static void uiPrvBadUsbDrawStatus(struct BadUsbUiData *data, const struct BadUsbStatus *status, enum BadUsbWorkerState state, const char *message)
@@ -4673,16 +4694,20 @@ reload_dir:
 		row = uiPrvContentTop(cnv);
 		uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
 		row += uiPrvGlyphHeight(cnv) + 1;
-		uiPrintf(cnv, row, 10, "%s  %u%%", uiPrvBadUsbStateName(state), (unsigned)pct);
+		(void)sprintf(msg, "%s  %u%%", uiPrvBadUsbStateName(state), (unsigned)pct);
+		uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, msg);
 		row += uiPrvGlyphHeight(cnv) + 1;
 		if (state == BadUsbStateInit)
-			uiPrintf(cnv, row, 10, "Lines %u", (unsigned)status->lineTotal);
+			(void)sprintf(msg, "Lines %u", (unsigned)status->lineTotal);
 		else if (status->lineTotal)
-			uiPrintf(cnv, row, 10, "Line %u/%u", (unsigned)status->lineNo, (unsigned)status->lineTotal);
+			(void)sprintf(msg, "Line %u/%u", (unsigned)status->lineNo, (unsigned)status->lineTotal);
 		else
-			uiPrintf(cnv, row, 10, "Line %u", (unsigned)status->lineNo);
+			(void)sprintf(msg, "Line %u", (unsigned)status->lineNo);
+		uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, msg);
 		if (status->delayRemainSec)
-			uiPrintf(cnv, row, cnv->w - 45, "%us", (unsigned)status->delayRemainSec);
+			(void)sprintf(msg, "%us", (unsigned)status->delayRemainSec);
+		if (status->delayRemainSec)
+			uiPuts(cnv, row, cnv->w - 45, msg, -1);
 		row += uiPrvGlyphHeight(cnv) + 1;
 
 		if (state == BadUsbStateScriptError && status->error[0]) {
@@ -4708,11 +4733,15 @@ reload_dir:
 
 	static bool uiPrvBadUsbPause(struct BadUsbUiData *data, const struct BadUsbStatus *status)
 	{
+		struct BadUsbStatus pausedStatus = *status;
+
+		pausedStatus.state = BadUsbStatePaused;
+		pausedStatus.message = "Paused";
 		uiPrvWaitKeysReleased();
 		while (1) {
 			uint_fast16_t key;
 
-			uiPrvBadUsbDrawStatus(data, status, BadUsbStatePaused, "Paused");
+			uiPrvBadUsbDrawStatus(data, &pausedStatus, BadUsbStatePaused, "Paused");
 			key = uiPrvRecvKeypress();
 			if (key & KEY_BIT_A) {
 				data->forceDraw = true;
@@ -4730,18 +4759,29 @@ reload_dir:
 	static bool uiPrvBadUsbStatus(void *userData, const struct BadUsbStatus *status)
 	{
 		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
+		struct BadUsbStatus badStatus;
 		uint64_t now = getTime();
 
 		if (uiPrvCenterExitPressedRaw())
 			return false;
 		if (uiGetKeysRaw() & KEY_BIT_B)
 			return false;
+		if (!uiPrvBadUsbStatusSane(status)) {
+			memset(&badStatus, 0, sizeof(badStatus));
+			badStatus.state = BadUsbStateScriptError;
+			badStatus.message = "Status invalid";
+			strcpy(badStatus.error, "Status invalid");
+			uiPrvBadUsbDrawStatus(data, &badStatus, BadUsbStateScriptError, "Status invalid");
+			return false;
+		}
+		data->lastStatus = *status;
+		data->haveStatus = true;
 		if ((status->state == BadUsbStateRunning || status->state == BadUsbStateDelay) && (uiGetKeysRaw() & KEY_BIT_A))
-			return uiPrvBadUsbPause(data, status);
+			return uiPrvBadUsbPause(data, &data->lastStatus);
 
 		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
 		    status->unsupportedCommands != data->lastUnsupportedCommands || now - data->lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvBadUsbDrawStatus(data, status, status->state, status->message);
+			uiPrvBadUsbDrawStatus(data, &data->lastStatus, status->state, status->message);
 			data->lastDraw = now;
 			data->lastLine = status->lineNo;
 			data->lastState = status->state;
@@ -4754,8 +4794,11 @@ reload_dir:
 	static bool uiPrvBadUsbWaitButton(void *userData, const struct BadUsbStatus *status)
 	{
 		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
+		struct BadUsbStatus waitStatus = *status;
 
-		uiPrvBadUsbDrawStatus(data, status, BadUsbStateWaitForButton, "Waiting for button");
+		waitStatus.state = BadUsbStateWaitForButton;
+		waitStatus.message = "Waiting for button";
+		uiPrvBadUsbDrawStatus(data, &waitStatus, BadUsbStateWaitForButton, "Waiting for button");
 		while (1) {
 			uint_fast16_t key = uiPrvRecvKeypress();
 
@@ -4777,13 +4820,61 @@ reload_dir:
 		return uiPrvStrEndsWithNoCase(fname, ".txt") || uiPrvStrEndsWithNoCase(fname, ".badusb");
 	}
 
+	static void uiPrvBadUsbShowState(struct BadUsbUiData *data, const struct BadUsbPreload *preload, enum BadUsbWorkerState state, const char *message)
+	{
+		struct BadUsbStatus status;
+
+		if (data->haveStatus)
+			status = data->lastStatus;
+		else
+			memset(&status, 0, sizeof(status));
+		if (preload) {
+			status.fileSize = preload->fileSize;
+			status.lineTotal = preload->lineTotal;
+		}
+		status.state = state;
+		status.message = message;
+		status.delayRemainSec = 0;
+		uiPrvBadUsbDrawStatus(data, &status, state, message);
+		data->lastStatus = status;
+		data->haveStatus = true;
+		data->lastDraw = getTime();
+		data->lastState = state;
+	}
+
+	static bool uiPrvBadUsbWaitReady(struct BadUsbUiData *data, const struct BadUsbPreload *preload)
+	{
+		uint64_t end = getTime() + (uint64_t)BADUSB_UI_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+		uint64_t lastDraw = 0;
+
+		while (getTime() < end) {
+			uint64_t now = getTime();
+
+			usbHidTask();
+			if (uiPrvCenterExitPressedRaw()) {
+				uiPrvRequestToolExit();
+				return false;
+			}
+			if (uiGetKeysRaw() & KEY_BIT_B)
+				return false;
+			if (usbHidReady())
+				return true;
+			if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+				uiPrvBadUsbShowState(data, preload, BadUsbStateNotConnected, "Waiting for USB");
+				lastDraw = now;
+			}
+		}
+		return usbHidReady();
+	}
+
 	static bool uiPrvRunBadUsbLocator(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name)
 	{
 		struct FatfsFil *fil = NULL;
 		struct BadUsbUiData data;
+		struct BadUsbPreload preload;
 		enum BadUsbResult ret;
 		char msg[96];
-		bool ok = false;
+		bool ok = false, reportsEnabled = false, usbStarted = false;
 
 		uiPrvSetHeaderTitle("BadUSB");
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
@@ -4801,7 +4892,44 @@ reload_dir:
 		data.name = name;
 		data.forceDraw = true;
 		uiPrvWaitKeysReleased();
-		ret = badUsbRunFile(fil, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+		ret = badUsbPreloadFile(fil, uiPrvBadUsbStatus, &data, &preload);
+		if (ret != BadUsbResultDone)
+			goto out_report;
+
+		uiPrvBadUsbShowState(&data, &preload, BadUsbStateWillRun, "Starting USB");
+		if (!usbHidBegin(&preload.info)) {
+			struct BadUsbStatus usbStatus;
+
+			memset(&usbStatus, 0, sizeof(usbStatus));
+			usbStatus.state = BadUsbStateUsbError;
+			usbStatus.fileSize = preload.fileSize;
+			usbStatus.lineTotal = preload.lineTotal;
+			usbStatus.message = usbHidLastError();
+			uiPrvBadUsbDrawStatus(&data, &usbStatus, BadUsbStateUsbError, usbHidLastError());
+			ret = BadUsbResultUsbError;
+			goto out_report;
+		}
+		usbStarted = true;
+		if (!uiPrvBadUsbWaitReady(&data, &preload)) {
+			ret = (uiGetKeysRaw() & KEY_BIT_B) || uiPrvToolExitRequested() ? BadUsbResultCancelled : BadUsbResultUsbError;
+			goto out_usb;
+		}
+		usbHidSetReportsEnabled(true);
+		reportsEnabled = true;
+		uiPrvWaitKeysReleased();
+		uiPrvBadUsbShowState(&data, &preload, BadUsbStateRunning, "Running");
+		ret = badUsbRunPreparedFile(fil, &preload, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+
+	out_usb:
+		if (reportsEnabled) {
+			usbHidReleaseAll();
+			usbHidSetReportsEnabled(false);
+		}
+		if (usbStarted)
+			usbHidEnd();
+		uiPrvWaitKeysReleased();
+
+	out_report:
 		if (ret == BadUsbResultDone) {
 			uiAlert(cnv, "BadUSB script complete", DialogTypeOk);
 			ok = true;

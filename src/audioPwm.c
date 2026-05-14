@@ -55,6 +55,11 @@ static void audioPwmPrvWriteDuty(uint32_t duty)
 		cc[0] = (uint16_t)duty;
 }
 
+static void audioPwmPrvClearDuty(void)
+{
+	pwm_hw->slice[AUDIO_PWM_IDX].cc = 0;
+}
+
 static void audioPwmPrvWriteToneDuty(void)
 {
 	static const uint16_t toneGain[AUDIO_PWM_VOLUME_MAX + 1] = {
@@ -123,7 +128,7 @@ void audioPwmStop(void)
 		return;
 
 	audioPwmPrvDisable();
-	audioPwmPrvWriteDuty(0);
+	audioPwmPrvClearDuty();
 	audioPwmPrvPinLow();
 	mMode = AudioPwmModeStopped;
 }

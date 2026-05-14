@@ -5157,7 +5157,8 @@ static void uiPrvEnterTool(enum UiToolId tool)
 
 static void uiPrvExitTool(enum UiToolId tool)
 {
-	audioPwmStop();
+	if (tool != UiToolBadUsb && tool != UiToolHidTest)
+		audioPwmStop();
 	usbHidSetReportsEnabled(false);
 	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));

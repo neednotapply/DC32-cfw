@@ -3,6 +3,7 @@
 #include "timebase.h"
 
 #define BADUSB_LINE_BUF_SZ			2048
+#define BADUSB_PRELOAD_BUF_SZ			128
 #define BADUSB_KEY_DELAY_MS			12
 #define BADUSB_ENUM_WAIT_MS			5000
 #define BADUSB_HOST_SETTLE_MS			1500
@@ -32,9 +33,7 @@ struct BadUsbModifier {
 struct BadUsbScratch {
 	char line[BADUSB_LINE_BUF_SZ];
 	char prevLine[BADUSB_LINE_BUF_SZ];
-	char execLine[BADUSB_LINE_BUF_SZ];
-	char repeatLine[BADUSB_LINE_BUF_SZ];
-	char chord[BADUSB_LINE_BUF_SZ];
+	char preloadBuf[BADUSB_PRELOAD_BUF_SZ];
 };
 
 static struct BadUsbScratch mScratch;
@@ -422,44 +421,49 @@ static bool badUsbPrvString(struct BadUsbState *st, const char *str, bool enter)
 	return true;
 }
 
-static bool badUsbPrvChord(struct BadUsbState *st, char *cmd)
+static bool badUsbPrvChordParts(struct BadUsbState *st, char *cmd, char *arg)
 {
 	uint8_t mods = 0, keys[6];
-	char *tok;
+	char *parts[2] = {cmd, arg};
+	uint_fast8_t part;
 
 	memcpy(keys, st->heldKeys, sizeof(keys));
-	for (tok = cmd; *tok; tok++)
-		if (*tok == '-')
-			*tok = ' ';
+	for (part = 0; part < sizeof(parts) / sizeof(*parts); part++) {
+		char *tok = parts[part];
 
-	tok = cmd;
-	while (*tok) {
-		char *end;
-		uint8_t mod;
+		if (!tok)
+			continue;
+		for (char *p = tok; *p; p++)
+			if (*p == '-')
+				*p = ' ';
+		while (*tok) {
+			char *end;
+			uint8_t mod;
 
-		while (*tok == ' ' || *tok == '\t')
-			tok++;
-		if (!*tok)
-			break;
-		end = tok;
-		while (*end && *end != ' ' && *end != '\t')
-			end++;
-		if (*end)
-			*end++ = 0;
+			while (*tok == ' ' || *tok == '\t')
+				tok++;
+			if (!*tok)
+				break;
+			end = tok;
+			while (*end && *end != ' ' && *end != '\t')
+				end++;
+			if (*end)
+				*end++ = 0;
 
-		mod = badUsbPrvModifier(tok);
-		if (mod)
-			mods |= mod;
-		else {
-			uint8_t usage, asciiMods;
+			mod = badUsbPrvModifier(tok);
+			if (mod)
+				mods |= mod;
+			else {
+				uint8_t usage, asciiMods;
 
-			if (!badUsbPrvKeySpec(tok, &usage, &asciiMods))
-				return badUsbPrvFail(st, "Unknown key");
-			mods |= asciiMods;
-			if (!badUsbPrvSetKey(keys, usage, true))
-				return badUsbPrvFail(st, "Too many keys");
+				if (!badUsbPrvKeySpec(tok, &usage, &asciiMods))
+					return badUsbPrvFail(st, "Unknown key");
+				mods |= asciiMods;
+				if (!badUsbPrvSetKey(keys, usage, true))
+					return badUsbPrvFail(st, "Too many keys");
+			}
+			tok = end;
 		}
-		tok = end;
 	}
 
 	if (!usbHidKeyboardReport(st->heldMods | mods, keys))
@@ -467,6 +471,11 @@ static bool badUsbPrvChord(struct BadUsbState *st, char *cmd)
 	if (!badUsbPrvDelay(st, BADUSB_KEY_DELAY_MS, "Sending keys"))
 		return false;
 	return usbHidKeyboardReport(st->heldMods, st->heldKeys);
+}
+
+static bool badUsbPrvChord(struct BadUsbState *st, char *cmd)
+{
+	return badUsbPrvChordParts(st, cmd, NULL);
 }
 
 static bool badUsbPrvHoldRelease(struct BadUsbState *st, char *arg, bool hold)
@@ -521,15 +530,13 @@ static bool badUsbPrvAltChar(struct BadUsbState *st, uint32_t code)
 
 static bool badUsbPrvExecute(struct BadUsbState *st, char *line);
 
-static bool badUsbPrvRepeat(struct BadUsbState *st, char *prevLine, uint32_t count)
+static bool badUsbPrvRepeat(struct BadUsbState *st, char *workLine, const char *prevLine, uint32_t count)
 {
 	uint32_t i;
 
 	for (i = 0; i < count; i++) {
-		char *tmp = mScratch.repeatLine;
-
-		badUsbPrvCopy(tmp, BADUSB_LINE_BUF_SZ, prevLine);
-		if (!badUsbPrvExecute(st, tmp))
+		badUsbPrvCopy(workLine, BADUSB_LINE_BUF_SZ, prevLine);
+		if (!badUsbPrvExecute(st, workLine))
 			return false;
 	}
 	return true;
@@ -626,15 +633,7 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		return true;
 	}
 	if (*arg) {
-		char *chord = mScratch.chord;
-
-		badUsbPrvCopy(chord, BADUSB_LINE_BUF_SZ, cmd);
-		if (strlen(chord) + 1 < BADUSB_LINE_BUF_SZ) {
-			strcat(chord, " ");
-			badUsbPrvCopy(chord + strlen(chord), BADUSB_LINE_BUF_SZ - strlen(chord), arg);
-			return badUsbPrvChord(st, chord);
-		}
-		return badUsbPrvFail(st, "Command too long");
+		return badUsbPrvChordParts(st, cmd, arg);
 	}
 	return badUsbPrvChord(st, cmd);
 }
@@ -649,11 +648,46 @@ static bool badUsbPrvIsRepeat(char *trimmed, const char **argP)
 	return true;
 }
 
+static bool badUsbPrvFirstTokenEq(const char *line, const char *cmd)
+{
+	while (*cmd) {
+		if (badUsbPrvUpper(*line++) != badUsbPrvUpper(*cmd++))
+			return false;
+	}
+	return *line == 0 || *line == ' ' || *line == '\t';
+}
+
+static void badUsbPrvParseIdLine(char *line, struct UsbHidDeviceInfo *info)
+{
+	char *trimmed = badUsbPrvTrim(line), *p;
+
+	if (!badUsbPrvStarts(trimmed, "ID "))
+		return;
+	p = badUsbPrvTrim(trimmed + 2);
+	if (!badUsbPrvParseHex4(p, &info->vid) || p[4] != ':' || !badUsbPrvParseHex4(p + 5, &info->pid))
+		return;
+	p += 9;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if (*p) {
+		char *sep = p;
+
+		while (*sep && *sep != ':')
+			sep++;
+		if (*sep) {
+			*sep++ = 0;
+			badUsbPrvCopy(info->manufacturer, sizeof(info->manufacturer), badUsbPrvTrim(p));
+			badUsbPrvCopy(info->product, sizeof(info->product), badUsbPrvTrim(sep));
+		}
+	}
+}
+
 static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbState *st, struct UsbHidDeviceInfo *info)
 {
-	char *line = mScratch.line, *trimmed;
-	uint32_t bytesRead = 0;
-	bool truncated;
+	char *firstLine = mScratch.line;
+	char *buf = mScratch.preloadBuf;
+	uint32_t bytesRead = 0, lineLen = 0, firstLen = 0;
+	bool inFirstLine = true, firstLineParsed = false;
 
 	usbHidDefaultInfo(info);
 	st->status.lineNo = 0;
@@ -661,39 +695,50 @@ static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbSta
 	st->status.bytesRead = 0;
 	if (!fatfsFileSeek(fil, 0))
 		return BadUsbResultFileError;
-	while (badUsbPrvReadLine(fil, line, BADUSB_LINE_BUF_SZ, &bytesRead, &truncated)) {
-		st->status.lineTotal++;
-		st->status.bytesRead = bytesRead;
-		if (truncated) {
-			st->status.lineNo = st->status.lineTotal;
-			(void)badUsbPrvFail(st, "Line too long");
-			return BadUsbResultDecodeError;
-		}
-		if (st->status.lineTotal == 1) {
-			trimmed = badUsbPrvTrim(line);
-			if (badUsbPrvStarts(trimmed, "ID ")) {
-				char *p = badUsbPrvTrim(trimmed + 2);
+	while (1) {
+		uint32_t n, i;
 
-				if (badUsbPrvParseHex4(p, &info->vid) && p[4] == ':' && badUsbPrvParseHex4(p + 5, &info->pid)) {
-					p += 9;
-					while (*p == ' ' || *p == '\t')
-						p++;
-					if (*p) {
-						char *sep = p;
+		if (!fatfsFileRead(fil, buf, BADUSB_PRELOAD_BUF_SZ, &n))
+			return BadUsbResultFileError;
+		if (!n)
+			break;
+		for (i = 0; i < n; i++) {
+			char ch = buf[i];
 
-						while (*sep && *sep != ':')
-							sep++;
-						if (*sep) {
-							*sep++ = 0;
-							badUsbPrvCopy(info->manufacturer, sizeof(info->manufacturer), badUsbPrvTrim(p));
-							badUsbPrvCopy(info->product, sizeof(info->product), badUsbPrvTrim(sep));
-						}
-					}
+			bytesRead++;
+			if (ch == '\r')
+				continue;
+			if (ch == '\n') {
+				st->status.lineTotal++;
+				if (inFirstLine && !firstLineParsed) {
+					firstLine[firstLen] = 0;
+					badUsbPrvParseIdLine(firstLine, info);
+					firstLineParsed = true;
 				}
+				inFirstLine = false;
+				lineLen = 0;
+				continue;
 			}
+			if (lineLen + 1 >= BADUSB_LINE_BUF_SZ) {
+				st->status.lineNo = st->status.lineTotal + 1;
+				st->status.bytesRead = bytesRead;
+				(void)badUsbPrvFail(st, "Line too long");
+				return BadUsbResultDecodeError;
+			}
+			if (inFirstLine && firstLen + 1 < BADUSB_LINE_BUF_SZ)
+				firstLine[firstLen++] = ch;
+			lineLen++;
 		}
+		st->status.bytesRead = bytesRead;
 		if (!badUsbPrvPoll(st, "Preloading"))
 			return BadUsbResultCancelled;
+	}
+	if (lineLen || (bytesRead && inFirstLine)) {
+		st->status.lineTotal++;
+		if (inFirstLine && !firstLineParsed) {
+			firstLine[firstLen] = 0;
+			badUsbPrvParseIdLine(firstLine, info);
+		}
 	}
 	st->status.bytesRead = 0;
 	st->status.lineNo = 0;
@@ -718,7 +763,7 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 	if (!fatfsFileSeek(fil, 0))
 		return BadUsbResultFileError;
 	while (badUsbPrvReadLine(fil, line, BADUSB_LINE_BUF_SZ, &st->status.bytesRead, &truncated)) {
-		char *execLine = mScratch.execLine, *trimmed;
+		char *trimmed;
 		const char *repeatArg;
 
 		st->status.lineNo++;
@@ -730,8 +775,7 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 		if (!badUsbPrvPoll(st, "Running"))
 			return BadUsbResultCancelled;
 
-		badUsbPrvCopy(execLine, BADUSB_LINE_BUF_SZ, line);
-		trimmed = badUsbPrvTrim(execLine);
+		trimmed = badUsbPrvTrim(line);
 		if (badUsbPrvStarts(trimmed, "ID ")) {
 			if (st->status.lineNo != 1) {
 				(void)badUsbPrvFail(st, "ID must be first line");
@@ -742,16 +786,16 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 		if (badUsbPrvIsRepeat(trimmed, &repeatArg)) {
 			uint32_t count;
 
-			if (!badUsbPrvParseU32(&repeatArg, &count) || !badUsbPrvAtEnd(repeatArg) || !prevLine[0] || !badUsbPrvRepeat(st, prevLine, count)) {
+			if (!badUsbPrvParseU32(&repeatArg, &count) || !badUsbPrvAtEnd(repeatArg) || !prevLine[0] || !badUsbPrvRepeat(st, line, prevLine, count)) {
 				(void)badUsbPrvFail(st, "Bad REPEAT");
 				return BadUsbResultDecodeError;
 			}
 			continue;
 		}
+		if (*trimmed && !badUsbPrvFirstTokenEq(trimmed, "REM"))
+			badUsbPrvCopy(prevLine, BADUSB_LINE_BUF_SZ, trimmed);
 		if (!badUsbPrvExecute(st, trimmed))
 			return BadUsbResultDecodeError;
-		if (*trimmed && !badUsbPrvEq(trimmed, "REM"))
-			badUsbPrvCopy(prevLine, BADUSB_LINE_BUF_SZ, line);
 	}
 
 	return BadUsbResultDone;

@@ -5152,14 +5152,16 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 
 static void uiPrvEnterTool(enum UiToolId tool)
 {
+	if (tool == UiToolBadUsb || tool == UiToolHidTest)
+		audioPwmStop();
 	bootGuardEnter(uiPrvBootGuardModeForTool(tool));
 }
 
 static void uiPrvExitTool(enum UiToolId tool)
 {
-	if (tool != UiToolBadUsb && tool != UiToolHidTest)
-		audioPwmStop();
+	usbHidReleaseAll();
 	usbHidSetReportsEnabled(false);
+	audioPwmStop();
 	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));
 }
@@ -5191,10 +5193,11 @@ static void uiPrvShowBootRecovery(struct Canvas *cnv)
 		struct BootGuardCrashInfo info;
 
 		bootGuardRecoveredCrashInfo(&info);
-		(void)sprintf(msg, "Recovered from a crash.\nMode %s\nPC %08x LR %08x\nSP %08x\nCFSR %08x HFSR %08x\nBFAR %08x",
+		(void)sprintf(msg, "Recovered from a crash.\nMode %s in %s\nPC %08x LR %08x\nxPSR %08x SP %08x\nCFSR %08x HFSR %08x\nBFAR %08x",
 			uiPrvBootGuardModeName((enum BootGuardMode)info.mode),
-			(unsigned)info.pc, (unsigned)info.lr, (unsigned)info.sp,
-			(unsigned)info.cfsr, (unsigned)info.hfsr, (unsigned)info.bfar);
+			uiPrvBootGuardModeName((enum BootGuardMode)info.originalMode),
+			(unsigned)info.pc, (unsigned)info.lr, (unsigned)info.xpsr,
+			(unsigned)info.sp, (unsigned)info.cfsr, (unsigned)info.hfsr, (unsigned)info.bfar);
 	}
 	else {
 		(void)sprintf(msg, "Recovered after reset in %s.\nStarting Main Menu.",

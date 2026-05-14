@@ -6,6 +6,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(APP DC32-cfw)
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(TINYUSB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyusb")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
 
 add_executable(${APP}
@@ -45,12 +46,22 @@ add_executable(${APP}
     ${SRC_DIR}/usbHid.c
     ${SRC_DIR}/utf.c
     ${SRC_DIR}/videoC.c
+    ${TINYUSB_DIR}/src/tusb.c
+    ${TINYUSB_DIR}/src/class/hid/hid_device.c
+    ${TINYUSB_DIR}/src/common/tusb_fifo.c
+    ${TINYUSB_DIR}/src/device/usbd.c
+    ${TINYUSB_DIR}/src/device/usbd_control.c
+    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/dcd_rp2040.c
+    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/rp2040_usb.c
 )
 
 target_include_directories(${APP} PRIVATE
     ${SRC_DIR}
+    ${SRC_DIR}/tinyusb_compat
     ${SRC_DIR}/inc_RP2350
     ${SRC_DIR}/nes
+    ${TINYUSB_DIR}/src
+    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
 
 target_compile_definitions(${APP} PRIVATE
@@ -120,6 +131,17 @@ set_source_files_properties(
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/badgeLeds.c
     PROPERTIES COMPILE_OPTIONS "-Os"
+)
+
+set_source_files_properties(
+    ${TINYUSB_DIR}/src/tusb.c
+    ${TINYUSB_DIR}/src/class/hid/hid_device.c
+    ${TINYUSB_DIR}/src/common/tusb_fifo.c
+    ${TINYUSB_DIR}/src/device/usbd.c
+    ${TINYUSB_DIR}/src/device/usbd_control.c
+    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/dcd_rp2040.c
+    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/rp2040_usb.c
+    PROPERTIES COMPILE_OPTIONS "-Wno-error"
 )
 
 target_link_options(${APP} PRIVATE

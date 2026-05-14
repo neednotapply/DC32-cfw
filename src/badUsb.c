@@ -24,6 +24,11 @@ struct BadUsbKey {
 	uint8_t usage;
 };
 
+struct BadUsbModifier {
+	const char *name;
+	uint8_t mask;
+};
+
 struct BadUsbScratch {
 	char line[BADUSB_LINE_BUF_SZ];
 	char prevLine[BADUSB_LINE_BUF_SZ];
@@ -44,6 +49,18 @@ static const struct BadUsbKey mSpecialKeys[] = {
 	{"PGDN", 0x4e}, {"CAPSLOCK", 0x39}, {"CAPS", 0x39}, {"NUMLOCK", 0x53},
 	{"SCROLLLOCK", 0x47}, {"PRINTSCREEN", 0x46}, {"BREAK", 0x48}, {"PAUSE", 0x48},
 	{"SPACE", 0x2c}, {"TAB", 0x2b}, {"MENU", 0x65}, {"APP", 0x65},
+};
+
+static const struct BadUsbModifier mModifiers[] = {
+	{"CTRL", USB_HID_MOD_LCTRL}, {"CONTROL", USB_HID_MOD_LCTRL}, {"LCTRL", USB_HID_MOD_LCTRL}, {"LEFTCTRL", USB_HID_MOD_LCTRL},
+	{"RCTRL", USB_HID_MOD_RCTRL}, {"RIGHTCTRL", USB_HID_MOD_RCTRL},
+	{"SHIFT", USB_HID_MOD_LSHIFT}, {"LSHIFT", USB_HID_MOD_LSHIFT}, {"LEFTSHIFT", USB_HID_MOD_LSHIFT},
+	{"RSHIFT", USB_HID_MOD_RSHIFT}, {"RIGHTSHIFT", USB_HID_MOD_RSHIFT},
+	{"ALT", USB_HID_MOD_LALT}, {"LALT", USB_HID_MOD_LALT}, {"LEFTALT", USB_HID_MOD_LALT}, {"OPTION", USB_HID_MOD_LALT},
+	{"RALT", USB_HID_MOD_RALT}, {"RIGHTALT", USB_HID_MOD_RALT},
+	{"GUI", USB_HID_MOD_LGUI}, {"WINDOWS", USB_HID_MOD_LGUI}, {"COMMAND", USB_HID_MOD_LGUI}, {"CMD", USB_HID_MOD_LGUI},
+	{"LGUI", USB_HID_MOD_LGUI}, {"LEFTGUI", USB_HID_MOD_LGUI},
+	{"RGUI", USB_HID_MOD_RGUI}, {"RIGHTGUI", USB_HID_MOD_RGUI},
 };
 
 static char badUsbPrvUpper(char c)
@@ -188,6 +205,12 @@ static bool badUsbPrvPoll(struct BadUsbState *st, const char *msg)
 	return !st->statusF || st->statusF(st->userData, &st->status);
 }
 
+static bool badUsbPrvFail(struct BadUsbState *st, const char *msg)
+{
+	(void)badUsbPrvPoll(st, msg);
+	return false;
+}
+
 static bool badUsbPrvDelay(struct BadUsbState *st, uint32_t msec, const char *msg)
 {
 	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
@@ -249,24 +272,11 @@ static bool badUsbPrvSetKey(uint8_t keys[6], uint8_t usage, bool hold)
 
 static uint8_t badUsbPrvModifier(const char *tok)
 {
-	if (badUsbPrvEq(tok, "CTRL") || badUsbPrvEq(tok, "CONTROL") || badUsbPrvEq(tok, "LCTRL") || badUsbPrvEq(tok, "LEFTCTRL"))
-		return USB_HID_MOD_LCTRL;
-	if (badUsbPrvEq(tok, "RCTRL") || badUsbPrvEq(tok, "RIGHTCTRL"))
-		return USB_HID_MOD_RCTRL;
-	if (badUsbPrvEq(tok, "SHIFT") || badUsbPrvEq(tok, "LSHIFT") || badUsbPrvEq(tok, "LEFTSHIFT"))
-		return USB_HID_MOD_LSHIFT;
-	if (badUsbPrvEq(tok, "RSHIFT") || badUsbPrvEq(tok, "RIGHTSHIFT"))
-		return USB_HID_MOD_RSHIFT;
-	if (badUsbPrvEq(tok, "ALT") || badUsbPrvEq(tok, "LALT") || badUsbPrvEq(tok, "LEFTALT"))
-		return USB_HID_MOD_LALT;
-	if (badUsbPrvEq(tok, "RALT") || badUsbPrvEq(tok, "RIGHTALT"))
-		return USB_HID_MOD_RALT;
-	if (badUsbPrvEq(tok, "OPTION"))
-		return USB_HID_MOD_LALT;
-	if (badUsbPrvEq(tok, "GUI") || badUsbPrvEq(tok, "WINDOWS") || badUsbPrvEq(tok, "COMMAND") || badUsbPrvEq(tok, "CMD") || badUsbPrvEq(tok, "LGUI") || badUsbPrvEq(tok, "LEFTGUI"))
-		return USB_HID_MOD_LGUI;
-	if (badUsbPrvEq(tok, "RGUI") || badUsbPrvEq(tok, "RIGHTGUI"))
-		return USB_HID_MOD_RGUI;
+	uint_fast8_t i;
+
+	for (i = 0; i < sizeof(mModifiers) / sizeof(*mModifiers); i++)
+		if (badUsbPrvEq(tok, mModifiers[i].name))
+			return mModifiers[i].mask;
 	return 0;
 }
 
@@ -358,6 +368,16 @@ static bool badUsbPrvNamedKey(const char *name, uint8_t *usageP)
 	return false;
 }
 
+static bool badUsbPrvKeySpec(const char *name, uint8_t *usageP, uint8_t *modsP)
+{
+	*modsP = 0;
+	if (!badUsbPrvNamedKey(name, usageP))
+		return false;
+	if (name[0] && !name[1])
+		(void)badUsbPrvAsciiKey(name[0], usageP, modsP);
+	return true;
+}
+
 static bool badUsbPrvSendKeyboard(struct BadUsbState *st, uint8_t mods, uint8_t usage)
 {
 	uint8_t keys[6];
@@ -434,15 +454,13 @@ static bool badUsbPrvChord(struct BadUsbState *st, char *cmd)
 		if (mod)
 			mods |= mod;
 		else {
-			uint8_t usage, asciiMods = 0;
+			uint8_t usage, asciiMods;
 
-			if (!badUsbPrvNamedKey(tok, &usage))
-				return false;
-			if (tok[0] && !tok[1])
-				(void)badUsbPrvAsciiKey(tok[0], &usage, &asciiMods);
+			if (!badUsbPrvKeySpec(tok, &usage, &asciiMods))
+				return badUsbPrvFail(st, "Unknown key");
 			mods |= asciiMods;
 			if (!badUsbPrvSetKey(keys, usage, true))
-				return false;
+				return badUsbPrvFail(st, "Too many keys");
 		}
 		tok = end;
 	}
@@ -466,18 +484,16 @@ static bool badUsbPrvHoldRelease(struct BadUsbState *st, char *arg, bool hold)
 		else
 			st->heldMods &=~ mod;
 	}
-	else if (badUsbPrvNamedKey(arg, &usage)) {
-		if (arg[0] && !arg[1])
-			(void)badUsbPrvAsciiKey(arg[0], &usage, &asciiMods);
+	else if (badUsbPrvKeySpec(arg, &usage, &asciiMods)) {
 		if (hold)
 			st->heldMods |= asciiMods;
 		else
 			st->heldMods &=~ asciiMods;
 		if (!badUsbPrvSetKey(st->heldKeys, usage, hold))
-			return false;
+			return badUsbPrvFail(st, "Too many held keys");
 	}
 	else
-		return false;
+		return badUsbPrvFail(st, "Unknown key");
 	if (st->validateOnly)
 		return true;
 	return usbHidKeyboardReport(st->heldMods, st->heldKeys);
@@ -549,12 +565,14 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		return true;
 	if (badUsbPrvEq(cmd, "DELAY")) {
 		const char *p = arg;
-		return badUsbPrvParseU32(&p, &val) && badUsbPrvDelay(st, val, "Delay");
+		if (!badUsbPrvParseU32(&p, &val) || !badUsbPrvAtEnd(p))
+			return badUsbPrvFail(st, "Bad DELAY");
+		return badUsbPrvDelay(st, val, "Delay");
 	}
 	if (badUsbPrvEq(cmd, "DEFAULT_DELAY") || badUsbPrvEq(cmd, "DEFAULTDELAY")) {
 		const char *p = arg;
-		if (!badUsbPrvParseU32(&p, &st->defaultDelay))
-			return false;
+		if (!badUsbPrvParseU32(&p, &st->defaultDelay) || !badUsbPrvAtEnd(p))
+			return badUsbPrvFail(st, "Bad DEFAULT_DELAY");
 		return true;
 	}
 	if (badUsbPrvEq(cmd, "STRING"))
@@ -563,11 +581,15 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		return badUsbPrvString(st, arg, true);
 	if (badUsbPrvEq(cmd, "STRING_DELAY") || badUsbPrvEq(cmd, "STRINGDELAY")) {
 		const char *p = arg;
-		return badUsbPrvParseU32(&p, &st->nextStringDelay);
+		if (!badUsbPrvParseU32(&p, &st->nextStringDelay) || !badUsbPrvAtEnd(p))
+			return badUsbPrvFail(st, "Bad STRING_DELAY");
+		return true;
 	}
 	if (badUsbPrvEq(cmd, "DEFAULT_STRING_DELAY") || badUsbPrvEq(cmd, "DEFAULTSTRINGDELAY")) {
 		const char *p = arg;
-		return badUsbPrvParseU32(&p, &st->defaultStringDelay);
+		if (!badUsbPrvParseU32(&p, &st->defaultStringDelay) || !badUsbPrvAtEnd(p))
+			return badUsbPrvFail(st, "Bad DEFAULT_STRING_DELAY");
+		return true;
 	}
 	if (badUsbPrvEq(cmd, "HOLD"))
 		return badUsbPrvHoldRelease(st, arg, true);
@@ -575,7 +597,9 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 		return badUsbPrvHoldRelease(st, arg, false);
 	if (badUsbPrvEq(cmd, "ALTCHAR")) {
 		const char *p = arg;
-		return badUsbPrvParseU32(&p, &val) && badUsbPrvAltChar(st, val);
+		if (!badUsbPrvParseU32(&p, &val) || !badUsbPrvAtEnd(p))
+			return badUsbPrvFail(st, "Bad ALTCHAR");
+		return badUsbPrvAltChar(st, val);
 	}
 	if (badUsbPrvEq(cmd, "ALTSTRING") || badUsbPrvEq(cmd, "ALTCODE")) {
 		while (*arg)
@@ -609,7 +633,7 @@ static bool badUsbPrvExecute(struct BadUsbState *st, char *line)
 			badUsbPrvCopy(chord + strlen(chord), BADUSB_LINE_BUF_SZ - strlen(chord), arg);
 			return badUsbPrvChord(st, chord);
 		}
-		return false;
+		return badUsbPrvFail(st, "Command too long");
 	}
 	return badUsbPrvChord(st, cmd);
 }
@@ -647,22 +671,26 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 
 		st->status.lineNo++;
 		if (truncated)
-			return BadUsbResultDecodeError;
+			return badUsbPrvFail(st, "Line too long"), BadUsbResultDecodeError;
 		if (!badUsbPrvPoll(st, validateOnly ? "Parsing" : "Running"))
 			return BadUsbResultCancelled;
 
 		badUsbPrvCopy(execLine, BADUSB_LINE_BUF_SZ, line);
 		trimmed = badUsbPrvTrim(execLine);
 		if (badUsbPrvStarts(trimmed, "ID ")) {
-			if (st->status.lineNo != 1)
+			if (st->status.lineNo != 1) {
+				(void)badUsbPrvFail(st, "ID must be first line");
 				return BadUsbResultDecodeError;
+			}
 			continue;
 		}
 		if (badUsbPrvIsRepeat(trimmed, &repeatArg)) {
 			uint32_t count;
 
-			if (!badUsbPrvParseU32(&repeatArg, &count) || !prevLine[0] || !badUsbPrvRepeat(st, prevLine, count))
+			if (!badUsbPrvParseU32(&repeatArg, &count) || !badUsbPrvAtEnd(repeatArg) || !prevLine[0] || !badUsbPrvRepeat(st, prevLine, count)) {
+				(void)badUsbPrvFail(st, "Bad REPEAT");
 				return BadUsbResultDecodeError;
+			}
 			continue;
 		}
 		if (!badUsbPrvExecute(st, trimmed))

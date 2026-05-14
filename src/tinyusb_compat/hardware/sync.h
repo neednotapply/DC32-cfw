@@ -1,0 +1,6 @@
+#ifndef _TINYUSB_COMPAT_HARDWARE_SYNC_H_
+#define _TINYUSB_COMPAT_HARDWARE_SYNC_H_
+
+#include "2350.h"
+
+#endif

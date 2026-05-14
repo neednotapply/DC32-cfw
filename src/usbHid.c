@@ -1,353 +1,125 @@
 #include <string.h>
 #include "2350.h"
 #include "timebase.h"
+#include "tusb.h"
+#include "device/dcd.h"
 #include "usbHid.h"
 
-#define USB_REQ_GET_STATUS                      0x00
-#define USB_REQ_CLEAR_FEATURE           0x01
-#define USB_REQ_SET_ADDRESS                     0x05
-#define USB_REQ_GET_DESCRIPTOR          0x06
-#define USB_REQ_SET_DESCRIPTOR          0x07
-#define USB_REQ_GET_CONFIGURATION       0x08
-#define USB_REQ_SET_CONFIGURATION       0x09
-#define USB_REQ_GET_INTERFACE           0x0a
-#define USB_REQ_SET_INTERFACE           0x0b
+#define USB_HID_HW_WAIT_MS		100
+#define USB_HID_DETACH_WAIT_MS		100
+#define USB_HID_KEYBOARD_REPORT_SIZE	8
 
-#define USB_DT_DEVICE                           0x01
-#define USB_DT_CONFIGURATION            0x02
-#define USB_DT_STRING                           0x03
-#define USB_DT_INTERFACE                        0x04
-#define USB_DT_ENDPOINT                         0x05
-#define USB_DT_HID                                      0x21
-#define USB_DT_REPORT                           0x22
-
-#define HID_REQ_GET_REPORT                      0x01
-#define HID_REQ_GET_IDLE                        0x02
-#define HID_REQ_GET_PROTOCOL            0x03
-#define HID_REQ_SET_REPORT                      0x09
-#define HID_REQ_SET_IDLE                        0x0a
-#define HID_REQ_SET_PROTOCOL            0x0b
-
-#define USB_EP1_IN_BUF                          0x180
-#define USB_EP1_IN_BIT                          (1u << 2)
-#define USB_EP0_IN_BIT                          (1u << 0)
-#define USB_EP0_OUT_BIT                         (1u << 1)
-
-#define USB_MAIN_CTRL_CONTROLLER_EN             (1u << 0)
-#define USB_SIE_CTRL_EP0_INT_1BUF               (1u << 29)
-#define USB_SIE_CTRL_PULLUP_EN                  (1u << 16)
-#define USB_SIE_STATUS_BUS_RESET                (1u << 19)
-#define USB_SIE_STATUS_SETUP_REC                (1u << 17)
-#define USB_USB_MUXING_TO_PHY                   (1u << 0)
-#define USB_USB_MUXING_SOFTCON                  (1u << 3)
-#define USB_USB_PWR_VBUS_DETECT                 (1u << 2)
-#define USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN     (1u << 3)
-#define USB_HID_HW_WAIT_MS                              100
-#define USB_HID_DETACH_WAIT_MS                         100
-#define USB_HID_CONFIG_DESC_LEN                 34
-#define USB_HID_KEYBOARD_REPORT_SIZE            8
-
-static struct UsbHidDeviceInfo mInfo;
-static uint8_t mConfigured, mPendingAddress, mIdleRate, mProtocol = 1;
-static const uint8_t *mCtrlData;
-static uint16_t mCtrlRemaining;
-static bool mHwReady, mInited, mReportsEnabled, mEp0DataPid, mEp1DataPid, mExpectSetReportOut;
-static const char *mLastError = "none";
-
-static const uint8_t mReportDesc[] = {
-        0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x05, 0x07,
-        0x19, 0xe0, 0x29, 0xe7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01,
-        0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
-        0x95, 0x05, 0x75, 0x01, 0x05, 0x08, 0x19, 0x01, 0x29, 0x05,
-        0x91, 0x02, 0x95, 0x01, 0x75, 0x03, 0x91, 0x01, 0x95, 0x06,
-        0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00,
-        0x29, 0x65, 0x81, 0x00, 0xc0,
+enum {
+	UsbHidItfKeyboard,
+	UsbHidItfTotal,
 };
 
-_Static_assert(sizeof(mReportDesc) == 63, "unexpected keyboard report descriptor size");
-_Static_assert(USB_HID_CONFIG_DESC_LEN == 34, "unexpected HID configuration descriptor size");
-_Static_assert(USB_HID_KEYBOARD_REPORT_SIZE == 8, "unexpected keyboard report size");
+#define USB_HID_CONFIG_TOTAL_LEN	(TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+#define USB_HID_EP_KEYBOARD		0x81
+
+static struct UsbHidDeviceInfo mInfo;
+static bool mHwReady, mInited, mReportsEnabled;
+static const char *mLastError = "none";
+static uint16_t mStringDesc[33];
+
+void panic(const char *fmt, ...)
+{
+	(void)fmt;
+	while (1) {}
+}
+
+uint8_t rp2040_chip_version(void)
+{
+	return 2;
+}
+
+static tusb_desc_device_t mDeviceDesc = {
+	.bLength = sizeof(tusb_desc_device_t),
+	.bDescriptorType = TUSB_DESC_DEVICE,
+	.bcdUSB = 0x0200,
+	.bDeviceClass = 0,
+	.bDeviceSubClass = 0,
+	.bDeviceProtocol = 0,
+	.bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
+	.idVendor = USB_HID_DEFAULT_VID,
+	.idProduct = USB_HID_DEFAULT_PID,
+	.bcdDevice = 0x0100,
+	.iManufacturer = 1,
+	.iProduct = 2,
+	.iSerialNumber = 0,
+	.bNumConfigurations = 1,
+};
+
+static const uint8_t mReportDesc[] = {
+	TUD_HID_REPORT_DESC_KEYBOARD()
+};
+
+static const uint8_t mConfigDesc[] = {
+	TUD_CONFIG_DESCRIPTOR(1, UsbHidItfTotal, 0, USB_HID_CONFIG_TOTAL_LEN, 0, 50),
+	TUD_HID_DESCRIPTOR(UsbHidItfKeyboard, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(mReportDesc),
+		USB_HID_EP_KEYBOARD, USB_HID_KEYBOARD_REPORT_SIZE, 1),
+};
+
+_Static_assert(sizeof(mReportDesc) >= 63, "unexpected keyboard report descriptor size");
+_Static_assert(sizeof(mConfigDesc) == USB_HID_CONFIG_TOTAL_LEN, "unexpected HID configuration descriptor size");
 
 void usbHidDefaultInfo(struct UsbHidDeviceInfo *info)
 {
-        memset(info, 0, sizeof(*info));
+	memset(info, 0, sizeof(*info));
 	info->vid = USB_HID_DEFAULT_VID;
 	info->pid = USB_HID_DEFAULT_PID;
 	strcpy(info->manufacturer, "DC32");
 	strcpy(info->product, "DC32 HID");
 }
 
-static void usbHidPrvWrite16(uint8_t *dst, uint16_t val)
-{
-        dst[0] = val;
-        dst[1] = val >> 8;
-}
-
-static const uint8_t* usbHidPrvDeviceDesc(uint16_t *lenP)
-{
-        static uint8_t desc[18] = {
-                18, USB_DT_DEVICE, 0x00, 0x02, 0, 0, 0, 64,
-                0, 0, 0, 0, 0x00, 0x01, 1, 2, 0, 1,
-        };
-
-        usbHidPrvWrite16(desc + 8, mInfo.vid);
-        usbHidPrvWrite16(desc + 10, mInfo.pid);
-        *lenP = sizeof(desc);
-        return desc;
-}
-
-static const uint8_t* usbHidPrvConfigDesc(uint16_t *lenP)
-{
-        static uint8_t desc[USB_HID_CONFIG_DESC_LEN] = {
-                9, USB_DT_CONFIGURATION, USB_HID_CONFIG_DESC_LEN, 0, 1, 1, 0, 0x80, 50,
-                9, USB_DT_INTERFACE, 0, 0, 1, 0x03, 1, 1, 0,
-                9, USB_DT_HID, 0x11, 0x01, 0, 1, USB_DT_REPORT, 0, 0,
-                7, USB_DT_ENDPOINT, 0x81, 0x03, USB_HID_KEYBOARD_REPORT_SIZE, 0, 1,
-        };
-
-        usbHidPrvWrite16(desc + 25, sizeof(mReportDesc));
-        *lenP = sizeof(desc);
-        return desc;
-}
-
-static const uint8_t* usbHidPrvHidDesc(uint16_t *lenP)
-{
-        static uint8_t desc[9] = {9, USB_DT_HID, 0x11, 0x01, 0, 1, USB_DT_REPORT, 0, 0};
-
-        usbHidPrvWrite16(desc + 7, sizeof(mReportDesc));
-        *lenP = sizeof(desc);
-        return desc;
-}
-
-static uint16_t usbHidPrvStringDesc(uint8_t index, uint8_t *dst)
-{
-        const char *str = NULL;
-        uint16_t len = 2, i;
-
-        if (!index) {
-                dst[0] = 4;
-                dst[1] = USB_DT_STRING;
-                dst[2] = 0x09;
-                dst[3] = 0x04;
-                return 4;
-        }
-        if (index == 1)
-                str = mInfo.manufacturer;
-        else if (index == 2)
-                str = mInfo.product;
-        else
-                str = "";
-
-        for (i = 0; str[i] && len + 2 <= 64; i++) {
-                dst[len++] = str[i];
-                dst[len++] = 0;
-        }
-        dst[0] = len;
-        dst[1] = USB_DT_STRING;
-        return len;
-}
-
-static uint32_t usbHidPrvBufCtrl(uint32_t len, bool data1)
-{
-        return USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_FULL | USB_BUF_CTRL_LAST | len | (data1 ? USB_BUF_CTRL_DATA1_PID : USB_BUF_CTRL_DATA0_PID);
-}
-
-static void usbHidPrvEp0In(const void *data, uint16_t len)
-{
-        if (len > 64)
-                len = 64;
-        if (len)
-                memcpy(usb_dpram->ep0_buf_a, data, len);
-        usb_dpram->ep_buf_ctrl[0].in = usbHidPrvBufCtrl(len, mEp0DataPid);
-        mEp0DataPid = !mEp0DataPid;
-}
-
-static void usbHidPrvEp0OutStatus(void)
-{
-        usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_DATA1_PID;
-}
-
-static void usbHidPrvEp0OutData(uint16_t len)
-{
-        if (len > 64)
-                len = 64;
-        usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_DATA1_PID | len;
-}
-
-static void usbHidPrvCtrlSendNext(void)
-{
-        uint16_t len = mCtrlRemaining;
-
-        if (len > 64)
-                len = 64;
-        usbHidPrvEp0In(mCtrlData, len);
-        mCtrlData += len;
-        mCtrlRemaining -= len;
-}
-
-static void usbHidPrvEp0Stall(void)
-{
-        usb_hw->ep_stall_arm = USB_EP0_IN_BIT | USB_EP0_OUT_BIT;
-        usb_dpram->ep_buf_ctrl[0].in = USB_BUF_CTRL_STALL;
-        usb_dpram->ep_buf_ctrl[0].out = USB_BUF_CTRL_STALL;
-}
-
-static void usbHidPrvEp1Init(void)
-{
-        usb_dpram->ep_ctrl[0].in = EP_CTRL_ENABLE_BITS | EP_CTRL_INTERRUPT_PER_BUFFER | (3u << EP_CTRL_BUFFER_TYPE_LSB) | USB_EP1_IN_BUF;
-        usb_dpram->ep_buf_ctrl[1].in = 0;
-        mEp1DataPid = false;
-}
-
-static void usbHidPrvBusReset(void)
-{
-        usb_hw->dev_addr_ctrl = 0;
-        mConfigured = 0;
-        mPendingAddress = 0;
-        mCtrlData = NULL;
-        mCtrlRemaining = 0;
-        mExpectSetReportOut = false;
-        usb_dpram->ep_buf_ctrl[0].in = 0;
-        usb_dpram->ep_buf_ctrl[0].out = 0;
-        usbHidPrvEp1Init();
-}
-
-static void usbHidPrvControlRead(const void *data, uint16_t len, uint16_t wanted)
-{
-        if (len > wanted)
-                len = wanted;
-        mCtrlData = data;
-        mCtrlRemaining = len;
-        usbHidPrvCtrlSendNext();
-}
-
-static void usbHidPrvSetup(void)
-{
-        uint8_t tmp[64];
-        const uint8_t *data = NULL;
-        const volatile uint8_t *pkt = usb_dpram->setup_packet;
-        uint8_t bmRequestType, bRequest;
-        uint16_t wValue, wLength;
-        uint16_t len = 0;
-
-        bmRequestType = pkt[0];
-        bRequest = pkt[1];
-        wValue = (uint16_t)pkt[2] | ((uint16_t)pkt[3] << 8);
-        wLength = (uint16_t)pkt[6] | ((uint16_t)pkt[7] << 8);
-        mEp0DataPid = true;
-        mCtrlData = NULL;
-        mCtrlRemaining = 0;
-        mExpectSetReportOut = false;
-
-        if ((bmRequestType & 0x60) == 0) {
-                if (bRequest == USB_REQ_GET_DESCRIPTOR) {
-                        uint8_t descType = wValue >> 8, descIdx = wValue;
-
-                        if (descType == USB_DT_DEVICE)
-                                data = usbHidPrvDeviceDesc(&len);
-                        else if (descType == USB_DT_CONFIGURATION)
-                                data = usbHidPrvConfigDesc(&len);
-                        else if (descType == USB_DT_STRING) {
-                                len = usbHidPrvStringDesc(descIdx, tmp);
-                                data = tmp;
-                        }
-                        else if (descType == USB_DT_REPORT) {
-                                data = mReportDesc;
-                                len = sizeof(mReportDesc);
-                        }
-                        else if (descType == USB_DT_HID)
-                                data = usbHidPrvHidDesc(&len);
-
-                        if (data)
-                                usbHidPrvControlRead(data, len, wLength);
-                        else
-                                usbHidPrvEp0Stall();
-                }
-                else if (bRequest == USB_REQ_SET_ADDRESS) {
-                        mPendingAddress = wValue & 0x7f;
-                        usbHidPrvEp0In(NULL, 0);
-                }
-                else if (bRequest == USB_REQ_SET_CONFIGURATION) {
-                        mConfigured = wValue;
-                        usbHidPrvEp1Init();
-                        usbHidPrvEp0In(NULL, 0);
-                }
-                else if (bRequest == USB_REQ_GET_CONFIGURATION) {
-                        tmp[0] = mConfigured;
-                        usbHidPrvControlRead(tmp, 1, wLength);
-                }
-                else if (bRequest == USB_REQ_GET_STATUS) {
-                        tmp[0] = tmp[1] = 0;
-                        usbHidPrvControlRead(tmp, 2, wLength);
-                }
-                else if (bRequest == USB_REQ_CLEAR_FEATURE || bRequest == USB_REQ_SET_DESCRIPTOR || bRequest == USB_REQ_SET_INTERFACE) {
-                        usbHidPrvEp0In(NULL, 0);
-                }
-                else if (bRequest == USB_REQ_GET_INTERFACE) {
-                        tmp[0] = 0;
-                        usbHidPrvControlRead(tmp, 1, wLength);
-                }
-                else {
-                        usbHidPrvEp0Stall();
-                }
-        }
-        else if ((bmRequestType & 0x60) == 0x20) {
-                if (bRequest == HID_REQ_SET_IDLE) {
-                        mIdleRate = wValue >> 8;
-                        usbHidPrvEp0In(NULL, 0);
-                }
-                else if (bRequest == HID_REQ_GET_IDLE) {
-                        tmp[0] = mIdleRate;
-                        usbHidPrvControlRead(tmp, 1, wLength);
-                }
-                else if (bRequest == HID_REQ_SET_PROTOCOL) {
-                        mProtocol = wValue;
-                        usbHidPrvEp0In(NULL, 0);
-                }
-                else if (bRequest == HID_REQ_GET_PROTOCOL) {
-                        tmp[0] = mProtocol;
-                        usbHidPrvControlRead(tmp, 1, wLength);
-                }
-                else if (bRequest == HID_REQ_GET_REPORT) {
-                        memset(tmp, 0, sizeof(tmp));
-                        usbHidPrvControlRead(tmp, wLength > sizeof(tmp) ? sizeof(tmp) : wLength, wLength);
-                }
-                else if (bRequest == HID_REQ_SET_REPORT) {
-                        if (wLength) {
-                                mExpectSetReportOut = true;
-                                usbHidPrvEp0OutData(wLength);
-                        }
-                        else {
-                                usbHidPrvEp0In(NULL, 0);
-                        }
-                }
-                else {
-                        usbHidPrvEp0Stall();
-                }
-        }
-        else {
-                usbHidPrvEp0Stall();
-        }
-}
-
 static bool usbHidPrvWaitBits(const volatile uint32_t *reg, uint32_t bits, bool set)
 {
-        uint64_t end = getTime() + (uint64_t)USB_HID_HW_WAIT_MS * (TICKS_PER_SECOND / 1000);
+	uint64_t end = getTime() + (uint64_t)USB_HID_HW_WAIT_MS * (TICKS_PER_SECOND / 1000);
 
-        while (getTime() < end) {
-                uint32_t val = *reg & bits;
+	while (getTime() < end) {
+		uint32_t val = *reg & bits;
 
-                if (set ? val == bits : val == 0)
-                        return true;
-        }
-        return false;
+		if (set ? val == bits : val == 0)
+			return true;
+	}
+	return false;
 }
 
 static void usbHidPrvWaitMs(uint32_t msec)
 {
-        uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
+	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
 
-        while (getTime() < end);
+	while (getTime() < end)
+		usbHidTask();
+}
+
+static void usbHidPrvPollController(void)
+{
+	if (!mInited)
+		return;
+	dcd_int_handler(0);
+	tud_task();
+}
+
+static void usbHidPrvNormalizeInfo(const struct UsbHidDeviceInfo *info)
+{
+	struct UsbHidDeviceInfo defaultInfo;
+
+	if (!info) {
+		usbHidDefaultInfo(&defaultInfo);
+		info = &defaultInfo;
+	}
+	mInfo = *info;
+	if (!mInfo.vid)
+		mInfo.vid = USB_HID_DEFAULT_VID;
+	if (!mInfo.pid)
+		mInfo.pid = USB_HID_DEFAULT_PID;
+	if (!mInfo.manufacturer[0])
+		strcpy(mInfo.manufacturer, "DC32");
+	if (!mInfo.product[0])
+		strcpy(mInfo.product, "DC32 HID");
+	mDeviceDesc.idVendor = mInfo.vid;
+	mDeviceDesc.idProduct = mInfo.pid;
 }
 
 bool usbHidPrepare(void)
@@ -358,28 +130,30 @@ bool usbHidPrepare(void)
 	if (mHwReady)
 		return true;
 
-        units = RESETS_RESET_PLL_USB_BITS;
-        resets_hw->reset |= units;
-        resets_hw->reset &=~ units;
-        if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true)) {
+	units = RESETS_RESET_PLL_USB_BITS;
+	resets_hw->reset |= units;
+	resets_hw->reset &=~ units;
+	if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true)) {
 		mLastError = "PLL reset timeout";
-                return false;
+		return false;
 	}
 
-        pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
-        pll_usb_hw->cs = (pll_usb_hw->cs &~ (PLL_CS_BYPASS_BITS | PLL_CS_REFDIV_BITS)) | (1 << PLL_CS_REFDIV_LSB);
-        pll_usb_hw->fbdiv_int = (pll_usb_hw->fbdiv_int &~ PLL_FBDIV_INT_BITS) | (100 << PLL_FBDIV_INT_LSB);
-        pll_usb_hw->prim = (pll_usb_hw->prim &~ (PLL_PRIM_POSTDIV1_BITS | PLL_PRIM_POSTDIV2_BITS)) | (5 << PLL_PRIM_POSTDIV1_LSB) | (5 << PLL_PRIM_POSTDIV2_LSB);
-        pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
-        if (!usbHidPrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true)) {
+	pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
+	pll_usb_hw->cs = (pll_usb_hw->cs &~ (PLL_CS_BYPASS_BITS | PLL_CS_REFDIV_BITS)) | (1 << PLL_CS_REFDIV_LSB);
+	pll_usb_hw->fbdiv_int = (pll_usb_hw->fbdiv_int &~ PLL_FBDIV_INT_BITS) | (100 << PLL_FBDIV_INT_LSB);
+	pll_usb_hw->prim = (pll_usb_hw->prim &~ (PLL_PRIM_POSTDIV1_BITS | PLL_PRIM_POSTDIV2_BITS)) |
+		(5 << PLL_PRIM_POSTDIV1_LSB) | (5 << PLL_PRIM_POSTDIV2_LSB);
+	pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
+	if (!usbHidPrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true)) {
 		mLastError = "PLL lock timeout";
-                return false;
+		return false;
 	}
-        pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
+	pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
 
-        clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;
-        clocks_hw->clk[clk_usb].div = 1 << CLOCKS_CLK_USB_DIV_INT_LSB;
-        clocks_hw->clk[clk_usb].ctrl = CLOCKS_CLK_USB_CTRL_ENABLE_BITS | (CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB << CLOCKS_CLK_USB_CTRL_AUXSRC_LSB);
+	clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;
+	clocks_hw->clk[clk_usb].div = 1 << CLOCKS_CLK_USB_DIV_INT_LSB;
+	clocks_hw->clk[clk_usb].ctrl = CLOCKS_CLK_USB_CTRL_ENABLE_BITS |
+		(CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB << CLOCKS_CLK_USB_CTRL_AUXSRC_LSB);
 
 	mHwReady = true;
 	return true;
@@ -392,96 +166,35 @@ const char *usbHidLastError(void)
 
 bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
-	struct UsbHidDeviceInfo defaultInfo;
-	uint32_t units;
-
 	if (mInited) {
 		usbHidEnd();
 		usbHidPrvWaitMs(USB_HID_DETACH_WAIT_MS);
 	}
 
-	if (!info) {
-		usbHidDefaultInfo(&defaultInfo);
-		info = &defaultInfo;
-	}
-	mInfo = *info;
-	if (!mInfo.vid)
-		mInfo.vid = USB_HID_DEFAULT_VID;
-        if (!mInfo.pid)
-                mInfo.pid = USB_HID_DEFAULT_PID;
-	if (!mInfo.manufacturer[0])
-		strcpy(mInfo.manufacturer, "DC32");
-	if (!mInfo.product[0])
-		strcpy(mInfo.product, "DC32 HID");
-
+	usbHidPrvNormalizeInfo(info);
 	if (!usbHidPrepare())
 		return false;
-
-        units = RESETS_RESET_USBCTRL_BITS;
-        resets_hw->reset |= units;
-        resets_hw->reset &=~ units;
-        if (!usbHidPrvWaitBits(&resets_hw->reset_done, units, true)) {
-		mLastError = "USB reset timeout";
-                return false;
+	if (!tud_init(0)) {
+		mLastError = "TinyUSB init failed";
+		return false;
 	}
 
-        memset((void*)usb_dpram, 0, USB_DPRAM_SIZE);
-        usb_hw->main_ctrl = 0;
-        usb_hw->muxing = USB_USB_MUXING_TO_PHY | USB_USB_MUXING_SOFTCON;
-        usb_hw->pwr = USB_USB_PWR_VBUS_DETECT | USB_USB_PWR_VBUS_DETECT_OVERRIDE_EN;
-	usb_hw->sie_ctrl = USB_SIE_CTRL_EP0_INT_1BUF;
-	usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN;
-	usbHidPrvBusReset();
 	mReportsEnabled = false;
 	mInited = true;
-	usb_hw->sie_ctrl |= USB_SIE_CTRL_PULLUP_EN;
+	tud_connect();
+	usbHidPrvPollController();
 	return true;
 }
 
 void usbHidTask(void)
 {
-        uint32_t status, bufStatus;
-
-        if (!mInited)
-                return;
-
-        status = usb_hw->sie_status;
-        if (status & USB_SIE_STATUS_BUS_RESET) {
-                usb_hw->sie_status = USB_SIE_STATUS_BUS_RESET;
-                usbHidPrvBusReset();
-        }
-        if (status & USB_SIE_STATUS_SETUP_REC) {
-                usb_hw->sie_status = USB_SIE_STATUS_SETUP_REC;
-                usbHidPrvSetup();
-        }
-
-        bufStatus = usb_hw->buf_status;
-        if (bufStatus) {
-                usb_hw->buf_status = bufStatus;
-                if (bufStatus & USB_EP0_IN_BIT) {
-                        if (mCtrlRemaining)
-                                usbHidPrvCtrlSendNext();
-                        else if (mPendingAddress) {
-                                usb_hw->dev_addr_ctrl = mPendingAddress;
-                                mPendingAddress = 0;
-                        }
-                        else {
-                                usbHidPrvEp0OutStatus();
-                        }
-                }
-                if (bufStatus & USB_EP0_OUT_BIT) {
-                        if (mExpectSetReportOut) {
-                                mExpectSetReportOut = false;
-                                usbHidPrvEp0In(NULL, 0);
-                        }
-                }
-        }
+	usbHidPrvPollController();
 }
 
 bool usbHidReady(void)
 {
 	usbHidTask();
-	return mInited && mConfigured;
+	return mInited && tud_mounted() && tud_hid_ready();
 }
 
 bool usbHidStarted(void)
@@ -495,47 +208,30 @@ bool usbHidReportsEnabled(void)
 	return mReportsEnabled;
 }
 
-static bool usbHidPrvSendReport(const uint8_t *report, uint32_t len, bool force)
+static bool usbHidPrvSendReport(uint8_t modifiers, const uint8_t keys[6], bool force)
 {
-	uint8_t *dst = &usb_dpram->epx_data[USB_EP1_IN_BUF - 0x180];
 	uint64_t end = getTime() + TICKS_PER_SECOND / 2;
 
 	if (!force && !mReportsEnabled)
 		return false;
-	if (len > 16)
-		return false;
-        while (getTime() < end) {
-                usbHidTask();
-                if (!usbHidReady())
-                        continue;
-                if (!(usb_dpram->ep_buf_ctrl[1].in & USB_BUF_CTRL_FULL)) {
-                        memcpy(dst, report, len);
-                        usb_dpram->ep_buf_ctrl[1].in = usbHidPrvBufCtrl(len, mEp1DataPid);
-                        mEp1DataPid = !mEp1DataPid;
-                        return true;
-                }
-        }
-        return false;
+	while (getTime() < end) {
+		usbHidTask();
+		if (tud_mounted() && tud_hid_ready())
+			return tud_hid_keyboard_report(0, modifiers, keys);
+	}
+	return false;
 }
 
 bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6])
 {
-	uint8_t report[USB_HID_KEYBOARD_REPORT_SIZE] = {modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
-
-	return usbHidPrvSendReport(report, sizeof(report), false);
+	return usbHidPrvSendReport(modifiers, keys, false);
 }
 
 static void usbHidPrvReleaseAll(bool force)
 {
 	uint8_t keys[6] = {0};
-	uint8_t keyboardReport[USB_HID_KEYBOARD_REPORT_SIZE] = {0};
 
-	if (!force) {
-		(void)usbHidKeyboardReport(0, keys);
-		return;
-	}
-
-	(void)usbHidPrvSendReport(keyboardReport, sizeof(keyboardReport), true);
+	(void)usbHidPrvSendReport(0, keys, force);
 }
 
 void usbHidReleaseAll(void)
@@ -554,11 +250,75 @@ void usbHidEnd(void)
 {
 	if (!mInited)
 		return;
-	if (mConfigured)
+	if (tud_mounted())
 		usbHidPrvReleaseAll(true);
-	usb_hw->sie_ctrl &=~ USB_SIE_CTRL_PULLUP_EN;
-	usb_hw->main_ctrl = 0;
-	mConfigured = 0;
 	mReportsEnabled = false;
+	tud_disconnect();
+	usbHidPrvPollController();
+	(void)tud_deinit(0);
 	mInited = false;
+}
+
+uint8_t const *tud_descriptor_device_cb(void)
+{
+	return (const uint8_t*)&mDeviceDesc;
+}
+
+uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
+{
+	(void)index;
+	return mConfigDesc;
+}
+
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
+{
+	(void)instance;
+	return mReportDesc;
+}
+
+uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
+{
+	const char *str = NULL;
+	uint32_t i, len;
+
+	(void)langid;
+	if (!index) {
+		mStringDesc[0] = (TUSB_DESC_STRING << 8) | (2 * 1 + 2);
+		mStringDesc[1] = 0x0409;
+		return mStringDesc;
+	}
+	if (index == 1)
+		str = mInfo.manufacturer;
+	else if (index == 2)
+		str = mInfo.product;
+	else
+		return NULL;
+
+	len = strlen(str);
+	if (len > sizeof(mStringDesc) / sizeof(mStringDesc[0]) - 1)
+		len = sizeof(mStringDesc) / sizeof(mStringDesc[0]) - 1;
+	for (i = 0; i < len; i++)
+		mStringDesc[i + 1] = (uint8_t)str[i];
+	mStringDesc[0] = (TUSB_DESC_STRING << 8) | (2 * len + 2);
+	return mStringDesc;
+}
+
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen)
+{
+	(void)instance;
+	(void)report_id;
+	(void)report_type;
+	if (reqlen > USB_HID_KEYBOARD_REPORT_SIZE)
+		reqlen = USB_HID_KEYBOARD_REPORT_SIZE;
+	memset(buffer, 0, reqlen);
+	return reqlen;
+}
+
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, const uint8_t *buffer, uint16_t bufsize)
+{
+	(void)instance;
+	(void)report_id;
+	(void)report_type;
+	(void)buffer;
+	(void)bufsize;
 }

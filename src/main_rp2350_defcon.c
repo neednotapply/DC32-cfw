@@ -1454,7 +1454,7 @@ static uint_fast16_t uiPrvSelfTestReadNonGbKeys(void)
 
 static uint_fast16_t isqrt(uint32_t val)
 {
-        uint32_t min = 0, max = 0xffff;
+	uint32_t min = 0, max = 0xffff;
 
         while (min < max) {
                 uint32_t guess = (max + min) / 2, guessSqr = guess * guess;
@@ -1467,7 +1467,12 @@ static uint_fast16_t isqrt(uint32_t val)
                         max = guess - 1;
         }
 
-        return (max + min) / 2;
+	return (max + min) / 2;
+}
+
+static uint16_t prvReadBe16(const uint8_t *val)
+{
+	return ((uint16_t)val[0] << 8) | val[1];
 }
 
 static void uiPrvSelfTestDrawStatic(struct Canvas *cnv, bool inverted, bool flipped)
@@ -1782,9 +1787,9 @@ static void uiPrvSelfTestsIfNeeded(void)
 
                                         if (i2cRegRead(ACCEL_I2C_ADDR, 0xa8, adcVals, 6)) {
 
-                                                int_fast16_t x = (int16_t)__builtin_bswap16(*(uint16_t*)(adcVals + 0));
-                                                int_fast16_t y = (int16_t)__builtin_bswap16(*(uint16_t*)(adcVals + 2));
-                                                int_fast16_t z = (int16_t)__builtin_bswap16(*(uint16_t*)(adcVals + 4));
+                                                int_fast16_t x = (int16_t)prvReadBe16(adcVals + 0);
+                                                int_fast16_t y = (int16_t)prvReadBe16(adcVals + 2);
+                                                int_fast16_t z = (int16_t)prvReadBe16(adcVals + 4);
                                                 uint_fast16_t magnitude;
                                                 bool accuracyPass;
 

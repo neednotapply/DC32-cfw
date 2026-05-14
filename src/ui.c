@@ -5191,10 +5191,10 @@ static void uiPrvShowBootRecovery(struct Canvas *cnv)
 		struct BootGuardCrashInfo info;
 
 		bootGuardRecoveredCrashInfo(&info);
-		(void)sprintf(msg, "Recovered from a crash.\nMode %s\nPC %08x SP %08x\nCFSR %08x HFSR %08x\nBFAR %08x",
+		(void)sprintf(msg, "Recovered from a crash.\nMode %s\nPC %08x LR %08x\nSP %08x\nCFSR %08x HFSR %08x\nBFAR %08x",
 			uiPrvBootGuardModeName((enum BootGuardMode)info.mode),
-			(unsigned)info.pc, (unsigned)info.sp, (unsigned)info.cfsr, (unsigned)info.hfsr,
-			(unsigned)info.bfar);
+			(unsigned)info.pc, (unsigned)info.lr, (unsigned)info.sp,
+			(unsigned)info.cfsr, (unsigned)info.hfsr, (unsigned)info.bfar);
 	}
 	else {
 		(void)sprintf(msg, "Recovered after reset in %s.\nStarting Main Menu.",

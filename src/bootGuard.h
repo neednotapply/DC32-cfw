@@ -9,6 +9,7 @@ struct BootGuardCrashInfo {
 	uint32_t cfsr;
 	uint32_t hfsr;
 	uint32_t pc;
+	uint32_t lr;
 	uint32_t sp;
 	uint32_t bfar;
 };

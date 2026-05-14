@@ -4,7 +4,7 @@
 #define BOOT_GUARD_MAGIC	0x44433247ul
 #define BOOT_GUARD_SCRATCH_MAGIC	0
 #define BOOT_GUARD_SCRATCH_MODE		1
-#define BOOT_GUARD_SCRATCH_REASON	2
+#define BOOT_GUARD_SCRATCH_REASON_OR_LR	2
 #define BOOT_GUARD_SCRATCH_CFSR		3
 #define BOOT_GUARD_SCRATCH_HFSR		4
 #define BOOT_GUARD_SCRATCH_PC		5
@@ -30,10 +30,10 @@ void bootGuardInit(void)
 
 	mRecoveredMode = bootGuardPrvScratchMode();
 	if (!reason)
-		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON] = 0;
-	else if (!mRecoveredMode && watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON] != (BOOT_GUARD_MAGIC ^ reason)) {
+		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] = 0;
+	else if (!mRecoveredMode && watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] != (BOOT_GUARD_MAGIC ^ reason)) {
 		mRecoveredMode = BootGuardModeTool;
-		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON] = BOOT_GUARD_MAGIC ^ reason;
+		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] = BOOT_GUARD_MAGIC ^ reason;
 	}
 }
 
@@ -62,7 +62,14 @@ enum BootGuardMode bootGuardRecoveredMode(void)
 void bootGuardRecoveredCrashInfo(struct BootGuardCrashInfo *info)
 {
 	info->mode = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MODE];
-	info->reason = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON];
+	if (info->mode == BootGuardModeHardFault) {
+		info->reason = 0;
+		info->lr = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR];
+	}
+	else {
+		info->reason = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR];
+		info->lr = 0;
+	}
 	info->cfsr = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_CFSR];
 	info->hfsr = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_HFSR];
 	info->pc = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_PC];
@@ -78,7 +85,7 @@ void bootGuardCaptureHardFault(uint32_t *frame, uint32_t retLr)
 
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MAGIC] = BOOT_GUARD_MAGIC;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MODE] = BootGuardModeHardFault;
-	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON] = BOOT_GUARD_MAGIC ^ watchdog_hw->reason;
+	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] = frame[5];
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_CFSR] = SCB->CFSR;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_HFSR] = SCB->HFSR;
 	watchdog_hw->scratch[BOOT_GUARD_SCRATCH_PC] = frame[6];

@@ -38,6 +38,7 @@ add_executable(${APP}
     ${SRC_DIR}/sdHwRP2350.c
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/sleepDefcon.c
+    ${SRC_DIR}/stringCompat.c
     ${SRC_DIR}/timebase.c
     ${SRC_DIR}/toolWorkspace.c
     ${SRC_DIR}/ui.c
@@ -84,6 +85,7 @@ target_compile_options(${APP} PRIVATE
     -ffunction-sections
     -fdata-sections
     -fomit-frame-pointer
+    -fno-builtin-strcmp
     -Wno-array-bounds
     -Wno-clobbered
     -Wno-unused-parameter

@@ -4842,6 +4842,16 @@ reload_dir:
 		data->lastState = state;
 	}
 
+	static void uiPrvBadUsbPreloadForDisplay(struct BadUsbPreload *preload, struct FatfsFil *fil, const struct UsbHidDeviceInfo *info)
+	{
+		memset(preload, 0, sizeof(*preload));
+		if (info)
+			preload->info = *info;
+		else
+			usbHidDefaultInfo(&preload->info);
+		preload->fileSize = fatfsFileGetSize(fil);
+	}
+
 	static bool uiPrvBadUsbWaitReady(struct BadUsbUiData *data, const struct BadUsbPreload *preload)
 	{
 		uint64_t end = getTime() + (uint64_t)BADUSB_UI_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
@@ -4872,6 +4882,7 @@ reload_dir:
 		struct FatfsFil *fil = NULL;
 		struct BadUsbUiData data;
 		struct BadUsbPreload preload;
+		struct UsbHidDeviceInfo hidInfo;
 		enum BadUsbResult ret;
 		char msg[96];
 		bool ok = false, reportsEnabled = false, usbStarted = false;
@@ -4892,12 +4903,15 @@ reload_dir:
 		data.name = name;
 		data.forceDraw = true;
 		uiPrvWaitKeysReleased();
-		ret = badUsbPreloadFile(fil, uiPrvBadUsbStatus, &data, &preload);
-		if (ret != BadUsbResultDone)
+
+		if (!badUsbReadDeviceInfo(fil, &hidInfo)) {
+			ret = BadUsbResultFileError;
 			goto out_report;
+		}
+		uiPrvBadUsbPreloadForDisplay(&preload, fil, &hidInfo);
 
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateWillRun, "Starting USB");
-		if (!usbHidBegin(&preload.info)) {
+		if (!usbHidBegin(&hidInfo)) {
 			struct BadUsbStatus usbStatus;
 
 			memset(&usbStatus, 0, sizeof(usbStatus));
@@ -4918,7 +4932,7 @@ reload_dir:
 		reportsEnabled = true;
 		uiPrvWaitKeysReleased();
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateRunning, "Running");
-		ret = badUsbRunPreparedFile(fil, &preload, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+		ret = badUsbRunPreparedFile(fil, NULL, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
 
 	out_usb:
 		if (reportsEnabled) {

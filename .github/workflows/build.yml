@@ -43,6 +43,9 @@ jobs:
           ARTIFACT_DIR="$RUNNER_TEMP/firmware"
           mkdir -p "$ARTIFACT_DIR"
           cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+          python3 tools/build_sd_zip.py \
+            --output "$ARTIFACT_DIR/SD.zip" \
+            --work-dir "$RUNNER_TEMP/sd-zip"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -50,6 +53,7 @@ jobs:
           name: firmware
           path: |
             ${{ runner.temp }}/firmware/DC32-cfw.uf2
+            ${{ runner.temp }}/firmware/SD.zip
 
       - name: Attach firmware to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
@@ -57,4 +61,5 @@ jobs:
         with:
           files: |
             ${{ runner.temp }}/firmware/DC32-cfw.uf2
+            ${{ runner.temp }}/firmware/SD.zip
           overwrite_files: true

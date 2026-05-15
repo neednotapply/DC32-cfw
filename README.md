@@ -11,7 +11,7 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
-- **Game loading and saves** - Loads games from `/ROM` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save before switching games when save RAM is present.
+- **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save before switching games when save RAM is present.
 - **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for `/IR/ac.ir`, `/IR/audio.ir`, `/IR/projector.ir`, and `/IR/tv.ir`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
@@ -44,11 +44,26 @@ The firmware can browse the full card, but the menu tools look in these conventi
 
 | Path | Used by |
 | ---- | ------- |
-| `/ROM` | Game picker for `.gb`, `.gbc`, and `.nes` files. |
+| `/ROMS` | Game picker root, conventionally split into `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game. |
 | `/IR` | Universal IR files, including `ac.ir`, `audio.ir`, `projector.ir`, `tv.ir`, and optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. |
+
+Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extract `SD.zip` directly to the SD card root so `IR/`, `BADUSB/`, `MUSIC/`, and `ROMS/` land alongside any existing folders. The bundle is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md` inside the zip.
+
+## SD.zip asset credits
+
+`SD.zip` fetches external assets from these upstream projects at workflow time:
+
+| SD path | Source |
+| ------- | ------ |
+| `/IR` | [flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), `applications/main/infrared/resources/infrared/assets` |
+| `/BADUSB` | [UberGuidoZ/Flipper](https://github.com/UberGuidoZ/Flipper), `BadUSB` |
+| `/MUSIC` | [neverfa11ing/FlipperMusicRTTTL](https://github.com/neverfa11ing/FlipperMusicRTTTL) |
+| `/ROMS/GB`, `/ROMS/GBC`, `/ROMS/NES` | Folders for user-provided ROMs, each with a `README.txt` placeholder; add only files you can lawfully use and redistribute. |
+
+Credit and licensing for bundled external assets remain with their upstream projects.
 
 ## Repository layout
 
@@ -69,6 +84,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
 | `src/settings.c`, `src/bootGuard.c`, `src/toolWorkspace.c` | Persistent settings, tool crash/reset recovery, and shared workspace allocation. |
 | `tools/bin_to_uf2.py` | Converts the raw binary image to the RP2350 UF2 update file. |
+| `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages the release `SD.zip` bundle. |
 | `tools/fatfs_regression_test.c` | Host-side FAT filesystem regression helper. |
 | `src/Makefile` | Legacy/developer make flow; the root CMake build is the current supported build path. |
 
@@ -114,7 +130,7 @@ The post-build step also runs `arm-none-eabi-size` and checks the firmware again
 
 Use `build/DC32-cfw.uf2` for normal updates. Put the badge into RP2350 USB bootloader mode, then copy `DC32-cfw.uf2` onto the mounted UF2 drive. The drive disconnects after the copy completes and the badge boots the new firmware.
 
-GitHub Actions uploads the same UF2 as the `firmware` artifact on builds and attaches it to tagged/release builds.
+GitHub Actions uploads the same UF2 and `SD.zip` as the `firmware` artifact on builds and attaches both files to tagged/release builds.
 
 ### Direct BIN programmer
 

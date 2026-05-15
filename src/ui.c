@@ -1038,11 +1038,11 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		uint32_t fileSz;
 		uint8_t attrs;
 		
-		dir = fatfsDirOpen(vol, "/ROM");
+		dir = fatfsDirOpen(vol, "/ROMS");
 		
 		if (!dir) {
 			
-			uiAlert(cnv, "Cannot find a ROM directory on the SD card", DialogTypeOk);
+			uiAlert(cnv, "Cannot find a /ROMS directory on the SD card", DialogTypeOk);
 			return 0;
 		}
 		
@@ -1082,7 +1082,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		pr("found %u roms\n", count);
 		
 		if (!count) {
-			uiAlert(cnv, "No ROMs found in /ROM on the card", DialogTypeOk);
+			uiAlert(cnv, "No ROMs found in /ROMS on the card", DialogTypeOk);
 			return 0;
 		}
 		
@@ -2371,7 +2371,7 @@ bool uiSaveSavestate(void)
 		if (romLocator)
 			filR = fatfsFileOpenWithLocator(vol, romLocator, OPEN_MODE_READ);
 		else {
-			dir = fatfsDirOpen(vol, "/ROM");
+			dir = fatfsDirOpen(vol, "/ROMS");
 			if (!dir)
 				goto out;
 			filR = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
@@ -2604,7 +2604,7 @@ bool uiSaveSavestate(void)
 		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
-		if (uiPrvPickFile(cnv, vol, "/ROM", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROM", false, &locator, name, sizeof(name), NULL, 0))
+		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:

@@ -794,14 +794,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 
 #define UI_TOOL_RESULT_RELEASE_WAIT_MS	250
 
-static void uiPrvWaitKeysReleasedBounded(uint32_t timeoutMs)
+static bool uiPrvWaitKeysReleasedBounded(uint32_t timeoutMs)
 {
 	uint64_t end = getTime() + (uint64_t)timeoutMs * (TICKS_PER_SECOND / 1000);
 
 	while (uiGetUiKeysRaw()) {
 		if (getTime() >= end)
-			return;
+			return false;
 	}
+	return true;
 }
 
 static void uiPrvToolResultAlert(struct Canvas *cnv, const char *msg)
@@ -4688,6 +4689,8 @@ reload_dir:
 		struct BadUsbStatus lastStatus;
 		bool forceDraw;
 		bool haveStatus;
+		bool inputArmed;
+		bool cancelRequested;
 	};
 
 	#define BADUSB_UI_ENUM_WAIT_MS	5000
@@ -4744,6 +4747,15 @@ reload_dir:
 			return status->lineNo <= maxLine;
 		}
 		return true;
+	}
+
+	static uint_fast16_t uiPrvBadUsbArmedKeys(struct BadUsbUiData *data)
+	{
+		uint_fast16_t keys = uiGetUiKeysRaw();
+
+		if (!keys)
+			data->inputArmed = true;
+		return data->inputArmed ? keys : 0;
 	}
 
 	static void uiPrvBadUsbDrawStatus(struct BadUsbUiData *data, const struct BadUsbStatus *status, enum BadUsbWorkerState state, const char *message)
@@ -4825,11 +4837,16 @@ reload_dir:
 		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
 		struct BadUsbStatus badStatus;
 		uint64_t now = getTime();
+		uint_fast16_t keys = uiPrvBadUsbArmedKeys(data);
 
-		if (uiPrvCenterExitPressedRaw())
+		if (keys & UI_KEY_BIT_CENTER) {
+			uiPrvRequestToolExit();
 			return false;
-		if (uiGetKeysRaw() & KEY_BIT_B)
+		}
+		if (keys & KEY_BIT_B) {
+			data->cancelRequested = true;
 			return false;
+		}
 		if (!uiPrvBadUsbStatusSane(status)) {
 			memset(&badStatus, 0, sizeof(badStatus));
 			badStatus.state = BadUsbStateScriptError;
@@ -4840,7 +4857,7 @@ reload_dir:
 		}
 		data->lastStatus = *status;
 		data->haveStatus = true;
-		if ((status->state == BadUsbStateRunning || status->state == BadUsbStateDelay) && (uiGetKeysRaw() & KEY_BIT_A))
+		if ((status->state == BadUsbStateRunning || status->state == BadUsbStateDelay) && (keys & KEY_BIT_A))
 			return uiPrvBadUsbPause(data, &data->lastStatus);
 
 		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
@@ -4913,14 +4930,18 @@ reload_dir:
 
 		while (getTime() < end) {
 			uint64_t now = getTime();
+			uint_fast16_t keys;
 
 			usbHidTask();
-			if (uiPrvCenterExitPressedRaw()) {
+			keys = uiPrvBadUsbArmedKeys(data);
+			if (keys & UI_KEY_BIT_CENTER) {
 				uiPrvRequestToolExit();
 				return false;
 			}
-			if (uiGetKeysRaw() & KEY_BIT_B)
+			if (keys & KEY_BIT_B) {
+				data->cancelRequested = true;
 				return false;
+			}
 			if (usbHidReady())
 				return true;
 			if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
@@ -4956,7 +4977,7 @@ reload_dir:
 		data.cnv = cnv;
 		data.name = name;
 		data.forceDraw = true;
-		uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
+		data.inputArmed = uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
 
 		ret = badUsbPreloadFile(fil, uiPrvBadUsbStatus, &data, &preload);
 		if (ret != BadUsbResultDone)
@@ -4978,12 +4999,12 @@ reload_dir:
 		}
 		usbStarted = true;
 		if (!uiPrvBadUsbWaitReady(&data, &preload)) {
-			ret = (uiGetKeysRaw() & KEY_BIT_B) || uiPrvToolExitRequested() ? BadUsbResultCancelled : BadUsbResultUsbError;
+			ret = data.cancelRequested || uiPrvToolExitRequested() ? BadUsbResultCancelled : BadUsbResultUsbError;
 			goto out_usb;
 		}
 		usbHidSetReportsEnabled(true);
 		reportsEnabled = true;
-		uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
+		data.inputArmed = uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateRunning, "Running");
 		ret = badUsbRunPreparedFile(fil, &preload, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
 

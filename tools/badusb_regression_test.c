@@ -20,7 +20,7 @@ struct FatfsFil {
 };
 
 static uint64_t mNow;
-static uint32_t mUsbBegins, mReports, mSawStart, mSawDone;
+static uint32_t mUsbBegins, mReports, mSawStart, mSawDone, mSawScriptError, mWaitButtonCalls;
 
 uint64_t getTime(void)
 {
@@ -126,6 +126,7 @@ static bool badusbStatus(void *userData, const struct BadUsbStatus *status)
 	if (status->state == BadUsbStateDone)
 		mSawDone++;
 	if (status->state == BadUsbStateScriptError) {
+		mSawScriptError++;
 		fprintf(stderr, "script error line %u: %s\n", (unsigned)status->errorLine, status->error);
 		return false;
 	}
@@ -136,6 +137,7 @@ static bool badusbWaitButton(void *userData, const struct BadUsbStatus *status)
 {
 	(void)userData;
 	(void)status;
+	mWaitButtonCalls++;
 	return true;
 }
 
@@ -173,7 +175,7 @@ static char *readWholeFile(const char *path, uint32_t *sizeP)
 	return buf;
 }
 
-static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
+static bool runScriptBufferExpectEx(const char *name, const char *data, uint32_t size, enum BadUsbResult expected, bool expectWait)
 {
 	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
 	struct BadUsbPreload preload;
@@ -184,10 +186,20 @@ static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 	mReports = 0;
 	mSawStart = 0;
 	mSawDone = 0;
+	mSawScriptError = 0;
+	mWaitButtonCalls = 0;
 	ret = badUsbPreloadFile(&fil, badusbStatus, NULL, &preload);
 	if (ret != BadUsbResultDone) {
-		fprintf(stderr, "FAIL: %s preload returned %d\n", name, ret);
-		return false;
+		if (ret != expected) {
+			fprintf(stderr, "FAIL: %s preload returned %d, expected %d\n", name, ret, expected);
+			return false;
+		}
+		if (mUsbBegins) {
+			fprintf(stderr, "FAIL: %s preload touched USB\n", name);
+			return false;
+		}
+		printf("PASS: %s preload returned expected %d\n", name, ret);
+		return true;
 	}
 	if (mUsbBegins) {
 		fprintf(stderr, "FAIL: %s preload touched USB\n", name);
@@ -203,16 +215,57 @@ static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 	usbHidReleaseAll();
 	usbHidSetReportsEnabled(false);
 	usbHidEnd();
-	if (ret != BadUsbResultDone) {
-		fprintf(stderr, "FAIL: %s returned %d\n", name, ret);
+	if (ret != expected) {
+		fprintf(stderr, "FAIL: %s returned %d, expected %d\n", name, ret, expected);
 		return false;
 	}
-	if (!mUsbBegins || !mSawStart || !mSawDone) {
+	if (!mUsbBegins || !mSawStart) {
 		fprintf(stderr, "FAIL: %s did not reach USB start/done states\n", name);
 		return false;
 	}
-	printf("PASS: %s usbBegins=%u reports=%u\n", name, (unsigned)mUsbBegins, (unsigned)mReports);
+	if (expected == BadUsbResultDone && !mSawDone) {
+		fprintf(stderr, "FAIL: %s did not reach done state\n", name);
+		return false;
+	}
+	if (expected == BadUsbResultDecodeError && !mSawScriptError) {
+		fprintf(stderr, "FAIL: %s did not report script error state\n", name);
+		return false;
+	}
+	if (expectWait && !mWaitButtonCalls) {
+		fprintf(stderr, "FAIL: %s did not call wait-for-button callback\n", name);
+		return false;
+	}
+	printf("PASS: %s result=%d usbBegins=%u reports=%u\n", name, ret, (unsigned)mUsbBegins, (unsigned)mReports);
 	return true;
+}
+
+static bool runScriptBufferExpect(const char *name, const char *data, uint32_t size, enum BadUsbResult expected)
+{
+	return runScriptBufferExpectEx(name, data, size, expected, false);
+}
+
+static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
+{
+	return runScriptBufferExpect(name, data, size, BadUsbResultDone);
+}
+
+static bool runLongFinalLineTest(void)
+{
+	static const char prefix[] = "STRING ";
+	uint32_t size = BADUSB_LINE_BUF_SZ + sizeof(prefix) + 8;
+	char *script = malloc(size);
+	bool ok;
+
+	if (!script) {
+		fprintf(stderr, "FAIL: allocate long final line script\n");
+		return false;
+	}
+	memcpy(script, prefix, sizeof(prefix) - 1);
+	memset(script + sizeof(prefix) - 1, 'a', size - sizeof(prefix));
+	script[size - 1] = 0;
+	ok = runScriptBufferExpect("final line too long", script, size - 1, BadUsbResultDecodeError);
+	free(script);
+	return ok;
 }
 
 static bool runScriptFile(const char *path)
@@ -249,6 +302,12 @@ int main(void)
 		"MEDIA PLAY\n";
 	bool ok = true;
 
+	ok = runScriptBufferExpect("empty script", "", 0, BadUsbResultDone) && ok;
+	ok = runScriptBufferExpect("newline EOF", "REM ok\n", 7, BadUsbResultDone) && ok;
+	ok = runScriptBufferExpect("no trailing newline EOF", "STRING hello", 12, BadUsbResultDone) && ok;
+	ok = runScriptBufferExpect("malformed final line EOF", "DELAY nope", 10, BadUsbResultDecodeError) && ok;
+	ok = runScriptBufferExpectEx("wait for button", "WAIT_FOR_BUTTON_PRESS\nSTRING ok\n", 32, BadUsbResultDone, true) && ok;
+	ok = runLongFinalLineTest() && ok;
 	ok = runScriptBuffer("embedded long-line script", longLineScript, sizeof(longLineScript) - 1) && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/Hacker_Typer.txt") && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/RickRoll_YT_Win.txt") && ok;

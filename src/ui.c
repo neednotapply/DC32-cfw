@@ -792,50 +792,6 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 	return uiPrvGetSimpleAnswer(cnv, dialogType);
 }
 
-#define UI_TOOL_RESULT_RELEASE_WAIT_MS	250
-
-static bool uiPrvWaitKeysReleasedBounded(uint32_t timeoutMs)
-{
-	uint64_t end = getTime() + (uint64_t)timeoutMs * (TICKS_PER_SECOND / 1000);
-
-	while (uiGetUiKeysRaw()) {
-		if (getTime() >= end)
-			return false;
-	}
-	return true;
-}
-
-static void uiPrvToolResultAlert(struct Canvas *cnv, const char *msg)
-{
-	static const char opts[] = " A/B = OK ";
-	uint32_t y;
-
-	pr("UI_TOOL_RESULT(%s)\n", msg);
-
-	uiPrvReset(cnv, false);
-	cnv->font = FontLarge;
-	y = uiPrvGlyphHeight(cnv) + 1;
-
-	cnv->font = FontMedium;
-	uiPrvDrawWrappedString(cnv, msg, y, 10);
-
-	cnv->foreColor = 0;
-	cnv->backColor = 9;
-	cnv->font = FontMedium;
-	uiPrintf(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, (cnv->w - uiPrvCharsWidth(cnv, opts, strlen(opts))) / 2, opts);
-	while (1) {
-		uint_fast16_t key = uiGetUiKeys();
-
-		if (key & UI_KEY_BIT_CENTER) {
-			uiPrvRequestToolExit();
-			break;
-		}
-		if (key & (KEY_BIT_A | KEY_BIT_B))
-			break;
-	}
-	uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
-}
-
 #ifndef NO_SD_CARD
 	static void uiPrvCardStreamReset(void)
 	{
@@ -3229,17 +3185,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	{
 		bool truncated;
 
-		if (uiPrvIrCancelRequested()) {
-			stats->cancelled = true;
-			return false;
-		}
 		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &truncated)) {
 			if (truncated)
 				stats->lineTooLong = true;
-			return false;
-		}
-		if (uiPrvIrCancelRequested()) {
-			stats->cancelled = true;
 			return false;
 		}
 
@@ -3542,26 +3490,26 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		fatfsUnmount(vol);
 
 		if (stats.lineTooLong) {
-			uiPrvToolResultAlert(cnv, "A line in the IR file is too long");
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
 
 			(void)sprintf(msg, "Malformed IR file near line %u", (unsigned)stats.lineNo);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
 			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "Universal IR spam cancelled");
+				uiAlert(cnv, "Universal IR spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
 			(void)sprintf(msg, "Universal IR spam complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (path) {
-			uiPrvToolResultAlert(cnv, "No power codes found in the IR file");
+			uiAlert(cnv, "No power codes found in the IR file", DialogTypeOk);
 		}
 
 	out_release:
@@ -3612,26 +3560,26 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		fatfsUnmount(vol);
 
 		if (stats.lineTooLong) {
-			uiPrvToolResultAlert(cnv, "A line in /IR/tv.ir is too long");
+			uiAlert(cnv, "A line in /IR/tv.ir is too long", DialogTypeOk);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
 
 			(void)sprintf(msg, "Malformed /IR/tv.ir near line %u", (unsigned)stats.lineNo);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
 			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "Mute cancelled");
+				uiAlert(cnv, "Mute cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
 			(void)sprintf(msg, "Mute complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (fil) {
-			uiPrvToolResultAlert(cnv, "No mute codes found in /IR/tv.ir");
+			uiAlert(cnv, "No mute codes found in /IR/tv.ir", DialogTypeOk);
 		}
 
 	out_release:
@@ -3679,26 +3627,26 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			fatfsFileClose(fil);
 	out_report:
 		if (stats.lineTooLong) {
-			uiPrvToolResultAlert(cnv, "A line in the IR file is too long");
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
 
 			(void)sprintf(msg, "Malformed IR file near line %u", (unsigned)stats.lineNo);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (stats.cancelled) {
 			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "Universal IR action cancelled");
+				uiAlert(cnv, "Universal IR action cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
 			(void)sprintf(msg, "Universal IR action complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (fil) {
-			uiPrvToolResultAlert(cnv, "No matching IR codes found in the selected file");
+			uiAlert(cnv, "No matching IR codes found in the selected file", DialogTypeOk);
 		}
 
 		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
@@ -3744,7 +3692,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
 	}
 
-	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP, bool *cancelledP)
+	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP)
 	{
 		struct UiFileListCtx ctx;
 		struct IrBlastStats stats;
@@ -3752,14 +3700,12 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		struct ToolWorkspaceSpan listMem = toolWorkspaceGet(ToolWorkspaceCartRamLower);
 
 		memset(&ctx, 0, sizeof(ctx));
-		memset(&stats, 0, sizeof(stats));
 		*lineTooLongP = false;
-		if (cancelledP)
-			*cancelledP = false;
 		if (!listMem.ptr || listMem.size < sizeof(struct MusicOption))
 			goto out;
 		ctx.nextAvail = (struct MusicOption*)listMem.ptr;
 		ctx.spaceAvail = listMem.size;
+		memset(&stats, 0, sizeof(stats));
 
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out;
@@ -3773,10 +3719,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 					break;
 		}
 
-	out:
 		*lineTooLongP = stats.lineTooLong;
-		if (cancelledP)
-			*cancelledP = stats.cancelled;
+
+	out:
 		*headP = ctx.head;
 		if (overflowP)
 			*overflowP = ctx.overflow;
@@ -3901,20 +3846,20 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		if (irStarted)
 			irRemoteEnd();
 		if (stats.lineTooLong) {
-			uiPrvToolResultAlert(cnv, "A line in the IR file is too long");
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 		}
 		else if (stats.cancelled) {
 			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "Universal IR button spam cancelled");
+				uiAlert(cnv, "Universal IR button spam cancelled", DialogTypeOk);
 		}
 		else if (ret) {
 			char msg[96];
 
 			(void)sprintf(msg, "Universal IR button spam complete\nSent: %u\nSkipped: %u\nMalformed: %u", (unsigned)stats.sent, (unsigned)stats.skipped, (unsigned)stats.malformed);
-			uiPrvToolResultAlert(cnv, msg);
+			uiAlert(cnv, msg, DialogTypeOk);
 		}
 		else if (isFlipper) {
-			uiPrvToolResultAlert(cnv, "Selected IR button could not be sent");
+			uiAlert(cnv, "Selected IR button could not be sent", DialogTypeOk);
 		}
 
 		toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
@@ -3975,7 +3920,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		char buttonName[IR_NAME_BUF_SZ];
 		struct ToolWorkspaceSpan lineMem, listMem;
 		char *line;
-		bool ret = false, overflow = false, lineTooLong = false, cancelled = false;
+		bool ret = false, overflow = false, lineTooLong = false;
 		uint32_t numButtons;
 
 		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ ||
@@ -3986,20 +3931,15 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		}
 		line = (char*)lineMem.ptr;
 
-		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong, &cancelled);
+		numButtons = uiPrvIrListButtons(fil, line, &buttons, &overflow, &lineTooLong);
 		if (lineTooLong) {
-			uiPrvToolResultAlert(cnv, "A line in the IR file is too long");
-			goto out_close;
-		}
-		if (cancelled) {
-			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "Universal IR button spam cancelled");
+			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
 			goto out_close;
 		}
 		if (overflow)
 			uiAlert(cnv, "Universal IR file has too many buttons; showing what fits", DialogTypeOk);
 		if (!numButtons) {
-			uiPrvToolResultAlert(cnv, "No Flipper buttons found in that IR file");
+			uiAlert(cnv, "No Flipper buttons found in that IR file", DialogTypeOk);
 			goto out_close;
 		}
 
@@ -4737,13 +4677,8 @@ reload_dir:
 			return false;
 		if (status->fileSize && status->lineTotal > status->fileSize + 1)
 			return false;
-		if (status->lineTotal) {
-			uint32_t maxLine = status->lineTotal;
-
-			if (status->state == BadUsbStateScriptError || status->state == BadUsbStateFileError)
-				maxLine++;
-			return status->lineNo <= maxLine;
-		}
+		if (status->lineTotal)
+			return status->lineNo <= status->lineTotal;
 		return true;
 	}
 
@@ -4802,7 +4737,7 @@ reload_dir:
 
 		pausedStatus.state = BadUsbStatePaused;
 		pausedStatus.message = "Paused";
-		uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
+		uiPrvWaitKeysReleased();
 		while (1) {
 			uint_fast16_t key;
 
@@ -4844,27 +4779,6 @@ reload_dir:
 		if ((status->state == BadUsbStateRunning || status->state == BadUsbStateDelay) && (uiGetKeysRaw() & KEY_BIT_A))
 			return uiPrvBadUsbPause(data, &data->lastStatus);
 
-		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
-		    status->unsupportedCommands != data->lastUnsupportedCommands || now - data->lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvBadUsbDrawStatus(data, &data->lastStatus, status->state, status->message);
-			data->lastDraw = now;
-			data->lastLine = status->lineNo;
-			data->lastState = status->state;
-			data->lastUnsupportedCommands = status->unsupportedCommands;
-			data->forceDraw = false;
-		}
-		return true;
-	}
-
-	static bool uiPrvBadUsbPreloadStatus(void *userData, const struct BadUsbStatus *status)
-	{
-		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
-		uint64_t now = getTime();
-
-		if (!status)
-			return true;
-		data->lastStatus = *status;
-		data->haveStatus = true;
 		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
 		    status->unsupportedCommands != data->lastUnsupportedCommands || now - data->lastDraw > TICKS_PER_SECOND / 4) {
 			uiPrvBadUsbDrawStatus(data, &data->lastStatus, status->state, status->message);
@@ -4928,6 +4842,16 @@ reload_dir:
 		data->lastState = state;
 	}
 
+	static void uiPrvBadUsbPreloadForDisplay(struct BadUsbPreload *preload, struct FatfsFil *fil, const struct UsbHidDeviceInfo *info)
+	{
+		memset(preload, 0, sizeof(*preload));
+		if (info)
+			preload->info = *info;
+		else
+			usbHidDefaultInfo(&preload->info);
+		preload->fileSize = fatfsFileGetSize(fil);
+	}
+
 	static bool uiPrvBadUsbWaitReady(struct BadUsbUiData *data, const struct BadUsbPreload *preload)
 	{
 		uint64_t end = getTime() + (uint64_t)BADUSB_UI_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
@@ -4978,12 +4902,13 @@ reload_dir:
 		data.cnv = cnv;
 		data.name = name;
 		data.forceDraw = true;
-
-		ret = badUsbPreloadFile(fil, uiPrvBadUsbPreloadStatus, &data, &preload);
-		if (ret != BadUsbResultDone)
-			goto out_report;
-		hidInfo = preload.info;
 		uiPrvWaitKeysReleased();
+
+		if (!badUsbReadDeviceInfo(fil, &hidInfo)) {
+			ret = BadUsbResultFileError;
+			goto out_report;
+		}
+		uiPrvBadUsbPreloadForDisplay(&preload, fil, &hidInfo);
 
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateWillRun, "Starting USB");
 		if (!usbHidBegin(&hidInfo)) {
@@ -5007,7 +4932,7 @@ reload_dir:
 		reportsEnabled = true;
 		uiPrvWaitKeysReleased();
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateRunning, "Running");
-		ret = badUsbRunPreparedFile(fil, &preload, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+		ret = badUsbRunPreparedFile(fil, NULL, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
 
 	out_usb:
 		if (reportsEnabled) {
@@ -5016,29 +4941,23 @@ reload_dir:
 		}
 		if (usbStarted)
 			usbHidEnd();
-		uiPrvWaitKeysReleasedBounded(UI_TOOL_RESULT_RELEASE_WAIT_MS);
+		uiPrvWaitKeysReleased();
 
 	out_report:
 		if (ret == BadUsbResultDone) {
-			uiPrvToolResultAlert(cnv, "BadUSB script complete");
+			uiAlert(cnv, "BadUSB script complete", DialogTypeOk);
 			ok = true;
 		}
 		else if (ret == BadUsbResultCancelled) {
 			if (!uiPrvToolExitRequested())
-				uiPrvToolResultAlert(cnv, "BadUSB script cancelled");
+				uiAlert(cnv, "BadUSB script cancelled", DialogTypeOk);
 		}
 		else if (ret == BadUsbResultUsbError)
-			uiPrvToolResultAlert(cnv, "BadUSB USB device failed to enumerate");
+			uiAlert(cnv, "BadUSB USB device failed to enumerate", DialogTypeOk);
 		else if (ret == BadUsbResultFileError)
-			uiPrvToolResultAlert(cnv, "BadUSB script read failed");
-		else {
-			if (data.haveStatus && data.lastStatus.error[0]) {
-				(void)sprintf(msg, "BadUSB script error\nLine %u: %s", (unsigned)data.lastStatus.errorLine, data.lastStatus.error);
-				uiPrvToolResultAlert(cnv, msg);
-			}
-			else
-				uiPrvToolResultAlert(cnv, "BadUSB script has an unsupported or malformed command");
-		}
+			uiAlert(cnv, "BadUSB script read failed", DialogTypeOk);
+		else
+			uiAlert(cnv, "BadUSB script has an unsupported or malformed command", DialogTypeOk);
 
 	out_close:
 		if (fil)

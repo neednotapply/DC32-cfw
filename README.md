@@ -110,6 +110,7 @@ sudo apt-get install -y build-essential cmake gcc-arm-none-eabi libnewlib-arm-no
 From the repository root:
 
 ```bash
+git submodule update --init --recursive
 cmake -S . -B build -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
   -DPICO_BOARD=defcon32_badge

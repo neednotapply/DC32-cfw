@@ -47,6 +47,7 @@ jobs:
           ref: main
           fetch-depth: 0
           fetch-tags: true
+          submodules: true
 
       - name: Check for commits since last Nightly
         if: steps.schedule.outputs.should_run == 'true'

@@ -52,6 +52,8 @@ jobs:
       - name: Check for commits since last Nightly
         if: steps.schedule.outputs.should_run == 'true'
         id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -66,13 +68,19 @@ jobs:
             echo "previous_sha=$nightly_sha" >> "$GITHUB_OUTPUT"
 
             if [[ "$nightly_sha" == "$main_sha" ]]; then
-              echo "No commits since the last Nightly release."
-              echo "has_changes=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+              if gh release view nightly >/dev/null 2>&1; then
+                echo "No commits since the last Nightly release."
+                echo "has_changes=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
 
-            changelog="$(git log --pretty=format:'- %h %s' "$nightly_sha..$main_sha")"
-            compare_note="Changes since previous Nightly tag \`$nightly_sha\`."
+              echo "Nightly tag already points at main, but the Nightly release is missing; this run will recreate it."
+              changelog=""
+              compare_note="No commits since the Nightly tag \`$nightly_sha\`; recreating the missing Nightly release."
+            else
+              changelog="$(git log --pretty=format:'- %h %s' "$nightly_sha..$main_sha")"
+              compare_note="Changes since previous Nightly tag \`$nightly_sha\`."
+            fi
           else
             echo "No existing Nightly tag found; this run will create it."
             echo "previous_sha=" >> "$GITHUB_OUTPUT"

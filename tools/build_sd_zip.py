@@ -154,12 +154,26 @@ def copy_music_assets(repo: Path, stage: Path) -> None:
 
 
 def create_rom_dirs(stage: Path) -> None:
-    for name, label in ROM_DIRS.items():
+    rom_messages = {
+        "GB": "Place your Game Boy roms in this folder.\n"
+              "Files should be .gb format.\n"
+              "Download GB roms here here: https://tinyurl.com/NoIntro-GB \n",
+
+        "GBC": "Place your Game Boy Color roms in this folder.\n"
+               "Files should be .gbc format.\n"
+               "Download GBC roms here: https://tinyurl.com/NoIntro-GBC \n",
+
+        "NES": "Place your Nintendo Entertainment System ROM files in this folder.\n"
+               "Files should be .nes format.\n"
+               "Download NES roms here: https://tinyurl.com/NoIntro-NES \n",
+    }
+
+    for name in ROM_DIRS:
         rom_dir = stage / "ROMS" / name
         rom_dir.mkdir(parents=True, exist_ok=True)
+
         (rom_dir / "README.txt").write_text(
-            f"Place your legally obtained {label} ROM files in this folder.\n"
-            "Only add files you can lawfully use and redistribute.\n",
+            rom_messages[name],
             encoding="utf-8",
             newline="\n",
         )

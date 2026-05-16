@@ -83,9 +83,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DC32-cfw-sd
-          path: |
-            ${{ runner.temp }}/DC32-cfw/SD.zip
-            ${{ runner.temp }}/DC32-cfw/SD.sources.json
+          path: ${{ runner.temp }}/DC32-cfw/SD.zip
 
       - name: Attach DC32-cfw files to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
@@ -94,5 +92,12 @@ jobs:
           files: |
             ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
             ${{ runner.temp }}/DC32-cfw/SD.zip
-            ${{ runner.temp }}/DC32-cfw/SD.sources.json
           overwrite_files: true
+
+      - name: Remove SD source manifest from release
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          gh release delete-asset "$RELEASE_TAG" SD.sources.json --yes >/dev/null 2>&1 || true

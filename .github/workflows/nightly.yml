@@ -146,24 +146,30 @@ jobs:
           set -euo pipefail
 
           ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
-          PREVIOUS_DIR="$RUNNER_TEMP/previous-sd-sources"
-          mkdir -p "$ARTIFACT_DIR" "$PREVIOUS_DIR"
+          mkdir -p "$ARTIFACT_DIR"
 
           python3 tools/build_sd_zip.py \
             --sources-only \
             --sources-output "$ARTIFACT_DIR/SD.sources.json"
 
-          echo "cache_key=$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          sd_sources_hash="$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)"
+          echo "cache_key=$sd_sources_hash" >> "$GITHUB_OUTPUT"
 
-          if gh release download nightly --pattern SD.sources.json --dir "$PREVIOUS_DIR" >/dev/null 2>&1; then
-            if cmp -s "$ARTIFACT_DIR/SD.sources.json" "$PREVIOUS_DIR/SD.sources.json"; then
-              echo "SD.zip sources are unchanged from the current Nightly release."
-              echo "should_upload=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+          {
+            echo
+            echo "## SD-card bundle"
+            echo
+            echo "- SD sources: $sd_sources_hash"
+          } >> "$RUNNER_TEMP/nightly-release-notes.md"
+
+          if previous_body="$(gh release view nightly --json body --jq .body 2>/dev/null)" &&
+             grep -Fq "SD sources: $sd_sources_hash" <<< "$previous_body"; then
+            echo "SD.zip sources are unchanged from the current Nightly release."
+            echo "should_upload=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          echo "SD.zip sources changed or no previous manifest was found."
+          echo "SD.zip sources changed or no previous source hash was found."
           echo "should_upload=true" >> "$GITHUB_OUTPUT"
 
       - name: Restore cached SD.zip
@@ -226,6 +232,7 @@ jobs:
           gh release upload nightly \
             "$RUNNER_TEMP/DC32-cfw/DC32-cfw.uf2" \
             --clobber
+          gh release delete-asset nightly SD.sources.json --yes >/dev/null 2>&1 || true
 
       - name: Upload Nightly SD.zip assets
         if: steps.changes.outputs.has_changes == 'true' && steps.sd-sources.outputs.should_upload == 'true'
@@ -234,5 +241,4 @@ jobs:
         run: |
           gh release upload nightly \
             "$RUNNER_TEMP/DC32-cfw/SD.zip" \
-            "$RUNNER_TEMP/DC32-cfw/SD.sources.json" \
             --clobber

@@ -28,6 +28,8 @@ MUSIC_BRANCH = "main"
 MUSIC_DIRS = ("ArcadeTones", "RTTTL_generics", "Software", "Theme_Songs")
 MUSIC_ARCHIVE = "Unsorted 10k Song Archive.zip"
 MUSIC_ARCHIVE_DIR = "Unsorted 10k Song Archive"
+MUSIC_BUCKET_FILE_LIMIT = 128
+MUSIC_BUCKET_ORDER = ("#", "0-9", *tuple(chr(ch) for ch in range(ord("A"), ord("Z") + 1)))
 
 ROM_DIRS = {
     "GB": "Game Boy",
@@ -213,6 +215,86 @@ def copy_music_assets(repo: Path, stage: Path) -> None:
     if nested_archive.exists():
         nested_archive.unlink()
 
+    bucket_large_music_dirs(dst)
+
+
+def music_file_bucket_key(path: Path) -> tuple[str, str]:
+    return (path.name.casefold(), path.name)
+
+
+def music_file_bucket_label(path: Path) -> str:
+    for char in path.stem:
+        if char.isalnum():
+            char = char.upper()
+            if "0" <= char <= "9":
+                return "0-9"
+            if "A" <= char <= "Z":
+                return char
+            break
+    return "#"
+
+
+def music_bucket_range_label(first: str, last: str) -> str:
+    return first if first == last else f"{first}-{last}"
+
+
+def music_bucket_chunk_label(label: str, idx: int) -> str:
+    return f"{label}-{idx:02d}"
+
+
+def move_music_files_to_bucket(parent: Path, label: str, files: list[Path]) -> None:
+    if not files:
+        return
+    bucket = parent / label
+    bucket.mkdir(exist_ok=True)
+    for src in files:
+        target = bucket / src.name
+        if target.exists():
+            raise FileExistsError(f"Music bucket collision: {target}")
+        src.replace(target)
+
+
+def bucket_large_music_dir(path: Path) -> None:
+    files = sorted((item for item in path.iterdir() if item.is_file()), key=music_file_bucket_key)
+    if len(files) <= MUSIC_BUCKET_FILE_LIMIT:
+        return
+
+    grouped: dict[str, list[Path]] = {label: [] for label in MUSIC_BUCKET_ORDER}
+    for file in files:
+        grouped[music_file_bucket_label(file)].append(file)
+
+    pending_labels: list[str] = []
+    pending_files: list[Path] = []
+
+    def flush_pending() -> None:
+        nonlocal pending_labels, pending_files
+        if pending_files:
+            move_music_files_to_bucket(path, music_bucket_range_label(pending_labels[0], pending_labels[-1]), pending_files)
+            pending_labels = []
+            pending_files = []
+
+    for label in MUSIC_BUCKET_ORDER:
+        label_files = grouped[label]
+        if not label_files:
+            continue
+        if len(label_files) > MUSIC_BUCKET_FILE_LIMIT:
+            flush_pending()
+            for idx, start in enumerate(range(0, len(label_files), MUSIC_BUCKET_FILE_LIMIT), 1):
+                move_music_files_to_bucket(path, music_bucket_chunk_label(label, idx), label_files[start:start + MUSIC_BUCKET_FILE_LIMIT])
+            continue
+        if pending_files and len(pending_files) + len(label_files) > MUSIC_BUCKET_FILE_LIMIT:
+            flush_pending()
+        pending_labels.append(label)
+        pending_files.extend(label_files)
+
+    flush_pending()
+
+
+def bucket_large_music_dirs(music_root: Path) -> None:
+    dirs = [music_root, *sorted((path for path in music_root.rglob("*") if path.is_dir()), key=lambda path: path.as_posix())]
+    for path in dirs:
+        bucket_large_music_dir(path)
+
 
 def create_rom_dirs(stage: Path) -> None:
     rom_messages = {
@@ -281,7 +363,7 @@ their upstream projects.
 - Commit: {music_sha}
 - Source paths: {', '.join(MUSIC_DIRS)}, {MUSIC_ARCHIVE}
 - SD path: MUSIC/
-- Notes: {MUSIC_ARCHIVE} was extracted into MUSIC/{MUSIC_ARCHIVE_DIR}/ and the nested zip was omitted.
+- Notes: {MUSIC_ARCHIVE} was extracted into MUSIC/{MUSIC_ARCHIVE_DIR}/ and the nested zip was omitted. Music folders with more than {MUSIC_BUCKET_FILE_LIMIT} direct files were split into alphabetic subfolders.
 
 ## ROMS
 

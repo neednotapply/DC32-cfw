@@ -48,7 +48,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | `/SAVE` | Imported/exported save RAM files for the selected game. |
 | `/IR` | Universal IR files, including `ac.ir`, `audio.ir`, `projector.ir`, `tv.ir`, and optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
-| `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. |
+| `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
 
 Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extract `SD.zip` directly to the SD card root so `IR/`, `BADUSB/`, `MUSIC/`, and `ROMS/` land alongside any existing folders. The bundle is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md` inside the zip.
 

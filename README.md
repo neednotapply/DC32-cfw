@@ -130,7 +130,7 @@ The post-build step also runs `arm-none-eabi-size` and checks the firmware again
 
 Use `build/DC32-cfw.uf2` for normal updates. Put the badge into RP2350 USB bootloader mode, then copy `DC32-cfw.uf2` onto the mounted UF2 drive. The drive disconnects after the copy completes and the badge boots the new firmware.
 
-GitHub Actions uploads the same UF2 and `SD.zip` as the `firmware` artifact on builds and attaches both files to tagged/release builds.
+GitHub Actions uploads the same UF2 and `SD.zip` as the `DC32-cfw` artifact on builds, which downloads as `DC32-cfw.zip`, and attaches both files to tagged/release builds.
 
 ### Direct BIN programmer
 

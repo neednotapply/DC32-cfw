@@ -38,28 +38,28 @@ jobs:
             -DPICO_BOARD=defcon32_badge
           cmake --build build
 
-      - name: Package firmware artifacts
+      - name: Package DC32-cfw artifacts
         run: |
-          ARTIFACT_DIR="$RUNNER_TEMP/firmware"
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           mkdir -p "$ARTIFACT_DIR"
           cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
           python3 tools/build_sd_zip.py \
             --output "$ARTIFACT_DIR/SD.zip" \
             --work-dir "$RUNNER_TEMP/sd-zip"
 
-      - name: Upload firmware artifacts
+      - name: Upload DC32-cfw artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware
+          name: DC32-cfw
           path: |
-            ${{ runner.temp }}/firmware/DC32-cfw.uf2
-            ${{ runner.temp }}/firmware/SD.zip
+            ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
+            ${{ runner.temp }}/DC32-cfw/SD.zip
 
-      - name: Attach firmware to release
+      - name: Attach DC32-cfw files to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/firmware/DC32-cfw.uf2
-            ${{ runner.temp }}/firmware/SD.zip
+            ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
+            ${{ runner.temp }}/DC32-cfw/SD.zip
           overwrite_files: true

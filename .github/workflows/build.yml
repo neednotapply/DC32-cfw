@@ -38,22 +38,52 @@ jobs:
             -DPICO_BOARD=defcon32_badge
           cmake --build build
 
-      - name: Package DC32-cfw artifacts
+      - name: Stage DC32-cfw UF2
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           mkdir -p "$ARTIFACT_DIR"
           cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+
+      - name: Resolve SD.zip source manifest
+        id: sd-sources
+        run: |
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          mkdir -p "$ARTIFACT_DIR"
+          python3 tools/build_sd_zip.py \
+            --sources-only \
+            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+          echo "cache_key=$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached SD.zip
+        id: sd-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/DC32-cfw/SD.zip
+          key: sd-zip-${{ steps.sd-sources.outputs.cache_key }}
+
+      - name: Build SD.zip
+        if: steps.sd-cache.outputs.cache-hit != 'true'
+        run: |
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           python3 tools/build_sd_zip.py \
             --output "$ARTIFACT_DIR/SD.zip" \
-            --work-dir "$RUNNER_TEMP/sd-zip"
+            --work-dir "$RUNNER_TEMP/sd-zip" \
+            --sources-output "$ARTIFACT_DIR/SD.sources.json"
 
-      - name: Upload DC32-cfw artifacts
+      - name: Upload DC32-cfw UF2 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DC32-cfw
+          name: DC32-cfw-uf2
+          path: ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
+
+      - name: Upload DC32-cfw SD artifact
+        if: steps.sd-cache.outputs.cache-hit != 'true' || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: DC32-cfw-sd
           path: |
-            ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
             ${{ runner.temp }}/DC32-cfw/SD.zip
+            ${{ runner.temp }}/DC32-cfw/SD.sources.json
 
       - name: Attach DC32-cfw files to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
@@ -62,4 +92,5 @@ jobs:
           files: |
             ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
             ${{ runner.temp }}/DC32-cfw/SD.zip
+            ${{ runner.temp }}/DC32-cfw/SD.sources.json
           overwrite_files: true

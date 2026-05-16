@@ -1,0 +1,229 @@
+name: Nightly Release
+
+on:
+  schedule:
+    # Midnight Pacific is 07:00 UTC during daylight saving time and 08:00 UTC otherwise.
+    - cron: "15 7 * * *"
+    - cron: "15 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: Build and publish Nightly
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Pacific schedule window
+        id: schedule
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pacific_hour="$(TZ=America/Los_Angeles date +%H)"
+          pacific_time="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Pacific time: $pacific_time"
+
+          if [[ "$pacific_hour" == "00" || "$pacific_hour" == "01" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping because this scheduled run is outside the post-midnight Pacific window."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout main
+        if: steps.schedule.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check for commits since last Nightly
+        if: steps.schedule.outputs.should_run == 'true'
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --force origin main:refs/remotes/origin/main --tags
+
+          main_sha="$(git rev-parse refs/remotes/origin/main)"
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse -q --verify refs/tags/nightly >/dev/null; then
+            nightly_sha="$(git rev-list -n 1 refs/tags/nightly)"
+            echo "previous_sha=$nightly_sha" >> "$GITHUB_OUTPUT"
+
+            if [[ "$nightly_sha" == "$main_sha" ]]; then
+              echo "No commits since the last Nightly release."
+              echo "has_changes=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            changelog="$(git log --pretty=format:'- %h %s' "$nightly_sha..$main_sha")"
+            compare_note="Changes since previous Nightly tag \`$nightly_sha\`."
+          else
+            echo "No existing Nightly tag found; this run will create it."
+            echo "previous_sha=" >> "$GITHUB_OUTPUT"
+            changelog="$(git log --pretty=format:'- %h %s' -n 20 "$main_sha")"
+            compare_note="No previous Nightly tag was found; showing the latest 20 commits."
+          fi
+
+          pacific_build_time="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
+
+          {
+            echo "# Nightly"
+            echo
+            echo "- Commit: \`$main_sha\`"
+            echo "- Built: $pacific_build_time"
+            echo "- Source branch: \`main\`"
+            echo
+            echo "$compare_note"
+            echo
+            echo "## Changes"
+            echo
+            if [[ -n "$changelog" ]]; then
+              echo "$changelog"
+            else
+              echo "- No commit summary available."
+            fi
+          } > "$RUNNER_TEMP/nightly-release-notes.md"
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            ninja-build
+
+      - name: Build firmware with CMake
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DPICO_BOARD=defcon32_badge
+          cmake --build build
+
+      - name: Stage DC32-cfw UF2
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          mkdir -p "$ARTIFACT_DIR"
+          cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
+
+      - name: Check whether SD.zip sources changed
+        if: steps.changes.outputs.has_changes == 'true'
+        id: sd-sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          PREVIOUS_DIR="$RUNNER_TEMP/previous-sd-sources"
+          mkdir -p "$ARTIFACT_DIR" "$PREVIOUS_DIR"
+
+          python3 tools/build_sd_zip.py \
+            --sources-only \
+            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+
+          echo "cache_key=$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+          if gh release download nightly --pattern SD.sources.json --dir "$PREVIOUS_DIR" >/dev/null 2>&1; then
+            if cmp -s "$ARTIFACT_DIR/SD.sources.json" "$PREVIOUS_DIR/SD.sources.json"; then
+              echo "SD.zip sources are unchanged from the current Nightly release."
+              echo "should_upload=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "SD.zip sources changed or no previous manifest was found."
+          echo "should_upload=true" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached SD.zip
+        if: steps.sd-sources.outputs.should_upload == 'true'
+        id: sd-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/DC32-cfw/SD.zip
+          key: sd-zip-${{ steps.sd-sources.outputs.cache_key }}
+
+      - name: Build SD.zip
+        if: steps.sd-sources.outputs.should_upload == 'true' && steps.sd-cache.outputs.cache-hit != 'true'
+        run: |
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          python3 tools/build_sd_zip.py \
+            --output "$ARTIFACT_DIR/SD.zip" \
+            --work-dir "$RUNNER_TEMP/sd-zip" \
+            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+
+      - name: Move nightly tag
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git tag -f nightly "${{ steps.changes.outputs.main_sha }}"
+          git push origin refs/tags/nightly --force
+
+      - name: Create or update Nightly release
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly \
+              --title "Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-release-notes.md" \
+              --prerelease \
+              --target "${{ steps.changes.outputs.main_sha }}"
+          else
+            gh release create nightly \
+              --title "Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-release-notes.md" \
+              --prerelease \
+              --latest=false \
+              --target "${{ steps.changes.outputs.main_sha }}" \
+              --verify-tag
+          fi
+
+          release_id="$(gh release view nightly --json databaseId --jq .databaseId)"
+          gh api \
+            --method PATCH \
+            "repos/${{ github.repository }}/releases/$release_id" \
+            -f make_latest=false \
+            --silent
+
+          gh release upload nightly \
+            "$RUNNER_TEMP/DC32-cfw/DC32-cfw.uf2" \
+            --clobber
+
+      - name: Upload Nightly SD.zip assets
+        if: steps.changes.outputs.has_changes == 'true' && steps.sd-sources.outputs.should_upload == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload nightly \
+            "$RUNNER_TEMP/DC32-cfw/SD.zip" \
+            "$RUNNER_TEMP/DC32-cfw/SD.sources.json" \
+            --clobber

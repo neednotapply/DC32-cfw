@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -50,6 +52,65 @@ def run_git(args: list[str], cwd: Path | None = None) -> str:
         where = f" in {cwd}" if cwd else ""
         raise RuntimeError(f"{' '.join(cmd)} failed{where}:\n{proc.stdout}")
     return proc.stdout.strip()
+
+
+def resolve_remote_branch(url: str, branch: str) -> str:
+    ref = f"refs/heads/{branch}"
+    output = run_git(["ls-remote", url, ref])
+    if not output:
+        raise RuntimeError(f"Could not resolve {url} {ref}")
+    return output.split()[0]
+
+
+def builder_hash() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, object]:
+    return {
+        "schema": 1,
+        "builder_sha256": builder_hash(),
+        "sources": {
+            "ir": {
+                "repository": IR_REPO,
+                "branch": IR_BRANCH,
+                "commit": ir_sha,
+                "paths": [IR_ASSET_PATH.as_posix()],
+            },
+            "badusb": {
+                "repository": BADUSB_REPO,
+                "branch": BADUSB_BRANCH,
+                "commit": badusb_sha,
+                "paths": [BADUSB_PATH.as_posix()],
+            },
+            "music": {
+                "repository": MUSIC_REPO,
+                "branch": MUSIC_BRANCH,
+                "commit": music_sha,
+                "paths": [*MUSIC_DIRS, MUSIC_ARCHIVE],
+            },
+            "roms": {
+                "directories": ROM_DIRS,
+            },
+        },
+    }
+
+
+def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(source_manifest(ir_sha, badusb_sha, music_sha), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def resolve_source_commits() -> tuple[str, str, str]:
+    return (
+        resolve_remote_branch(IR_REPO, IR_BRANCH),
+        resolve_remote_branch(BADUSB_REPO, BADUSB_BRANCH),
+        resolve_remote_branch(MUSIC_REPO, MUSIC_BRANCH),
+    )
 
 
 def clone_repo(url: str, branch: str, dest: Path, sparse_paths: list[str] | None = None) -> str:
@@ -246,13 +307,26 @@ def build_zip(stage: Path, output: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build SD.zip from upstream asset repositories.")
-    parser.add_argument("--output", required=True, type=Path, help="Path to write SD.zip")
-    parser.add_argument("--work-dir", required=True, type=Path, help="Temporary work directory")
+    parser.add_argument("--output", type=Path, help="Path to write SD.zip")
+    parser.add_argument("--work-dir", type=Path, help="Temporary work directory")
+    parser.add_argument("--sources-output", type=Path, help="Path to write an SD source manifest JSON file")
+    parser.add_argument("--sources-only", action="store_true", help="Only resolve sources and write --sources-output")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.sources_only:
+        if not args.sources_output:
+            raise ValueError("--sources-only requires --sources-output")
+        ir_sha, badusb_sha, music_sha = resolve_source_commits()
+        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha)
+        print(f"Wrote {args.sources_output.resolve()}")
+        return 0
+
+    if not args.output or not args.work_dir:
+        raise ValueError("--output and --work-dir are required unless --sources-only is used")
+
     work_dir = args.work_dir.resolve()
     output = args.output.resolve()
     repos = work_dir / "repos"
@@ -274,6 +348,8 @@ def main() -> int:
     copy_music_assets(music_repo, stage)
     create_rom_dirs(stage)
     write_sources(stage, ir_sha, badusb_sha, music_sha)
+    if args.sources_output:
+        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha)
     build_zip(stage, output)
 
     print(f"Wrote {output}")

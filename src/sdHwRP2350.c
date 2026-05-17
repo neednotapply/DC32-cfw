@@ -11,6 +11,7 @@
 static uint16_t mTimeoutBytes;
 static uint32_t mRdTimeoutTicks, mWrTimeoutTicks;
 static volatile uint32_t mTrash;
+static uint32_t mSpeedLimit = 500000;
 
 #define SD_DMA_CH_READ		(SD_DMA_FIRST + 0)
 #define SD_DMA_CH_WRITE		(SD_DMA_FIRST + 1)
@@ -76,10 +77,15 @@ void sdHwSetSpeed(uint32_t maxSpeed)
 	//in reality it chokes on clocks over 1MHz, and thus this limit here. We considered trying to
 	//identify it so as to not cripple other card, but given that this was found at the 11th hour,
 	//we did not go that route, so enjoy your meditative SD card experience...huuuuummmmmmm.....
-	if (maxSpeed > 500000)
-		maxSpeed = 500000;
+	if (maxSpeed > mSpeedLimit)
+		maxSpeed = mSpeedLimit;
 
 	sdHwPrvSetBrg((TICKS_PER_SECOND + maxSpeed - 1) / maxSpeed);
+}
+
+void sdHwSetSpeedLimit(uint32_t maxHz)
+{
+	mSpeedLimit = maxHz ? maxHz : 500000;
 }
 
 uint32_t sdHwInit(void)

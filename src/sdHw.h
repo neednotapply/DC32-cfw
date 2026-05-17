@@ -76,6 +76,7 @@ void sdHwRxRawBytes(void *dst /* can be NULL*/, uint_fast16_t numBytes);
 
 
 void sdHwSetSpeed(uint32_t maxHz);
+void sdHwSetSpeedLimit(uint32_t maxHz);
 
 enum SdHwCmdResult sdHwCmd(uint_fast8_t cmd, uint32_t param, bool cmdCrcRequired, enum SdHwRespType respTyp, void *respBufOut, enum SdHwDataDir dataDir, uint_fast16_t blockSz, uint32_t numBlocks);
 

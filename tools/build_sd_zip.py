@@ -28,7 +28,7 @@ MUSIC_BRANCH = "main"
 MUSIC_DIRS = ("ArcadeTones", "RTTTL_generics", "Software", "Theme_Songs")
 MUSIC_ARCHIVE = "Unsorted 10k Song Archive.zip"
 MUSIC_ARCHIVE_DIR = "Unsorted 10k Song Archive"
-MUSIC_BUCKET_FILE_LIMIT = 128
+MUSIC_BUCKET_FILE_LIMIT = 64
 MUSIC_BUCKET_ORDER = ("#", "0-9", *tuple(chr(ch) for ch in range(ord("A"), ord("Z") + 1)))
 
 ROM_DIRS = {

@@ -5668,8 +5668,10 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 static void uiPrvUsbStorageDraw(struct Canvas *cnv)
 {
 	uint32_t blocks = sdGetNumSecs();
+	struct UsbMscStatus status;
 	char msg[96];
 
+	usbMscGetStatus(&status);
 	uiPrvSetHeaderTitle("USB Storage");
 	uiPrvReset(cnv, false);
 	cnv->font = FontMedium;
@@ -5678,10 +5680,17 @@ static void uiPrvUsbStorageDraw(struct Canvas *cnv)
 	uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, usbMscWritable() ? "microSD is read-write" : "microSD is read-only", -1);
 	(void)sprintf(msg, "%u MiB exposed", (unsigned)(blocks / 2048));
 	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
-	if (usbMscEjected())
-		uiPuts(cnv, uiPrvMenuRow(cnv, 5), 10, "Host ejected the card", -1);
+	(void)sprintf(msg, "%s LBA %u", status.op, (unsigned)status.lba);
+	uiPuts(cnv, uiPrvMenuRow(cnv, 4), 10, msg, -1);
+	(void)sprintf(msg, "%u bytes %s", (unsigned)status.bytes, status.speedLimited ? "safe speed" : "fast speed");
+	uiPuts(cnv, uiPrvMenuRow(cnv, 5), 10, msg, -1);
+	if (status.error && strcmp(status.error, "none")) {
+		uiPrvDrawWrappedString(cnv, status.error, uiPrvMenuRow(cnv, 6), 10);
+	}
+	else if (usbMscEjected())
+		uiPuts(cnv, uiPrvMenuRow(cnv, 6), 10, "Host ejected the card", -1);
 	else
-		uiPrvDrawWrappedString(cnv, "Eject/unmount on the host before exiting.", uiPrvMenuRow(cnv, 5), 10);
+		uiPrvDrawWrappedString(cnv, "Eject/unmount on the host before exiting.", uiPrvMenuRow(cnv, 6), 10);
 	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Exit", -1);
 }
 

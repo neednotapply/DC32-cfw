@@ -26,6 +26,7 @@ uint32_t sdGetNumSecs(void);
 
 bool sdSecRead(uint32_t sec, uint8_t *dst);
 bool sdSecWrite(uint32_t sec, const uint8_t *src);
+void sdSetSpeedLimit(uint32_t maxHz);
 
 bool sdReadStart(uint32_t sec, uint32_t numSec);	//if numSec is nonzero, card will be advised to expect that many blocks
 bool sdReadNext(uint8_t *dst);

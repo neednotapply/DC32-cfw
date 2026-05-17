@@ -19,6 +19,7 @@
 struct SD {
 	uint32_t numSec;
 	uint32_t snum;
+	uint32_t maxSpeed;
 	union SdFlags flags;
 	uint8_t mid;
 	uint16_t oid;
@@ -571,6 +572,7 @@ bool __attribute__((noinline)) sdCardInit(void)
 	}
 	
 	//speed the clock up
+	mSD.maxSpeed = maxSpeed;
 	sdHwSetSpeed(maxSpeed);
 	
 	//set block size
@@ -609,6 +611,13 @@ bool sdSecRead(uint32_t sec, uint8_t *dst)
 	}
 
 	return true;
+}
+
+void sdSetSpeedLimit(uint32_t maxHz)
+{
+	sdHwSetSpeedLimit(maxHz);
+	if (mSD.flags.inited && mSD.maxSpeed)
+		sdHwSetSpeed(mSD.maxSpeed);
 }
 
 bool sdReadStart(uint32_t sec, uint32_t numSec)
@@ -807,7 +816,6 @@ uint8_t sdGetFlags(void)
 {
 	return mSD.flags.value;
 }
-
 
 
 

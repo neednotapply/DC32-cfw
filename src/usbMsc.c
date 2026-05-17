@@ -176,8 +176,11 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
 {
 	(void)lun;
 	(void)power_condition;
+	(void)load_eject;
 	usbMscPrvStatus(start ? "Start" : "Stop", 0, 0);
-	if (load_eject && !start)
+	if (start)
+		mEjected = false;
+	else
 		mEjected = true;
 	return true;
 }

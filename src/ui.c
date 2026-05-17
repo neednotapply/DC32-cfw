@@ -5665,6 +5665,8 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	return nextTool;
 }
 
+#define USB_STORAGE_REDRAW_TICKS TICKS_PER_SECOND
+
 static void uiPrvUsbStorageDraw(struct Canvas *cnv)
 {
 	uint32_t blocks = sdGetNumSecs();
@@ -5727,6 +5729,7 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 
 		usbMscTask();
 		if ((uiGetKeysRaw() & KEY_BIT_B) || uiPrvCenterExitPressedRaw()) {
+			uiPrvWaitKeysReleased();
 			if (!usbMscEjected() && !uiAlert(cnv, "The host has not ejected the SD card.\nDisconnect anyway?", DialogTypeYesNo)) {
 				uiPrvClearToolExit();
 				uiPrvWaitKeysReleased();
@@ -5735,7 +5738,7 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 			}
 			break;
 		}
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+		if (!lastDraw || now - lastDraw > USB_STORAGE_REDRAW_TICKS) {
 			uiPrvUsbStorageDraw(cnv);
 			lastDraw = now;
 		}

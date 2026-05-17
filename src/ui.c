@@ -16,6 +16,7 @@
 #include "irRemote.h"
 #include "badUsb.h"
 #include "usbHid.h"
+#include "usbMsc.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
@@ -5328,6 +5329,7 @@ static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *ti
 enum UiToolId {
 	UiToolBrowser,
 	UiToolIr,
+	UiToolUsbStorage,
 	UiToolBadUsb,
 	UiToolHidTest,
 	UiToolMusic,
@@ -5343,6 +5345,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 	switch (tool) {
 		case UiToolBrowser: return "File Browser";
 		case UiToolIr: return "Universal IR";
+		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
 		case UiToolHidTest: return "HID Test";
 		case UiToolMusic: return "Music";
@@ -5372,6 +5375,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 			return BootGuardModeMusic;
 
 		case UiToolBrowser:
+		case UiToolUsbStorage:
 		case UiToolHidTest:
 		case UiToolSettings:
 		case UiToolPowerOff:
@@ -5391,6 +5395,9 @@ static void uiPrvExitTool(enum UiToolId tool)
 {
 	usbHidReleaseAll();
 	usbHidSetReportsEnabled(false);
+#ifndef NO_SD_CARD
+	usbMscEnd();
+#endif
 	audioPwmStop();
 	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));
@@ -5463,6 +5470,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	static const char *names[UiToolNum] = {
 		[UiToolBrowser] = "File Browser",
 		[UiToolIr] = "Universal IR",
+		[UiToolUsbStorage] = "USB Storage",
 		[UiToolBadUsb] = "BadUSB",
 		[UiToolHidTest] = "HID Test",
 		[UiToolMusic] = "Music",
@@ -5473,6 +5481,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	static const enum UiToolId toolOrder[UiToolNum] = {
 		UiToolBrowser,
 		UiToolIr,
+		UiToolUsbStorage,
 		UiToolBadUsb,
 		UiToolHidTest,
 		UiToolMusic,
@@ -5654,6 +5663,77 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	(void)uiPrvCardPreUnmount();
 	fatfsUnmount(vol);
 	return nextTool;
+}
+
+static void uiPrvUsbStorageDraw(struct Canvas *cnv)
+{
+	uint32_t blocks = sdGetNumSecs();
+	char msg[96];
+
+	uiPrvSetHeaderTitle("USB Storage");
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, usbMscMounted() ? "USB connected" : "Waiting for host", -1);
+	uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, usbMscWritable() ? "microSD is read-write" : "microSD is read-only", -1);
+	(void)sprintf(msg, "%u MiB exposed", (unsigned)(blocks / 2048));
+	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
+	if (usbMscEjected())
+		uiPuts(cnv, uiPrvMenuRow(cnv, 5), 10, "Host ejected the card", -1);
+	else
+		uiPrvDrawWrappedString(cnv, "Eject/unmount on the host before exiting.", uiPrvMenuRow(cnv, 5), 10);
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Exit", -1);
+}
+
+static void uiPrvUsbStorageTool(struct Canvas *cnv)
+{
+	uint64_t lastDraw = 0;
+	union SdFlags flags;
+
+	uiPrvSetHeaderTitle("USB Storage");
+	uiPrvReset(cnv, false);
+	uiPrvDrawWrappedString(cnv, "Starting USB Storage...", 32, 10);
+
+	uiPrvCardStreamReset();
+	if (!sdGetNumSecs() && (!sdCardInit() || !sdGetNumSecs())) {
+		(void)uiPrvCardPreUnmount();
+		sdReportLastError();
+		uiAlert(cnv, "Insert an SD card, or check that the card can be read", DialogTypeOk);
+		return;
+	}
+	(void)uiPrvCardPreUnmount();
+
+	flags.value = sdGetFlags();
+	if (!usbMscBegin(!flags.RO)) {
+		char msg[96];
+
+		(void)sprintf(msg, "USB Storage failed to start\n%s", usbMscLastError());
+		uiAlert(cnv, msg, DialogTypeOk);
+		return;
+	}
+	uiPrvWaitKeysReleased();
+
+	while (!uiPrvToolExitRequested()) {
+		uint64_t now = getTime();
+
+		usbMscTask();
+		if ((uiGetKeysRaw() & KEY_BIT_B) || uiPrvCenterExitPressedRaw()) {
+			if (!usbMscEjected() && !uiAlert(cnv, "The host has not ejected the SD card.\nDisconnect anyway?", DialogTypeYesNo)) {
+				uiPrvClearToolExit();
+				uiPrvWaitKeysReleased();
+				lastDraw = 0;
+				continue;
+			}
+			break;
+		}
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvUsbStorageDraw(cnv);
+			lastDraw = now;
+		}
+	}
+
+	usbMscEnd();
+	uiPrvWaitKeysReleased();
 }
 #endif
 
@@ -5905,6 +5985,16 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvEnterTool(activeTool);
 				(void)uiPrvIrTools(cnv);
 				uiPrvExitTool(activeTool);
+			#endif
+				break;
+
+			case UiToolUsbStorage:
+			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
+				uiPrvUsbStorageTool(cnv);
+				uiPrvExitTool(activeTool);
+			#else
+				uiAlert(cnv, "USB Storage requires SD card support", DialogTypeOk);
 			#endif
 				break;
 

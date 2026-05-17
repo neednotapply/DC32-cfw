@@ -43,11 +43,14 @@ add_executable(${APP}
     ${SRC_DIR}/timebase.c
     ${SRC_DIR}/toolWorkspace.c
     ${SRC_DIR}/ui.c
+    ${SRC_DIR}/usbDevice.c
     ${SRC_DIR}/usbHid.c
+    ${SRC_DIR}/usbMsc.c
     ${SRC_DIR}/utf.c
     ${SRC_DIR}/videoC.c
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
+    ${TINYUSB_DIR}/src/class/msc/msc_device.c
     ${TINYUSB_DIR}/src/common/tusb_fifo.c
     ${TINYUSB_DIR}/src/device/usbd.c
     ${TINYUSB_DIR}/src/device/usbd_control.c
@@ -136,6 +139,7 @@ set_source_files_properties(
 set_source_files_properties(
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
+    ${TINYUSB_DIR}/src/class/msc/msc_device.c
     ${TINYUSB_DIR}/src/common/tusb_fifo.c
     ${TINYUSB_DIR}/src/device/usbd.c
     ${TINYUSB_DIR}/src/device/usbd_control.c

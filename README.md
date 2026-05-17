@@ -1,19 +1,20 @@
 # DC32 Custom Firmware
 
-`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES support, an SD-card file browser, Universal IR tools, BadUSB scripting, an RTTTL music player, LED controls, settings persistence, and badge hardware bring-up code.
+`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES support, an SD-card file browser, USB microSD storage mode, Universal IR tools, BadUSB scripting, an RTTTL music player, LED controls, settings persistence, and badge hardware bring-up code.
 
 The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, BadUSB, HID Test, Music, Game, Settings, and Power Off entries. HID Test exposes a direct keyboard report check while mouse/composite HID work remains out of scope.
+- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, HID Test, Music, Game, Settings, and Power Off entries. HID Test exposes a direct keyboard report check while mouse/composite HID work remains out of scope.
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
 - **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save before switching games when save RAM is present.
 - **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for `/IR/ac.ir`, `/IR/audio.ir`, `/IR/projector.ir`, and `/IR/tv.ir`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
+- **USB Storage** - Exposes the full microSD card to a host computer as a standalone USB Mass Storage device. Eject or unmount from the host before leaving the tool; other SD-card tools are unavailable while storage mode is active.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
 - **LED controls** - Drives the badge WS2812 LEDs with off, all-on, rainbow, pulse, traveling dot, random, rear-on, and front-on patterns. Color modes include custom RGB, rainbow, flame, and random, with speed and brightness controls.
 - **Settings** - Persists Game, LED, Screen, and Music settings in QSPI flash. Game settings include color mode, upscaling, and display speed (`50%`, `100%`, `150%`, `200%`). Screen settings include rotation and brightness. LED settings include pattern, color, custom RGB, speed, and brightness.
@@ -30,6 +31,7 @@ The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://g
 | SD file browser | No | Yes |
 | Game Boy ROM loading from SD | Limited/original flow | Yes |
 | NES ROM loading from SD | No | Yes |
+| USB microSD storage mode | No | Yes |
 | BadUSB scripting | No | Yes |
 | RTTTL music player | No | Yes |
 | Universal IR tools | No | Yes |
@@ -78,7 +80,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `src/nes/` | InfoNES-derived NES runtime and mapper code used by the current CMake build. |
 | `src/dispDefcon.c` | LCD driver, framebuffer, PIO program loading, DMA management, brightness, and framerate handling. |
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
-| `src/badUsb.c`, `src/usbHid.c` | Keyboard-only USB HID stack and BadUSB interpreter. |
+| `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard-only HID, and BadUSB interpreter. |
 | `src/irRemote.c`, `src/pioIrdaSIR.c` | IR transmitter support and badge IRDA setup. |
 | `src/rtttlPlayer.c`, `src/audioPwm.c` | RTTTL parsing/playback and PWM audio output. |
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
@@ -150,6 +152,7 @@ Adjust the programmer command, permissions, or path for your setup.
 - QSPI layout is defined in `src/memMap.h`: settings, selected-game metadata, save RAM copy, and the loaded ROM occupy fixed flash regions.
 - Game ROM size is capped by `QSPI_ROM_SIZE_MAX` and save RAM by `QSPI_RAM_SIZE_MAX`.
 - The NES runtime intentionally enables only mappers 0, 1, 2, 3, 4, and 7 in `src/nes/InfoNES_Mapper.cpp`.
+- USB Storage exposes the raw microSD card as a read-write Mass Storage device when the dedicated tool is active. Eject/unmount from the host before exiting the tool or unplugging the badge.
 - The USB HID implementation is keyboard-only and attaches only while BadUSB or HID Test is running. BadUSB mouse/media behavior and AutoClicker output are not available in this build.
 
 ## Support and contributions

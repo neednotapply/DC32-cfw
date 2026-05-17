@@ -20,6 +20,7 @@
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
+#include "imageViewer.h"
 #include "timebase.h"
 #include "toolWorkspace.h"
 #include "utf.h"
@@ -5333,6 +5334,7 @@ enum UiToolId {
 	UiToolBadUsb,
 	UiToolHidTest,
 	UiToolMusic,
+	UiToolImage,
 	UiToolGame,
 	UiToolSettings,
 	UiToolPowerOff,
@@ -5349,6 +5351,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolBadUsb: return "BadUSB";
 		case UiToolHidTest: return "HID Test";
 		case UiToolMusic: return "Music";
+		case UiToolImage: return "Image Viewer";
 		case UiToolGame:
 		case UiToolRunGame:
 			return "Game";
@@ -5375,6 +5378,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 			return BootGuardModeMusic;
 
 		case UiToolBrowser:
+		case UiToolImage:
 		case UiToolUsbStorage:
 		case UiToolHidTest:
 		case UiToolSettings:
@@ -5463,7 +5467,126 @@ enum UiBrowserOpenWithId {
 	UiBrowserOpenBadUsb,
 	UiBrowserOpenMusic,
 	UiBrowserOpenGame,
+	UiBrowserOpenImage,
 };
+
+static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
+{
+	switch (result) {
+	case ImageViewerResultOpenError:
+		uiAlert(cnv, "Cannot open image file", DialogTypeOk);
+		break;
+	case ImageViewerResultReadError:
+		uiAlert(cnv, "Image read failed", DialogTypeOk);
+		break;
+	case ImageViewerResultDecodeError:
+		uiAlert(cnv, "Cannot decode image file", DialogTypeOk);
+		break;
+	case ImageViewerResultUnsupported:
+		uiAlert(cnv, "Unsupported image format", DialogTypeOk);
+		break;
+	case ImageViewerResultTooLarge:
+		uiAlert(cnv, "Image is too large for this firmware", DialogTypeOk);
+		break;
+	case ImageViewerResultNoMemory:
+		uiAlert(cnv, "Not enough workspace memory for image viewer", DialogTypeOk);
+		break;
+	default:
+		break;
+	}
+}
+
+static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const char *curName, bool forward, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
+{
+	struct FatfsDir *dir;
+	char fname[FATFS_NAME_BUF_LEN];
+	uint32_t fileSz;
+	uint8_t attrs;
+	struct FatFileLocator locator, firstLoc, lastLoc, prevLoc;
+	char firstName[UI_PICK_FILE_NAME_BUF_SZ], lastName[UI_PICK_FILE_NAME_BUF_SZ], prevName[UI_PICK_FILE_NAME_BUF_SZ];
+	bool haveFirst = false, havePrev = false, foundCur = false;
+
+	dir = fatfsDirOpen(vol, path);
+	if (!dir)
+		return false;
+
+	while (fatfsDirRead(dir, fname, &fileSz, &attrs, &locator)) {
+		if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || uiPrvHiddenEntry(fname, attrs) || !imageViewerFileName(fname))
+			continue;
+		if (!haveFirst) {
+			firstLoc = locator;
+			uiPrvCopyStr(firstName, sizeof(firstName), fname);
+			haveFirst = true;
+		}
+		if (forward && foundCur) {
+			*locatorOut = locator;
+			uiPrvCopyStr(nameOut, nameOutSz, fname);
+			fatfsDirClose(dir);
+			return true;
+		}
+		if (!strcmp(fname, curName)) {
+			foundCur = true;
+			if (!forward && havePrev) {
+				*locatorOut = prevLoc;
+				uiPrvCopyStr(nameOut, nameOutSz, prevName);
+				fatfsDirClose(dir);
+				return true;
+			}
+		}
+		prevLoc = locator;
+		uiPrvCopyStr(prevName, sizeof(prevName), fname);
+		havePrev = true;
+		lastLoc = locator;
+		uiPrvCopyStr(lastName, sizeof(lastName), fname);
+	}
+	fatfsDirClose(dir);
+
+	if (!haveFirst)
+		return false;
+	if (forward) {
+		*locatorOut = firstLoc;
+		uiPrvCopyStr(nameOut, nameOutSz, firstName);
+		return true;
+	}
+	*locatorOut = lastLoc;
+	uiPrvCopyStr(nameOut, nameOutSz, lastName);
+	return true;
+}
+
+static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, const char *parentPath, const struct FatFileLocator *locator, const char *name)
+{
+	struct FatFileLocator curLocator = *locator;
+	char curName[UI_PICK_FILE_NAME_BUF_SZ];
+	char curPath[UI_PICK_FILE_PATH_BUF_SZ];
+
+	uiPrvCopyStr(curName, sizeof(curName), name);
+	uiPrvCopyStr(curPath, sizeof(curPath), parentPath && parentPath[0] ? parentPath : "/");
+
+	while (1) {
+		enum ImageViewerResult result;
+
+		uiPrvSetHeaderTitle("Image Viewer");
+		result = imageViewerRun(cnv, vol, curPath, &curLocator, curName);
+		if (result == ImageViewerResultExit) {
+			uiPrvRequestToolExit();
+			return;
+		}
+		if (result == ImageViewerResultPrev || result == ImageViewerResultNext) {
+			struct FatFileLocator nextLocator;
+			char nextName[UI_PICK_FILE_NAME_BUF_SZ];
+
+			if (uiPrvFindAdjacentImage(vol, curPath, curName, result == ImageViewerResultNext, &nextLocator, nextName, sizeof(nextName))) {
+				curLocator = nextLocator;
+				uiPrvCopyStr(curName, sizeof(curName), nextName);
+				continue;
+			}
+			uiAlert(cnv, "No other images found in this folder", DialogTypeOk);
+			continue;
+		}
+		uiPrvImageAlert(cnv, result);
+		return;
+	}
+}
 
 static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool)
 {
@@ -5474,6 +5597,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolBadUsb] = "BadUSB",
 		[UiToolHidTest] = "HID Test",
 		[UiToolMusic] = "Music",
+		[UiToolImage] = "Image Viewer",
 		[UiToolGame] = "Emulation",
 		[UiToolSettings] = "Settings",
 		[UiToolPowerOff] = "Power Off",
@@ -5485,6 +5609,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		UiToolBadUsb,
 		UiToolHidTest,
 		UiToolMusic,
+		UiToolImage,
 		UiToolGame,
 		UiToolSettings,
 		UiToolPowerOff,
@@ -5535,6 +5660,10 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	if (uiPrvRomFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenGame;
 		labels[numOptions++] = "Emulation";
+	}
+	if (imageViewerFileName(ref->name)) {
+		ids[numOptions] = UiBrowserOpenImage;
+		labels[numOptions++] = "Image Viewer";
 	}
 
 	if (!numOptions)
@@ -5603,6 +5732,10 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 			return UiToolRunGame;
 		return UiToolBrowser;
 
+	case UiBrowserOpenImage:
+		uiPrvRunImageSequence(cnv, vol, ref->parentPath, &ref->locator, ref->name);
+		return UiToolBrowser;
+
 	case UiBrowserOpenNone:
 		uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
 		return UiToolBrowser;
@@ -5663,6 +5796,31 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	(void)uiPrvCardPreUnmount();
 	fatfsUnmount(vol);
 	return nextTool;
+}
+
+static void uiPrvImageViewerTool(struct Canvas *cnv)
+{
+	struct FatfsVol *vol;
+	struct FatFileLocator locator;
+	char name[UI_PICK_FILE_NAME_BUF_SZ];
+	char parentPath[UI_PICK_FILE_PATH_BUF_SZ];
+
+	uiPrvSetHeaderTitle("Image Viewer");
+	uiPrvReset(cnv, false);
+	uiPrvDrawWrappedString(cnv, "Opening Image Viewer...", 32, 10);
+	vol = uiPrvMountCard(cnv, false);
+	if (!vol)
+		return;
+
+	while (!uiPrvToolExitRequested()) {
+		uiPrvSetHeaderTitle("Image Viewer");
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .png/.jpg/.jpeg/.gif files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+			break;
+		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
+	}
+
+	(void)uiPrvCardPreUnmount();
+	fatfsUnmount(vol);
 }
 
 #define USB_STORAGE_REDRAW_TICKS TICKS_PER_SECOND
@@ -6029,6 +6187,16 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvEnterTool(activeTool);
 				uiPrvMusicPlayer(cnv);
 				uiPrvExitTool(activeTool);
+			#endif
+				break;
+
+			case UiToolImage:
+			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
+				uiPrvImageViewerTool(cnv);
+				uiPrvExitTool(activeTool);
+			#else
+				uiAlert(cnv, "Image Viewer requires SD card support", DialogTypeOk);
 			#endif
 				break;
 

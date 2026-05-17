@@ -20,6 +20,7 @@ enum ToolWorkspaceOwner {
 	ToolWorkspaceOwnerIr,
 	ToolWorkspaceOwnerBadUsb,
 	ToolWorkspaceOwnerTransfer,
+	ToolWorkspaceOwnerImage,
 };
 
 struct ToolWorkspaceSpan {

@@ -28,7 +28,7 @@ static uint16_t mFb[DISP_WIDTH * DISP_HEIGHT];
 static uint32_t mFbStartAddr = (uintptr_t)mFb;
 static uint64_t mPerFrameSpace, mNextFrame;
 static uint8_t mSm0start, mBri = 15;
-static bool mDispOn;
+static bool mDispOn, mScanoutHeld;
 
 
 
@@ -84,6 +84,30 @@ static void dispPrvSetPioWidth(uint_fast8_t bitsPerXfer)
 	MY_PIO->sm[DISP_PIO_SM].shiftctrl = (MY_PIO->sm[DISP_PIO_SM].shiftctrl &~ PIO_SM0_SHIFTCTRL_PULL_THRESH_BITS ) | (bitsPerXfer << PIO_SM0_SHIFTCTRL_PULL_THRESH_LSB);
 	MY_PIO->sm[DISP_PIO_SM].instr = I_JMP(0, 0, JMP_ALWAYS, mSm0start);
 	MY_PIO->ctrl |= (1 << PIO_CTRL_SM_ENABLE_LSB) << DISP_PIO_SM;
+}
+
+static void dispPrvArmContinuousDma(void)
+{
+	mFbStartAddr = (uintptr_t)mFb;
+	dma_hw->ch[DISP_DMA_START_CH].read_addr = (uintptr_t)&mFbStartAddr;
+	dma_hw->ch[DISP_DMA_START_CH].write_addr = (uintptr_t)&dma_hw->ch[DISP_DMA_XFER_CH].al3_read_addr_trig;
+	dma_hw->ch[DISP_DMA_START_CH].transfer_count = 1;
+	dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = (DMA_CH0_CTRL_TRIG_TREQ_SEL_VALUE_PERMANENT << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_WORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_EN_BITS;
+
+	dma_hw->ch[DISP_DMA_XFER_CH].write_addr = (uintptr_t)&MY_PIO->txf[DISP_PIO_SM];
+	dma_hw->ch[DISP_DMA_XFER_CH].transfer_count = DISP_WIDTH * DISP_HEIGHT;
+	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = (DREQ_PIO_TYPE_IDX(DISP_PIO_IDX, TX, DISP_PIO_SM) << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_INCR_READ_BITS | DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS | DMA_CH0_CTRL_TRIG_EN_BITS;
+}
+
+static bool dispPrvStopContinuousDma(void)
+{
+	uint32_t guard = DISP_WIDTH * DISP_HEIGHT * 2;
+
+	dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = 0;
+	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = 0;
+	dma_hw->abort = (1u << DISP_DMA_START_CH) | (1u << DISP_DMA_XFER_CH);
+	while (guard-- && ((dma_hw->ch[DISP_DMA_START_CH].al1_ctrl | dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl) & DMA_CH0_CTRL_TRIG_BUSY_BITS));
+	return guard != 0;
 }
 
 static bool dispPrvTurnOn(bool firstTime)
@@ -175,14 +199,7 @@ bool dispInit(uint32_t desiredFramerate)
 	mSm0start = sm0Start;
 	dispPrvSetPioWidth(8);
 
-	dma_hw->ch[DISP_DMA_START_CH].read_addr = (uintptr_t)&mFbStartAddr;
-	dma_hw->ch[DISP_DMA_START_CH].write_addr = (uintptr_t)&dma_hw->ch[DISP_DMA_XFER_CH].al3_read_addr_trig;
-	dma_hw->ch[DISP_DMA_START_CH].transfer_count = 1;
-	dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = (DMA_CH0_CTRL_TRIG_TREQ_SEL_VALUE_PERMANENT << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_WORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_EN_BITS;
-	
-	dma_hw->ch[DISP_DMA_XFER_CH].write_addr = (uintptr_t)&MY_PIO->txf[DISP_PIO_SM];
-	dma_hw->ch[DISP_DMA_XFER_CH].transfer_count = DISP_WIDTH * DISP_HEIGHT;
-	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = (DREQ_PIO_TYPE_IDX(DISP_PIO_IDX, TX, DISP_PIO_SM) << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_INCR_READ_BITS | DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS | DMA_CH0_CTRL_TRIG_EN_BITS;
+	dispPrvArmContinuousDma();
 	
 
 	lcdCmd(0x01, true, -1);
@@ -230,6 +247,36 @@ bool dispOff(void)
 void* dispGetFb(void)
 {
 	return mFb;
+}
+
+bool dispHoldScanoutBegin(void)
+{
+	uint32_t guard;
+
+	if (!mDispOn || mScanoutHeld)
+		return false;
+	guard = DISP_WIDTH * DISP_HEIGHT * 3;
+	while (guard-- && dma_hw->ch[DISP_DMA_XFER_CH].transfer_count > DISP_WIDTH);
+	if (!guard)
+		return false;
+	if (!dispPrvStopContinuousDma())
+		return false;
+	asm volatile("dsb sy\ndsb sy\ndsb sy\n");
+	sio_hw->gpio_set = 1 << PIN_LCD_CS;
+	mScanoutHeld = true;
+	return true;
+}
+
+void dispHoldScanoutEnd(void)
+{
+	if (!mScanoutHeld)
+		return;
+	dispPrvSetPioWidth(8);
+	lcdSetRegion(0, 0, DISP_WIDTH, DISP_HEIGHT, 0, 0);
+	lcdCmd(0x2c, false, -1);
+	dispPrvSetPioWidth(16);
+	dispPrvArmContinuousDma();
+	mScanoutHeld = false;
 }
 
 void dispSetFramerate(uint32_t desiredFramerate)

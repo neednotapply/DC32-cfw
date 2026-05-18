@@ -94,6 +94,9 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, o
             "roms": {
                 "directories": ROM_DIRS,
             },
+            "images": {
+                "paths": ["IMAGES/image_converter.py"],
+            },
         },
     }
 
@@ -322,6 +325,19 @@ def create_rom_dirs(stage: Path) -> None:
         )
 
 
+def create_image_dir(stage: Path) -> None:
+    image_dir = stage / "IMAGES"
+
+    image_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).resolve().parent / "image_converter.py", image_dir / "image_converter.py")
+    (image_dir / "README.txt").write_text(
+        "Place images in this folder, then run image_converter.py on your PC.\n"
+        "The badge image viewer opens generated .dci stills and optimized .badge.gif animations.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
 def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
     dest = dest.resolve()
     for member in zf.infolist():
@@ -369,6 +385,12 @@ their upstream projects.
 
 - SD paths: {', '.join(f'ROMS/{name}/' for name in ROM_DIRS)}
 - Notes: These folders contain README.txt placeholders. Add only ROM files you can lawfully use and redistribute.
+
+## IMAGES
+
+- SD path: IMAGES/
+- Files: image_converter.py, README.txt
+- Notes: Run image_converter.py on a PC to convert still PNG, JPEG, and GIF source images into badge-native .dci files and optimize animated GIFs for badge playback.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 
@@ -429,6 +451,7 @@ def main() -> int:
     copy_badusb_assets(badusb_repo, stage)
     copy_music_assets(music_repo, stage)
     create_rom_dirs(stage)
+    create_image_dir(stage)
     write_sources(stage, ir_sha, badusb_sha, music_sha)
     if args.sources_output:
         write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha)

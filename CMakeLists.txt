@@ -22,6 +22,7 @@ add_executable(${APP}
     ${SRC_DIR}/gbC.c
     ${SRC_DIR}/irRemote.c
     ${SRC_DIR}/imageViewer.c
+    ${SRC_DIR}/imageViewerAnimatedGif.cpp
     ${SRC_DIR}/main_rp2350_defcon.c
     ${SRC_DIR}/mappersC.c
     ${SRC_DIR}/mbc.c
@@ -50,10 +51,7 @@ add_executable(${APP}
     ${SRC_DIR}/usbMsc.c
     ${SRC_DIR}/utf.c
     ${SRC_DIR}/videoC.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/gifdec/gifdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/picojpeg.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/miniz.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/pngle.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/AnimatedGIF/AnimatedGIF.cpp
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
@@ -69,9 +67,7 @@ target_include_directories(${APP} PRIVATE
     ${SRC_DIR}/tinyusb_compat
     ${SRC_DIR}/inc_RP2350
     ${SRC_DIR}/nes
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/gifdec
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/AnimatedGIF
     ${TINYUSB_DIR}/src
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
@@ -144,15 +140,13 @@ set_source_files_properties(
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/badgeLeds.c
     ${SRC_DIR}/imageViewer.c
+    ${SRC_DIR}/imageViewerAnimatedGif.cpp
     ${SRC_DIR}/raster.c
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
 
 set_source_files_properties(
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/gifdec/gifdec.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/picojpeg.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/miniz.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/pngle.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/AnimatedGIF/AnimatedGIF.cpp
     PROPERTIES COMPILE_OPTIONS "-Wno-error;-Wno-unused-parameter;-Wno-sign-compare"
 )
 

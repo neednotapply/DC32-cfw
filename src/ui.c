@@ -1345,7 +1345,37 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		return dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
 	}
 
-	static bool uiPrvPickEntryRead(struct FatfsDir *dir, UiFileNameFilterF filterF, struct UiPickEntry *entry)
+	static bool uiPrvImageBadgeNameForSource(char *dst, uint32_t dstLen, const char *name)
+	{
+		uint32_t len = strlen(name), suffixLen = sizeof(".gif") - 1, badgeLen = sizeof(".badge.gif") - 1;
+
+		if (!uiPrvStrEndsWithNoCase(name, ".gif") || uiPrvStrEndsWithNoCase(name, ".badge.gif") || len < suffixLen || len - suffixLen + badgeLen + 1 > dstLen)
+			return false;
+		memcpy(dst, name, len - suffixLen);
+		memcpy(dst + len - suffixLen, ".badge.gif", badgeLen + 1);
+		return true;
+	}
+
+	static bool uiPrvImageFileVisibleInDir(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, const char *name)
+	{
+		char badgeName[UI_PICK_FILE_NAME_BUF_SZ];
+		struct FatfsDir *lookupDir;
+		struct FatFileLocator locator;
+		bool haveBadge;
+
+		if (!imageViewerFileName(name))
+			return false;
+		if (!uiPrvImageBadgeNameForSource(badgeName, sizeof(badgeName), name))
+			return true;
+		lookupDir = uiPrvPickDirOpen(vol, rootPath, dirLoc);
+		if (!lookupDir)
+			return true;
+		haveBadge = fatfsFindFileAt(lookupDir, badgeName, &locator);
+		fatfsDirClose(lookupDir);
+		return !haveBadge;
+	}
+
+	static bool uiPrvPickEntryRead(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, struct FatfsDir *dir, UiFileNameFilterF filterF, struct UiPickEntry *entry)
 	{
 		uint8_t attrs;
 
@@ -1356,7 +1386,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 				entry->isDir = true;
 				return true;
 			}
-			if (!filterF || filterF(entry->name)) {
+			if (!filterF || (filterF == imageViewerFileName ? uiPrvImageFileVisibleInDir(vol, rootPath, dirLoc, entry->name) : filterF(entry->name))) {
 				entry->isDir = false;
 				return true;
 			}
@@ -1374,7 +1404,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		if (!dir)
 			return 0;
 
-		while (uiPrvPickEntryRead(dir, filterF, &entry)) {
+		while (uiPrvPickEntryRead(vol, rootPath, dirLoc, dir, filterF, &entry)) {
 			if (!(++seen & 0x0f))
 				badgeLedsTick();
 			if (!uiPrvFileListAppend(ctx, entry.name, entry.size, entry.isDir, &entry.locator))
@@ -1392,7 +1422,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		if (!dir)
 			return 0;
 
-		while (uiPrvPickEntryRead(dir, filterF, entry)) {
+		while (uiPrvPickEntryRead(vol, rootPath, dirLoc, dir, filterF, entry)) {
 			if (!(++count & 0x0f))
 				badgeLedsTick();
 		}
@@ -1408,7 +1438,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		if (!dir)
 			return false;
 
-		while (uiPrvPickEntryRead(dir, filterF, entry)) {
+		while (uiPrvPickEntryRead(vol, rootPath, dirLoc, dir, filterF, entry)) {
 			if (!wantedIdx--) {
 				found = true;
 				break;
@@ -5483,7 +5513,7 @@ static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
 		uiAlert(cnv, "Cannot decode image file", DialogTypeOk);
 		break;
 	case ImageViewerResultUnsupported:
-		uiAlert(cnv, "Unsupported image format", DialogTypeOk);
+		uiAlert(cnv, "Open a .dci still image or .gif animation. Use /IMAGES/image_converter.py on a PC for still images", DialogTypeOk);
 		break;
 	case ImageViewerResultTooLarge:
 		uiAlert(cnv, "Image is too large for this firmware", DialogTypeOk);
@@ -5511,7 +5541,7 @@ static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const
 		return false;
 
 	while (fatfsDirRead(dir, fname, &fileSz, &attrs, &locator)) {
-		if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || uiPrvHiddenEntry(fname, attrs) || !imageViewerFileName(fname))
+		if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || uiPrvHiddenEntry(fname, attrs) || !uiPrvImageFileVisibleInDir(vol, path, NULL, fname))
 			continue;
 		if (!haveFirst) {
 			firstLoc = locator;
@@ -5553,6 +5583,46 @@ static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const
 	return true;
 }
 
+enum UiImageMenuAction {
+	UiImageMenuActionReturn,
+	UiImageMenuActionSelect,
+	UiImageMenuActionSettings,
+	UiImageMenuActionMainMenu,
+};
+
+static enum UiImageMenuAction uiPrvImageViewerMenu(struct Canvas *cnv)
+{
+	enum {
+		ImageMenuOptionReturn,
+		ImageMenuOptionSelect,
+		ImageMenuOptionSettings,
+		ImageMenuOptionMainMenu,
+		ImageMenuOptionNum,
+	};
+	static const char *labels[ImageMenuOptionNum] = {
+		[ImageMenuOptionReturn] = "Return",
+		[ImageMenuOptionSelect] = "Select image",
+		[ImageMenuOptionSettings] = "Settings",
+		[ImageMenuOptionMainMenu] = "Main Menu",
+	};
+	uint_fast8_t i, selOption;
+	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+	uiPrvSetHeaderTitle("Image Viewer");
+	uiPrvReset(cnv, false);
+	for (i = 0; i < ImageMenuOptionNum; i++)
+		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+
+	selOption = uiPrvMenu(cnv, 0, ImageMenuOptionNum, &button);
+	if (button == KEY_BIT_B || selOption == ImageMenuOptionReturn)
+		return UiImageMenuActionReturn;
+	if (selOption == ImageMenuOptionSelect)
+		return UiImageMenuActionSelect;
+	if (selOption == ImageMenuOptionSettings)
+		return UiImageMenuActionSettings;
+	return UiImageMenuActionMainMenu;
+}
+
 static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, const char *parentPath, const struct FatFileLocator *locator, const char *name)
 {
 	struct FatFileLocator curLocator = *locator;
@@ -5567,6 +5637,22 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 
 		uiPrvSetHeaderTitle("Image Viewer");
 		result = imageViewerRun(cnv, vol, curPath, &curLocator, curName);
+		if (result == ImageViewerResultMenu) {
+			enum UiImageMenuAction action = uiPrvImageViewerMenu(cnv);
+
+			if (action == UiImageMenuActionReturn)
+				continue;
+			if (action == UiImageMenuActionSelect)
+				return;
+			if (action == UiImageMenuActionSettings) {
+				(void)uiPrvSettings(cnv, true);
+				if (uiPrvToolExitRequested())
+					return;
+				continue;
+			}
+			uiPrvRequestToolExit();
+			return;
+		}
 		if (result == ImageViewerResultExit) {
 			uiPrvRequestToolExit();
 			return;
@@ -5814,7 +5900,7 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .png/.jpg/.jpeg/.gif files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .dci or .gif files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
 	}

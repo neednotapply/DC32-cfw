@@ -29,6 +29,8 @@ bool dispOff(void);
 void dispSetFramerate(uint32_t desiredFramerate);
 
 void* dispGetFb(void);
+bool dispHoldScanoutBegin(void);
+void dispHoldScanoutEnd(void);
 
 void dispPrvFrameCtrReset(void);
 void dispPrvFrameCtrWait(void);

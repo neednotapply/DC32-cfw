@@ -51,7 +51,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | `/IR` | Universal IR files, including `ac.ir`, `audio.ir`, `projector.ir`, `tv.ir`, and optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
-| `/IMAGES` | Image viewer files. Run `/IMAGES/image_converter.py` on a PC to convert still `.png`, `.jpg`, `.jpeg`, and `.gif` sources into badge-native `.dci` files and optimize animated GIFs for badge playback. |
+| `/IMAGES` | Image viewer files. Run `/IMAGES/image_converter.py` on a PC to convert still images into badge-native `.dci` files and animated GIF/APNG/WebP files into `.dca` animations. |
 
 Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extract `SD.zip` directly to the SD card root so `IR/`, `BADUSB/`, `MUSIC/`, `ROMS/`, and `IMAGES/` land alongside any existing folders. The bundle is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md` inside the zip.
 
@@ -65,7 +65,7 @@ Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extra
 | `/BADUSB` | [UberGuidoZ/Flipper](https://github.com/UberGuidoZ/Flipper), `BadUSB` |
 | `/MUSIC` | [neverfa11ing/FlipperMusicRTTTL](https://github.com/neverfa11ing/FlipperMusicRTTTL) |
 | `/ROMS/GB`, `/ROMS/GBC`, `/ROMS/NES` | Folders for user-provided ROMs, each with a `README.txt` placeholder; add only files you can lawfully use and redistribute. |
-| `/IMAGES` | Local `image_converter.py` helper for creating `.dci` still images and optimized `.badge.gif` animations from user-provided images. |
+| `/IMAGES` | Local `image_converter.py` helper for creating `.dci` still images and `.dca` animations from user-provided images. |
 
 Credit and licensing for bundled external assets remain with their upstream projects.
 

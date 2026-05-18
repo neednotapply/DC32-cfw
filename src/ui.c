@@ -1345,34 +1345,12 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		return dirLoc ? fatfsDirOpenWithLocator(vol, dirLoc) : fatfsDirOpen(vol, rootPath);
 	}
 
-	static bool uiPrvImageBadgeNameForSource(char *dst, uint32_t dstLen, const char *name)
-	{
-		uint32_t len = strlen(name), suffixLen = sizeof(".gif") - 1, badgeLen = sizeof(".badge.gif") - 1;
-
-		if (!uiPrvStrEndsWithNoCase(name, ".gif") || uiPrvStrEndsWithNoCase(name, ".badge.gif") || len < suffixLen || len - suffixLen + badgeLen + 1 > dstLen)
-			return false;
-		memcpy(dst, name, len - suffixLen);
-		memcpy(dst + len - suffixLen, ".badge.gif", badgeLen + 1);
-		return true;
-	}
-
 	static bool uiPrvImageFileVisibleInDir(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, const char *name)
 	{
-		char badgeName[UI_PICK_FILE_NAME_BUF_SZ];
-		struct FatfsDir *lookupDir;
-		struct FatFileLocator locator;
-		bool haveBadge;
-
-		if (!imageViewerFileName(name))
-			return false;
-		if (!uiPrvImageBadgeNameForSource(badgeName, sizeof(badgeName), name))
-			return true;
-		lookupDir = uiPrvPickDirOpen(vol, rootPath, dirLoc);
-		if (!lookupDir)
-			return true;
-		haveBadge = fatfsFindFileAt(lookupDir, badgeName, &locator);
-		fatfsDirClose(lookupDir);
-		return !haveBadge;
+		(void)vol;
+		(void)rootPath;
+		(void)dirLoc;
+		return imageViewerFileName(name);
 	}
 
 	static bool uiPrvPickEntryRead(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, struct FatfsDir *dir, UiFileNameFilterF filterF, struct UiPickEntry *entry)
@@ -5513,7 +5491,7 @@ static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
 		uiAlert(cnv, "Cannot decode image file", DialogTypeOk);
 		break;
 	case ImageViewerResultUnsupported:
-		uiAlert(cnv, "Open a .dci still image or .gif animation. Use /IMAGES/image_converter.py on a PC for still images", DialogTypeOk);
+		uiAlert(cnv, "Open a .dci still image or .dca animation. Use /IMAGES/image_converter.py on a PC", DialogTypeOk);
 		break;
 	case ImageViewerResultTooLarge:
 		uiAlert(cnv, "Image is too large for this firmware", DialogTypeOk);
@@ -5532,54 +5510,60 @@ static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const
 	char fname[FATFS_NAME_BUF_LEN];
 	uint32_t fileSz;
 	uint8_t attrs;
-	struct FatFileLocator locator, firstLoc, lastLoc, prevLoc;
-	char firstName[UI_PICK_FILE_NAME_BUF_SZ], lastName[UI_PICK_FILE_NAME_BUF_SZ], prevName[UI_PICK_FILE_NAME_BUF_SZ];
-	bool haveFirst = false, havePrev = false, foundCur = false;
+	struct FatFileLocator locator, firstLoc, lastLoc, candidateLoc;
+	char firstName[UI_PICK_FILE_NAME_BUF_SZ], lastName[UI_PICK_FILE_NAME_BUF_SZ], candidateName[UI_PICK_FILE_NAME_BUF_SZ];
+	bool haveFirst = false, haveLast = false, haveCandidate = false;
 
 	dir = fatfsDirOpen(vol, path);
 	if (!dir)
 		return false;
 
 	while (fatfsDirRead(dir, fname, &fileSz, &attrs, &locator)) {
+		int curCmp;
+
 		if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || uiPrvHiddenEntry(fname, attrs) || !uiPrvImageFileVisibleInDir(vol, path, NULL, fname))
 			continue;
-		if (!haveFirst) {
+		if (!haveFirst || strsCaselesslyCompareUtf(fname, firstName, 0xffffffff) < 0) {
 			firstLoc = locator;
 			uiPrvCopyStr(firstName, sizeof(firstName), fname);
 			haveFirst = true;
 		}
-		if (forward && foundCur) {
-			*locatorOut = locator;
-			uiPrvCopyStr(nameOut, nameOutSz, fname);
-			fatfsDirClose(dir);
-			return true;
+		if (!haveLast || strsCaselesslyCompareUtf(fname, lastName, 0xffffffff) > 0) {
+			lastLoc = locator;
+			uiPrvCopyStr(lastName, sizeof(lastName), fname);
+			haveLast = true;
 		}
-		if (!strcmp(fname, curName)) {
-			foundCur = true;
-			if (!forward && havePrev) {
-				*locatorOut = prevLoc;
-				uiPrvCopyStr(nameOut, nameOutSz, prevName);
-				fatfsDirClose(dir);
-				return true;
+		curCmp = strsCaselesslyCompareUtf(fname, curName, 0xffffffff);
+		if (forward) {
+			if (curCmp > 0 && (!haveCandidate || strsCaselesslyCompareUtf(fname, candidateName, 0xffffffff) < 0)) {
+				candidateLoc = locator;
+				uiPrvCopyStr(candidateName, sizeof(candidateName), fname);
+				haveCandidate = true;
 			}
 		}
-		prevLoc = locator;
-		uiPrvCopyStr(prevName, sizeof(prevName), fname);
-		havePrev = true;
-		lastLoc = locator;
-		uiPrvCopyStr(lastName, sizeof(lastName), fname);
+		else if (curCmp < 0 && (!haveCandidate || strsCaselesslyCompareUtf(fname, candidateName, 0xffffffff) > 0)) {
+			candidateLoc = locator;
+			uiPrvCopyStr(candidateName, sizeof(candidateName), fname);
+			haveCandidate = true;
+		}
 	}
 	fatfsDirClose(dir);
 
 	if (!haveFirst)
 		return false;
+	if (haveCandidate) {
+		*locatorOut = candidateLoc;
+		uiPrvCopyStr(nameOut, nameOutSz, candidateName);
+		return true;
+	}
 	if (forward) {
 		*locatorOut = firstLoc;
 		uiPrvCopyStr(nameOut, nameOutSz, firstName);
-		return true;
 	}
-	*locatorOut = lastLoc;
-	uiPrvCopyStr(nameOut, nameOutSz, lastName);
+	else {
+		*locatorOut = lastLoc;
+		uiPrvCopyStr(nameOut, nameOutSz, lastName);
+	}
 	return true;
 }
 
@@ -5634,12 +5618,18 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 
 	while (1) {
 		enum ImageViewerResult result;
+		struct Settings settings;
+		struct Canvas viewerCanvas = *cnv;
 
+		settingsGet(&settings);
+		viewerCanvas.flipped = settings.rotation;
 		uiPrvSetHeaderTitle("Image Viewer");
-		result = imageViewerRun(cnv, vol, curPath, &curLocator, curName);
+		result = imageViewerRun(&viewerCanvas, vol, curPath, &curLocator, curName);
 		if (result == ImageViewerResultMenu) {
-			enum UiImageMenuAction action = uiPrvImageViewerMenu(cnv);
+			enum UiImageMenuAction action;
 
+			uiPrvWaitKeysReleased();
+			action = uiPrvImageViewerMenu(cnv);
 			if (action == UiImageMenuActionReturn)
 				continue;
 			if (action == UiImageMenuActionSelect)
@@ -5900,7 +5890,7 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .dci or .gif files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .dci or .dca files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
 	}

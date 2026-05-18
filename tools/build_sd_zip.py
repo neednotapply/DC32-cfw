@@ -332,7 +332,7 @@ def create_image_dir(stage: Path) -> None:
     shutil.copyfile(Path(__file__).resolve().parent / "image_converter.py", image_dir / "image_converter.py")
     (image_dir / "README.txt").write_text(
         "Place images in this folder, then run image_converter.py on your PC.\n"
-        "The badge image viewer opens generated .dci stills and optimized .badge.gif animations.\n",
+        "The badge image viewer opens generated .dci stills and .dca animations.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -390,7 +390,7 @@ their upstream projects.
 
 - SD path: IMAGES/
 - Files: image_converter.py, README.txt
-- Notes: Run image_converter.py on a PC to convert still PNG, JPEG, and GIF source images into badge-native .dci files and optimize animated GIFs for badge playback.
+- Notes: Run image_converter.py on a PC to convert still PNG/JPEG images into badge-native .dci files and animated GIF/APNG/WebP files into .dca animations.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

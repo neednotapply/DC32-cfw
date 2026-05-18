@@ -972,6 +972,12 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 				return -1;
 			if (bc == UTF_NO_OUTPUT)
 				return 1;
+			if (!ac && !bc)
+				return 0;
+			if (!ac)
+				return -1;
+			if (!bc)
+				return 1;
 			
 			ac = utfToCaseless(ac);
 			bc = utfToCaseless(bc);

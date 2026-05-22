@@ -20,6 +20,13 @@ union SdFlags {
 	uint8_t value;
 };
 
+struct SdLastError {
+	uint8_t type;
+	uint32_t sector;
+	uint32_t data;
+	const char *name;
+};
+
 
 bool sdCardInit(void);
 uint32_t sdGetNumSecs(void);
@@ -40,5 +47,7 @@ void sdGetInfo(uint8_t *midP, uint16_t *oidP, uint32_t *snumP);
 uint8_t sdGetFlags(void);
 
 void sdReportLastError(void);
+void sdGetLastError(struct SdLastError *errP);
+void sdClearLastError(void);
 
 #endif

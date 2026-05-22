@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef FATFS_USE_LFN_SUPPORT
+#define FATFS_USE_LFN_SUPPORT 1
+#endif
+
 #include "../src/fatfs.h"
 
 #define DISK_SECS			8192U
@@ -11,6 +16,8 @@
 #define ROOT_DIR_ENTRIES	64U
 #define ROOT_DIR_SECS		((ROOT_DIR_ENTRIES * 32U + FATFS_DISK_SECT_SZ - 1U) / FATFS_DISK_SECT_SZ)
 #define DATA_SEC			(RESERVED_SECS + NUM_FATS * SECTORS_PER_FAT + ROOT_DIR_SECS)
+#define TETRIS_ROM_NAME		"Tetris DX (World) (SGB Enhanced).gb"
+#define TETRIS_SAVE_NAME	"Tetris DX (World) (SGB Enhanced).sav"
 
 static uint8_t mDisk[DISK_SECS * FATFS_DISK_SECT_SZ];
 
@@ -84,6 +91,67 @@ static bool expect(bool condition, const char *msg)
 	return condition;
 }
 
+static void copyStr(char *dst, uint32_t dstLen, const char *src)
+{
+	if (!dstLen)
+		return;
+
+	while (--dstLen && *src)
+		*dst++ = *src++;
+	*dst = 0;
+}
+
+static uint8_t saveFallbackChar(char c)
+{
+	if (c >= 'a' && c <= 'z')
+		c += 'A' - 'a';
+	if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+		return (uint8_t)c;
+	return 0;
+}
+
+static void makeFallbackSaveName(const char *romName, char dst[static 13])
+{
+	static const char hex[] = "0123456789ABCDEF";
+	const char *base = romName, *dot = NULL, *src;
+	uint32_t hash = 2166136261u, pos = 0;
+	uint16_t hash12;
+
+	for (src = romName; *src; src++) {
+		if (*src == '/' || *src == '\\')
+			base = src + 1;
+	}
+	for (src = base; *src; src++) {
+		if (*src == '.')
+			dot = src;
+	}
+	if (!dot)
+		dot = src;
+
+	for (src = base; src != dot; src++) {
+		hash ^= (uint8_t)*src;
+		hash *= 16777619u;
+	}
+	hash12 = (uint16_t)((hash ^ (hash >> 12) ^ (hash >> 24)) & 0x0fffu);
+
+	for (src = base; src != dot && pos < 5; src++) {
+		uint8_t c = saveFallbackChar(*src);
+
+		if (c)
+			dst[pos++] = (char)c;
+	}
+	while (pos < 5)
+		dst[pos++] = 'X';
+	dst[pos++] = hex[(hash12 >> 8) & 0x0f];
+	dst[pos++] = hex[(hash12 >> 4) & 0x0f];
+	dst[pos++] = hex[hash12 & 0x0f];
+	dst[pos++] = '.';
+	dst[pos++] = 'S';
+	dst[pos++] = 'A';
+	dst[pos++] = 'V';
+	dst[pos] = 0;
+}
+
 static bool writePattern(struct FatfsFil *fil, uint32_t size, uint8_t seed)
 {
 	uint8_t buf[1536];
@@ -105,6 +173,182 @@ static bool verifyPattern(struct FatfsFil *fil, uint32_t size, uint8_t seed)
 		if (buf[i] != (uint8_t)(seed + i * 17))
 			return false;
 	return true;
+}
+
+static void fillGeneratedSaveChunk(uint8_t *buf, uint32_t pos, uint32_t size, uint8_t seed)
+{
+	uint32_t i;
+
+	for (i = 0; i < size; i++)
+		buf[i] = (uint8_t)(seed + (pos + i) * 13 + ((pos + i) >> 8));
+}
+
+static bool writeGeneratedSave(struct FatfsFil *fil, uint32_t size, uint8_t seed)
+{
+	uint8_t buf[512];
+	uint32_t pos = 0;
+
+	while (pos < size) {
+		uint32_t now = size - pos, written = 0;
+
+		if (now > sizeof(buf))
+			now = sizeof(buf);
+		fillGeneratedSaveChunk(buf, pos, now, seed);
+		if (!fatfsFileWrite(fil, buf, now, &written) || written != now)
+			return false;
+		pos += now;
+	}
+	return true;
+}
+
+static bool verifyGeneratedSaveFile(struct FatfsVol *vol, const char *path, uint32_t size, uint8_t seed)
+{
+	struct FatfsFil *fil;
+	uint8_t expected[512], actual[512];
+	uint32_t pos = 0;
+	bool ok = true;
+
+	fil = fatfsFileOpen(vol, path, OPEN_MODE_READ);
+	if (!expect(fil != NULL, "open generated save file"))
+		return false;
+	ok = expect(fatfsFileGetSize(fil) == size, "generated save file size matches") && ok;
+
+	while (ok && pos < size) {
+		uint32_t now = size - pos, numRead = 0;
+
+		if (now > sizeof(actual))
+			now = sizeof(actual);
+		fillGeneratedSaveChunk(expected, pos, now, seed);
+		ok = expect(fatfsFileRead(fil, actual, now, &numRead) && numRead == now, "read generated save chunk") && ok;
+		ok = expect(!memcmp(actual, expected, now), "generated save chunk matches") && ok;
+		pos += now;
+	}
+
+	ok = expect(fatfsFileClose(fil), "close generated save file") && ok;
+	return ok;
+}
+
+static struct FatfsFil* openGeneratedSaveForExport(struct FatfsVol *vol, struct FatfsDir *saveDir, const char *name,
+	const char *fallbackName, bool simulatePrimaryCreateFailure, char *chosenName, uint32_t chosenNameLen)
+{
+	struct FatFileLocator loc;
+	struct FatfsFil *fil;
+
+	if (fatfsFindFileAt(saveDir, name, &loc)) {
+		copyStr(chosenName, chosenNameLen, name);
+		return fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+	}
+
+	if (!simulatePrimaryCreateFailure) {
+		if (fatfsFileCreateAt(saveDir, name, &loc)) {
+			copyStr(chosenName, chosenNameLen, name);
+			return fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+		}
+	}
+
+	if (!fallbackName || !fallbackName[0])
+		return NULL;
+
+	if (fatfsFindFileAt(saveDir, fallbackName, &loc)) {
+		copyStr(chosenName, chosenNameLen, fallbackName);
+		return fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+	}
+
+	if (!fatfsFileCreateAt(saveDir, fallbackName, &loc))
+		return NULL;
+
+	copyStr(chosenName, chosenNameLen, fallbackName);
+	fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+	return fil;
+}
+
+static bool remountAndVerifyGeneratedSave(struct FatfsVol **volP, const char *path, uint32_t size, uint8_t seed)
+{
+	struct FatfsVol *vol;
+	bool ok = true;
+
+	ok = expect(fatfsUnmount(*volP), "unmount after generated save export") && ok;
+	*volP = NULL;
+	vol = fatfsMount(diskRead, diskWrite, NULL);
+	if (!expect(vol != NULL, "remount after generated save export"))
+		return false;
+	*volP = vol;
+	ok = verifyGeneratedSaveFile(vol, path, size, seed) && ok;
+	return ok;
+}
+
+static struct FatfsFil *openGeneratedSaveIfSizeMatches(struct FatfsDir *saveDir, const char *name, uint32_t size, char *chosenName, uint32_t chosenNameLen)
+{
+	struct FatfsFil *fil = fatfsFileOpenAt(saveDir, name, OPEN_MODE_READ);
+
+	if (!fil)
+		return NULL;
+	if (fatfsFileGetSize(fil) == size) {
+		copyStr(chosenName, chosenNameLen, name);
+		return fil;
+	}
+
+	fatfsFileClose(fil);
+	return NULL;
+}
+
+static bool verifyGeneratedSaveLoadLookup(struct FatfsVol *vol, const char *primaryName, const char *fallbackName,
+	const char *expectedName, uint32_t size)
+{
+	struct FatfsDir *saveDir;
+	struct FatfsFil *fil = NULL;
+	char chosenName[96] = {};
+	bool ok = true;
+
+	saveDir = fatfsDirOpen(vol, "/SAVE");
+	if (!expect(saveDir != NULL, "open /SAVE for load lookup"))
+		return false;
+
+	fil = openGeneratedSaveIfSizeMatches(saveDir, primaryName, size, chosenName, sizeof(chosenName));
+	if (!fil && fallbackName && strcmp(primaryName, fallbackName))
+		fil = openGeneratedSaveIfSizeMatches(saveDir, fallbackName, size, chosenName, sizeof(chosenName));
+
+	ok = expect(fil != NULL, "load lookup found save") && ok;
+	ok = expect(!strcmp(chosenName, expectedName), "load lookup chose expected save name") && ok;
+	if (fil)
+		ok = expect(fatfsFileClose(fil), "close load lookup save file") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close /SAVE after load lookup") && ok;
+	return ok;
+}
+
+static bool exportGeneratedSave(struct FatfsVol **volP, const char *name, const char *fallbackName,
+	bool simulatePrimaryCreateFailure, uint32_t size, uint8_t seed, char *chosenNameOut, uint32_t chosenNameOutLen)
+{
+	struct FatfsVol *vol = *volP;
+	struct FatfsDir *saveDir;
+	struct FatfsFil *fil;
+	struct FatFileLocator loc;
+	char chosenName[96];
+	char path[128];
+	bool ok = true;
+
+	saveDir = fatfsDirOpen(vol, "/SAVE");
+	if (!saveDir) {
+		ok = expect(fatfsDirCreate(vol, "/SAVE", &loc), "create /SAVE directory") && ok;
+		saveDir = fatfsDirOpenWithLocator(vol, &loc);
+	}
+	if (!expect(saveDir != NULL, "open /SAVE directory"))
+		return false;
+
+	fil = openGeneratedSaveForExport(vol, saveDir, name, fallbackName, simulatePrimaryCreateFailure, chosenName, sizeof(chosenName));
+	if (!expect(fil != NULL, "open generated save for export")) {
+		fatfsDirClose(saveDir);
+		return false;
+	}
+	if (chosenNameOut)
+		copyStr(chosenNameOut, chosenNameOutLen, chosenName);
+	(void)sprintf(path, "/SAVE/%s", chosenName);
+	ok = expect(writeGeneratedSave(fil, size, seed), "write generated save") && ok;
+	ok = expect(fatfsFileTruncate(fil, size), "truncate generated save to exact size") && ok;
+	ok = expect(fatfsFileClose(fil), "close generated save export") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close /SAVE directory") && ok;
+	ok = remountAndVerifyGeneratedSave(volP, path, size, seed) && ok;
+	return ok;
 }
 
 static bool testTruncateOpenRewrite(struct FatfsVol *vol)
@@ -181,6 +425,37 @@ static bool testTruncateZeroFreesClusters(struct FatfsVol *vol)
 	return ok;
 }
 
+static bool testSaveExportRewriteVerify(struct FatfsVol **volP)
+{
+	char fallbackName[13];
+	char chosenName[96];
+
+	makeFallbackSaveName(TETRIS_ROM_NAME, fallbackName);
+	if (!expect(!strcmp(fallbackName, "TETRI933.SAV"), "deterministic fallback name for Tetris DX"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, TETRIS_SAVE_NAME, fallbackName, true, 16384, 55, chosenName, sizeof(chosenName)), "fallback generated save export when primary create fails"))
+		return false;
+	if (!expect(!strcmp(chosenName, fallbackName), "simulated primary create failure uses fallback name"))
+		return false;
+	if (!expect(verifyGeneratedSaveLoadLookup(*volP, TETRIS_SAVE_NAME, fallbackName, fallbackName, 16384), "load lookup falls back to 8.3 save"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, TETRIS_SAVE_NAME, fallbackName, false, 16384, 66, chosenName, sizeof(chosenName)), "primary long-name generated save export"))
+		return false;
+	if (!expect(!strcmp(chosenName, TETRIS_SAVE_NAME), "primary long-name save is preferred when creatable"))
+		return false;
+	if (!expect(verifyGeneratedSaveLoadLookup(*volP, TETRIS_SAVE_NAME, fallbackName, TETRIS_SAVE_NAME, 16384), "load lookup prefers primary long save"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, "Pokemon Blue.sav", NULL, false, 32768, 11, NULL, 0), "create missing generated save export"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, "Pokemon Red.sav", NULL, false, 8192, 33, NULL, 0), "create missing generated save in existing /SAVE"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, "Pokemon Blue.sav", NULL, false, 8192, 77, NULL, 0), "rewrite, shrink, and verify generated save export"))
+		return false;
+	if (!expect(exportGeneratedSave(volP, "Pokemon Blue.sav", NULL, false, 32768, 91, NULL, 0), "rewrite, extend, and verify generated save export"))
+		return false;
+	return true;
+}
+
 int main(void)
 {
 	struct FatfsVol *vol;
@@ -196,7 +471,22 @@ int main(void)
 	ok = testTruncateOpenRewrite(vol) && ok;
 	ok = testReadOnlyGuards(vol) && ok;
 	ok = testTruncateZeroFreesClusters(vol) && ok;
-	ok = expect(fatfsUnmount(vol), "unmount in-memory FAT16 image") && ok;
+	ok = testSaveExportRewriteVerify(&vol) && ok;
+	if (vol)
+		ok = expect(fatfsUnmount(vol), "unmount in-memory FAT16 image") && ok;
+	else
+		ok = false;
+
+	vol = fatfsMount(diskRead, diskWrite, NULL);
+	if (!vol) {
+		fprintf(stderr, "FAIL: remount in-memory FAT16 image\n");
+		return 1;
+	}
+	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon Blue.sav", 32768, 91) && ok;
+	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon Red.sav", 8192, 33) && ok;
+	ok = verifyGeneratedSaveFile(vol, "/SAVE/Tetris DX (World) (SGB Enhanced).sav", 16384, 66) && ok;
+	ok = verifyGeneratedSaveFile(vol, "/SAVE/TETRI933.SAV", 16384, 55) && ok;
+	ok = expect(fatfsUnmount(vol), "unmount remounted in-memory FAT16 image") && ok;
 
 	if (!ok)
 		return 1;

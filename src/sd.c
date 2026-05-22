@@ -47,8 +47,11 @@ static uint32_t mCurBlock;
 #define ERR_WRITE_CMD25_ERROR		9
 #define ERR_WRITE_DATA_REPLY_ERROR	10
 #define ERR_WRITE_BUSY_WAIT_TIMEOUT	11
+#define ERR_WRITE_STOP_TOKEN_ERROR	12
+#define ERR_WRITE_STOP_BUSY_TIMEOUT	13
+#define ERR_WRITE_CMD12_ERROR		14
 
-void sdReportLastError(void)
+static const char* sdPrvErrorName(uint8_t errType)
 {
 	static const char *mErrorNames[] = {
 		[ERR_NONE] = "none",
@@ -65,10 +68,20 @@ void sdReportLastError(void)
 		[ERR_WRITE_CMD25_ERROR] = "CMD25 error on write",
 		[ERR_WRITE_DATA_REPLY_ERROR] = "reply token for write was bad",
 		[ERR_WRITE_BUSY_WAIT_TIMEOUT] = "write busy wait took too long",
+		[ERR_WRITE_STOP_TOKEN_ERROR] = "multi-block write stop token failed",
+		[ERR_WRITE_STOP_BUSY_TIMEOUT] = "multi-block write stop busy wait took too long",
+		[ERR_WRITE_CMD12_ERROR] = "CMD12 error stopping write",
 	};
-	const char *errName = (mLastErrorType <= sizeof(mErrorNames) / sizeof(*mErrorNames)) ? mErrorNames[mLastErrorType] : NULL;
+	const char *errName = (errType < sizeof(mErrorNames) / sizeof(*mErrorNames)) ? mErrorNames[errType] : NULL;
+
 	if (!errName)
 		errName = "UNKNOWN";
+	return errName;
+}
+
+void sdReportLastError(void)
+{
+	const char *errName = sdPrvErrorName(mLastErrorType);
 	
 	pr("last error type %u(%s) at sector %u. Extra data: 0x%08x\n", mLastErrorType, errName, mLastErrorLoc, mErrData);
 }
@@ -78,6 +91,29 @@ static void sdPrvErrHappened(uint_fast8_t errType, uint32_t secNum, uint32_t ext
 	mLastErrorType = errType;
 	mLastErrorLoc = secNum;
 	mErrData = extraData;
+}
+
+static void sdPrvErrHappenedIfNone(uint_fast8_t errType, uint32_t secNum, uint32_t extraData)
+{
+	if (mLastErrorType == ERR_NONE)
+		sdPrvErrHappened(errType, secNum, extraData);
+}
+
+void sdGetLastError(struct SdLastError *errP)
+{
+	if (!errP)
+		return;
+	errP->type = mLastErrorType;
+	errP->sector = mLastErrorLoc;
+	errP->data = mErrData;
+	errP->name = sdPrvErrorName(mLastErrorType);
+}
+
+void sdClearLastError(void)
+{
+	mLastErrorType = ERR_NONE;
+	mLastErrorLoc = 0;
+	mErrData = 0;
 }
 
 
@@ -684,7 +720,9 @@ bool sdReadStop(void)
 bool sdWriteStart(uint32_t sec, uint32_t numSec)
 {
 	enum SdHwCmdResult result;
-	uint8_t rsp;
+	uint8_t rsp = 0;
+
+	sdClearLastError();
 	
 	if (!numSec)
 		numSec = 0xffffffff;
@@ -744,7 +782,7 @@ bool sdWriteStop(void)
 {
 	enum SdHwCmdResult result;
 	bool writeEndOk, busyDone;
-	uint8_t rsp;
+	uint8_t rsp = 0;
 
 	writeEndOk = sdHwMultiBlockWriteSignalEnd();
 	busyDone = sdHwPrgBusyWait();
@@ -753,11 +791,23 @@ bool sdWriteStop(void)
 
 	if (mSD.flags.sdioIface) {
 		result = sdPrvSimpleCommand(12, 0, false, SdRespTypeR1withBusy, &rsp, SdHwDataNone, 0, 0);
-		if (result != SdHwCmdResultOK || rsp)
+		if (result != SdHwCmdResultOK || rsp) {
+			sdPrvErrHappenedIfNone(ERR_WRITE_CMD12_ERROR, mCurBlock, rsp);
 			return false;
+		}
 	}
-	
-	return writeEndOk && busyDone;
+
+	if (!writeEndOk) {
+		sdPrvErrHappenedIfNone(ERR_WRITE_STOP_TOKEN_ERROR, mCurBlock, 0);
+		return false;
+	}
+
+	if (!busyDone) {
+		sdPrvErrHappenedIfNone(ERR_WRITE_STOP_BUSY_TIMEOUT, mCurBlock, 0);
+		return false;
+	}
+
+	return true;
 }
 
 bool sdSecWrite(uint32_t sec, const uint8_t *src)
@@ -766,6 +816,8 @@ bool sdSecWrite(uint32_t sec, const uint8_t *src)
 	enum SdHwWriteReply wr;
 	uint8_t rsp = 0;
 	bool busyDone;
+
+	sdClearLastError();
 	
 	result = sdPrvSimpleCommand(24, mSD.flags.HC ? sec : sec << 9, false,  SdRespTypeR1, &rsp, SdHwDataWrite, SD_BLOCK_SIZE, 1);
 	if (result != SdHwCmdResultOK || rsp) {
@@ -781,19 +833,19 @@ bool sdSecWrite(uint32_t sec, const uint8_t *src)
 	
 	if (wr == SdHwTimeout) {
 		
-		sdPrvErrHappened(ERR_WRITE_REPLY_TIMEOUT, mCurBlock, wr);
+		sdPrvErrHappened(ERR_WRITE_REPLY_TIMEOUT, sec, wr);
 		return false;
 	}
 	
 	if (wr != SdHwWriteAccepted) {
 		
-		sdPrvErrHappened(ERR_WRITE_DATA_REPLY_ERROR, mCurBlock, wr);
+		sdPrvErrHappened(ERR_WRITE_DATA_REPLY_ERROR, sec, wr);
 		return false;
 	}
 	
 	if (!busyDone) {
 		
-		sdPrvErrHappened(ERR_WRITE_BUSY_WAIT_TIMEOUT, mCurBlock, wr);
+		sdPrvErrHappened(ERR_WRITE_BUSY_WAIT_TIMEOUT, sec, wr);
 		return false;
 	}
 	
@@ -816,8 +868,5 @@ uint8_t sdGetFlags(void)
 {
 	return mSD.flags.value;
 }
-
-
-
 
 

@@ -52,6 +52,26 @@ typedef bool (*FatfsDiskWriteF)(void *diskUserData, uint32_t sec, uint32_t numSe
 #define OPEN_MODE_CREATE	2
 #define OPEN_MODE_TRUNCATE	4
 
+enum FatfsCreateError {
+	FatfsCreateErrorNone,
+	FatfsCreateErrorNameInvalid,
+	FatfsCreateErrorAlreadyExists,
+	FatfsCreateErrorDirRewind,
+	FatfsCreateErrorDirScan,
+	FatfsCreateErrorSfnIterate,
+	FatfsCreateErrorDirSeekEnd,
+	FatfsCreateErrorDirRootFull,
+	FatfsCreateErrorDirState,
+	FatfsCreateErrorDirAlloc,
+	FatfsCreateErrorDirSeekPartialFree,
+	FatfsCreateErrorDirLink,
+	FatfsCreateErrorDirSeekWrite,
+	FatfsCreateErrorLfnWrite,
+	FatfsCreateErrorSfnLocation,
+	FatfsCreateErrorSfnWrite,
+	FatfsCreateErrorTerminatorWrite,
+};
+
 
 //our funcs (vol)
 struct FatfsVol* fatfsMount(FatfsDiskReadF readF, FatfsDiskWriteF writeF, void *diskUserData);
@@ -89,6 +109,11 @@ bool fatfsDirDeleteAt(struct FatfsDir* dir, const char *name);
 //targetted dir search
 bool fatfsFindFileAt(struct FatfsDir* dir, const char *name, struct FatFileLocator *locatorP);
 bool fatfsFindDirAt(struct FatfsDir* dir, const char *name, struct FatFileLocator *locatorP);
+
+//diagnostics for the most recent create attempt
+enum FatfsCreateError fatfsLastCreateError(void);
+const char* fatfsLastCreateErrorName(void);
+void fatfsClearLastCreateError(void);
 
 
 

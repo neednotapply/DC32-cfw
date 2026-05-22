@@ -852,6 +852,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 	static bool uiPrvCardWriteSec(void *diskUserData, uint32_t sec, uint32_t numSec, const void *srcP)
 	{
 		const uint8_t *src = (const uint8_t*)srcP;
+		uint32_t i;
 		
 		if (!numSec)
 			return false;
@@ -862,36 +863,28 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 			if (!sdReadStop())
 				return false;
 		}
-		else if (mCurCardOp == CurrentlyWriting && mCurCardSec != sec) {
+		else if (mCurCardOp == CurrentlyWriting) {
 			
 			mCurCardOp = CurentlyIdle;
 			if (!sdWriteStop())
 				return false;
 		}
 		
-		if (mCurCardOp == CurentlyIdle) {
-			
-			if (!sdWriteStart(sec, 0))
-				return false;
-			
-			mCurCardSec = sec;
-			mCurCardOp = CurrentlyWriting;
-		}
-		
-		//we are now in the writing state
-		while (numSec) {
-			
-			if (!sdWriteNext(src)) {
-				uiPrvCardStreamReset();
+		if (numSec == 1)
+			return sdSecWrite(sec, src);
+
+		if (!sdWriteStart(sec, numSec))
+			return false;
+
+		for (i = 0; i < numSec; i++) {
+
+			if (!sdWriteNext(src + i * SD_BLOCK_SIZE)) {
+				(void)sdWriteStop();
 				return false;
 			}
-			
-			src += SD_BLOCK_SIZE;
-			numSec--;
-			mCurCardSec++;
 		}
 		
-		return true;
+		return sdWriteStop();
 	}
 	
 	static bool uiPrvCardPreUnmount(void)
@@ -2360,6 +2353,63 @@ bool uiSaveSavestate(void)
 		dst[pos] = 0;
 	}
 
+	static uint8_t uiPrvSaveFallbackChar(char c)
+	{
+		if (c >= 'a' && c <= 'z')
+			c += 'A' - 'a';
+		if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+			return (uint8_t)c;
+		return 0;
+	}
+
+	static void uiPrvSaveFallbackFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
+	{
+		static const char hex[] = "0123456789ABCDEF";
+		const char *base, *dot = NULL, *src;
+		uint32_t hash = 2166136261u, pos = 0;
+		uint16_t hash12;
+
+		(void)runtime;
+		if (!dstLen)
+			return;
+
+		base = uiPrvBaseName(romName);
+		for (src = base; *src; src++) {
+			if (*src == '.')
+				dot = src;
+		}
+		if (!dot)
+			dot = src;
+
+		if (dstLen < 13) {
+			dst[0] = 0;
+			return;
+		}
+
+		for (src = base; src != dot; src++) {
+			hash ^= (uint8_t)*src;
+			hash *= 16777619u;
+		}
+		hash12 = (uint16_t)((hash ^ (hash >> 12) ^ (hash >> 24)) & 0x0fffu);
+
+		for (src = base; src != dot && pos < 5; src++) {
+			uint8_t c = uiPrvSaveFallbackChar(*src);
+
+			if (c)
+				dst[pos++] = (char)c;
+		}
+		while (pos < 5)
+			dst[pos++] = 'X';
+		dst[pos++] = hex[(hash12 >> 8) & 0x0f];
+		dst[pos++] = hex[(hash12 >> 4) & 0x0f];
+		dst[pos++] = hex[hash12 & 0x0f];
+		dst[pos++] = '.';
+		dst[pos++] = 'S';
+		dst[pos++] = 'A';
+		dst[pos++] = 'V';
+		dst[pos] = 0;
+	}
+
 	static struct FatfsFil *uiPrvOpenSaveFileIfSizeMatches(struct FatfsDir *dir, const char *saveName, uint32_t expectedSize, bool *badSizeP)
 	{
 		struct FatfsFil *fil = fatfsFileOpenAt(dir, saveName, OPEN_MODE_READ);
@@ -2381,6 +2431,7 @@ bool uiSaveSavestate(void)
 		struct FatfsDir *dir;
 		struct FatfsFil *fil = NULL;
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char fallbackName[13];
 
 		if (!expectedSize)
 			return NULL;
@@ -2391,6 +2442,9 @@ bool uiSaveSavestate(void)
 
 		uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
 		fil = uiPrvOpenSaveFileIfSizeMatches(dir, saveName, expectedSize, badSizeP);
+		uiPrvSaveFallbackFileName(romName, runtime, fallbackName, sizeof(fallbackName));
+		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName))
+			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fallbackName, expectedSize, badSizeP);
 		if (!fil && strcmp(saveName, romName))
 			fil = uiPrvOpenSaveFileIfSizeMatches(dir, romName, expectedSize, badSizeP);
 
@@ -2398,7 +2452,64 @@ bool uiSaveSavestate(void)
 		return fil;
 	}
 
-	static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz);
+	enum SaveExportStatus {
+		SaveExportStatusOk,
+		SaveExportStatusMountFailed,
+		SaveExportStatusSaveDirFailed,
+		SaveExportStatusCreateFailed,
+		SaveExportStatusOpenExistingFailed,
+		SaveExportStatusOpenCreatedFailed,
+		SaveExportStatusWriteFailed,
+		SaveExportStatusTruncateFailed,
+		SaveExportStatusFileCloseFailed,
+		SaveExportStatusDirCloseFailed,
+		SaveExportStatusStreamCloseFailed,
+		SaveExportStatusUnmountFailed,
+		SaveExportStatusVerifyMountFailed,
+		SaveExportStatusVerifySaveDirFailed,
+		SaveExportStatusVerifyOpenFailed,
+		SaveExportStatusVerifySizeMismatch,
+		SaveExportStatusVerifyReadFailed,
+		SaveExportStatusVerifyMismatch,
+		SaveExportStatusVerifyFileCloseFailed,
+		SaveExportStatusVerifyDirCloseFailed,
+		SaveExportStatusVerifyStreamCloseFailed,
+		SaveExportStatusVerifyUnmountFailed,
+	};
+
+#define SAVE_EXPORT_MSG_BUF_SZ	1024
+
+	struct SaveExportResult {
+		enum SaveExportStatus status;
+		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char fallbackSaveName[13];
+		const char *openPath;
+		uint32_t bytesExpected;
+		uint32_t bytesDone;
+		uint32_t verifyOffset;
+		enum FatfsCreateError fatCreateError;
+		const char *fatCreateErrorName;
+		enum FatfsCreateError primaryCreateError;
+		const char *primaryCreateErrorName;
+		enum FatfsCreateError fallbackCreateError;
+		const char *fallbackCreateErrorName;
+		uint8_t verifyExpected;
+		uint8_t verifyActual;
+		uint8_t sdFlags;
+		uint8_t attemptNo;
+		bool flashCacheFailed;
+		bool cardReportedReadOnly;
+		bool fallbackUsed;
+		bool forceRequested;
+		bool forceReinitUsed;
+		bool retryAttempted;
+		bool manualRequest;
+		struct SdLastError sdError;
+	};
+
+	static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *result);
+	static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual);
 
 	static bool uiPrvSelectionMatchesCachedGame(const char *romName, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)
 	{
@@ -2598,117 +2709,351 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz)
+static void uiPrvSaveExportResultInit(struct SaveExportResult *result)
 {
-	struct FatfsDir *saveDir = fatfsDirOpen(vol, "/SAVE");
-	struct FatfsFil *fil;
-	struct GameSelection selection;
+	memset(result, 0, sizeof(*result));
+	result->status = SaveExportStatusOk;
+	result->sdError.name = "none";
+	result->fatCreateErrorName = "none";
+	result->primaryCreateErrorName = "none";
+	result->fallbackCreateErrorName = "none";
+	result->openPath = "none";
+}
+
+static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
+{
+	char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char fallbackSaveName[13];
+	uint32_t bytesExpected = result->bytesExpected;
+	uint8_t attemptNo = result->attemptNo;
+	bool flashCacheFailed = result->flashCacheFailed;
+	bool forceRequested = result->forceRequested;
+	bool retryAttempted = result->retryAttempted;
+	bool manualRequest = result->manualRequest;
+
+	uiPrvCopyStr(primarySaveName, sizeof(primarySaveName), result->primarySaveName);
+	uiPrvCopyStr(fallbackSaveName, sizeof(fallbackSaveName), result->fallbackSaveName);
+	uiPrvSaveExportResultInit(result);
+	uiPrvCopyStr(result->primarySaveName, sizeof(result->primarySaveName), primarySaveName);
+	uiPrvCopyStr(result->fallbackSaveName, sizeof(result->fallbackSaveName), fallbackSaveName);
+	uiPrvCopyStr(result->saveName, sizeof(result->saveName), primarySaveName);
+	result->bytesExpected = bytesExpected;
+	result->attemptNo = attemptNo;
+	result->flashCacheFailed = flashCacheFailed;
+	result->forceRequested = forceRequested;
+	result->retryAttempted = retryAttempted;
+	result->manualRequest = manualRequest;
+}
+
+static void uiPrvSaveExportSetStatus(struct SaveExportResult *result, enum SaveExportStatus status)
+{
+	if (result->status != SaveExportStatusOk)
+		return;
+
+	result->status = status;
+	sdGetLastError(&result->sdError);
+}
+
+static void uiPrvSaveExportRecordFatCreateError(struct SaveExportResult *result)
+{
+	result->fatCreateError = fatfsLastCreateError();
+	result->fatCreateErrorName = fatfsLastCreateErrorName();
+}
+
+static void uiPrvSaveExportRecordPrimaryCreateError(struct SaveExportResult *result)
+{
+	result->primaryCreateError = fatfsLastCreateError();
+	result->primaryCreateErrorName = fatfsLastCreateErrorName();
+	uiPrvSaveExportRecordFatCreateError(result);
+}
+
+static void uiPrvSaveExportRecordFallbackCreateError(struct SaveExportResult *result)
+{
+	result->fallbackCreateError = fatfsLastCreateError();
+	result->fallbackCreateErrorName = fatfsLastCreateErrorName();
+	uiPrvSaveExportRecordFatCreateError(result);
+}
+
+static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportResult *result)
+{
+	struct FatfsDir *saveDir = NULL;
+	struct FatfsFil *fil = NULL;
+	struct FatFileLocator loc;
 	union SdFlags flags;
-	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
-	bool ret = true;
-	
-		if (!savegameExportSz)
-			return true;
-	if (!uiGetGameSelection(&selection)) {
-		pr("Savegame export: no selected game\n");
-		return false;
-	}
+	bool ret;
+
 	flags.value = sdGetFlags();
-	if (flags.RO) {
-		pr("Savegame export: SD card is read-only/write-protected\n");
-		return false;
-	}
-	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
+	result->sdFlags = flags.value;
+	result->cardReportedReadOnly = flags.RO;
+	if (flags.RO)
+		pr("Savegame export: card reports write protect; attempting verified write anyway\n");
 
-		if (!saveDir) {		//we might have ti make the savedir
-			
-			struct FatFileLocator loc;
-			
-			if (!fatfsDirCreate(vol, "/SAVE", &loc) || !(saveDir = fatfsDirOpenWithLocator(vol, &loc))) {
-				pr("Savegame export: cannot create/open /SAVE\n");
-				return false;
-			}
+	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
+	result->fallbackUsed = false;
+	pr("Savegame export: preparing /SAVE/%s (%u bytes)\n", result->primarySaveName, result->bytesExpected);
+	if (result->fallbackSaveName[0])
+		pr("Savegame export: fallback save name is /SAVE/%s\n", result->fallbackSaveName);
+	saveDir = fatfsDirOpen(vol, "/SAVE");
+	if (!saveDir) {
+		struct FatFileLocator loc;
+
+		pr("Savegame export: /SAVE missing, creating it\n");
+		if (!fatfsDirCreate(vol, "/SAVE", &loc) || !(saveDir = fatfsDirOpenWithLocator(vol, &loc))) {
+			pr("Savegame export: cannot create/open /SAVE\n");
+			uiPrvSaveExportSetStatus(result, SaveExportStatusSaveDirFailed);
+			return false;
 		}
+	}
 
-		fil = fatfsFileOpenAt(saveDir, saveName, OPEN_MODE_WRITE | OPEN_MODE_CREATE);
-		if (fil) {
-			uint32_t bytesWritten = 0;
-
-			if (!fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, savegameExportSz, &bytesWritten) || bytesWritten != savegameExportSz) {
-				pr("Savegame export: write failed for /SAVE/%s (%u/%u)\n", saveName, bytesWritten, savegameExportSz);
-				ret = false;
-			}
-			else if (!fatfsFileTruncate(fil, savegameExportSz)) {
-				pr("Savegame export: truncate failed for /SAVE/%s to %u bytes\n", saveName, savegameExportSz);
-				ret = false;
-			}
-
-			if (!fatfsFileClose(fil)) {
-				pr("Savegame export: close failed for /SAVE/%s\n", saveName);
-				ret = false;
+	if (fatfsFindFileAt(saveDir, result->primarySaveName, &loc)) {
+		result->openPath = "primary existing";
+		fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+		if (!fil) {
+			pr("Savegame export: cannot open existing /SAVE/%s for writing\n", result->primarySaveName);
+			uiPrvSaveExportSetStatus(result, SaveExportStatusOpenExistingFailed);
+			goto out_close_dir;
+		}
+	}
+	else {
+		pr("Savegame export: /SAVE/%s missing, creating it\n", result->primarySaveName);
+		fatfsClearLastCreateError();
+		if (fatfsFileCreateAt(saveDir, result->primarySaveName, &loc)) {
+			result->openPath = "primary created";
+			fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+			if (!fil) {
+				pr("Savegame export: created /SAVE/%s but cannot reopen for writing\n", result->primarySaveName);
+				uiPrvSaveExportSetStatus(result, SaveExportStatusOpenCreatedFailed);
+				goto out_close_dir;
 			}
 		}
 		else {
-			pr("Savegame export: cannot open /SAVE/%s for writing\n", saveName);
-			ret = false;
+			uiPrvSaveExportRecordPrimaryCreateError(result);
+			pr("Savegame export: cannot create /SAVE/%s (FAT stage: %s)\n", result->primarySaveName, result->primaryCreateErrorName);
+			if (!result->fallbackSaveName[0] || !strcmp(result->primarySaveName, result->fallbackSaveName)) {
+				uiPrvSaveExportSetStatus(result, SaveExportStatusCreateFailed);
+				goto out_close_dir;
+			}
+
+			uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->fallbackSaveName);
+			result->fallbackUsed = true;
+			pr("Savegame export: trying fallback /SAVE/%s\n", result->fallbackSaveName);
+
+			if (fatfsFindFileAt(saveDir, result->fallbackSaveName, &loc)) {
+				result->openPath = "fallback existing";
+				fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+				if (!fil) {
+					pr("Savegame export: cannot open existing fallback /SAVE/%s for writing\n", result->fallbackSaveName);
+					uiPrvSaveExportSetStatus(result, SaveExportStatusOpenExistingFailed);
+					goto out_close_dir;
+				}
+			}
+			else {
+				pr("Savegame export: /SAVE/%s missing, creating fallback\n", result->fallbackSaveName);
+				fatfsClearLastCreateError();
+				if (!fatfsFileCreateAt(saveDir, result->fallbackSaveName, &loc)) {
+					uiPrvSaveExportRecordFallbackCreateError(result);
+					pr("Savegame export: cannot create fallback /SAVE/%s (FAT stage: %s)\n", result->fallbackSaveName, result->fallbackCreateErrorName);
+					uiPrvSaveExportSetStatus(result, SaveExportStatusCreateFailed);
+					goto out_close_dir;
+				}
+				result->openPath = "fallback created";
+				fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
+				if (!fil) {
+					pr("Savegame export: created fallback /SAVE/%s but cannot reopen for writing\n", result->fallbackSaveName);
+					uiPrvSaveExportSetStatus(result, SaveExportStatusOpenCreatedFailed);
+					goto out_close_dir;
+				}
+			}
 		}
-		
-		if (!fatfsDirClose(saveDir)) {
-			pr("Savegame export: close failed for /SAVE\n");
-			ret = false;
-		}
-		
-		return ret;
 	}
 
-static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
+	pr("Savegame export: writing /SAVE/%s\n", result->saveName);
+	ret = fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, result->bytesExpected, &result->bytesDone);
+	if (!ret || result->bytesDone != result->bytesExpected) {
+		pr("Savegame export: write failed for /SAVE/%s (%u/%u)\n", result->saveName, result->bytesDone, result->bytesExpected);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusWriteFailed);
+	}
+	else if (!fatfsFileTruncate(fil, result->bytesExpected)) {
+		pr("Savegame export: truncate failed for /SAVE/%s to %u bytes\n", result->saveName, result->bytesExpected);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusTruncateFailed);
+	}
+
+	if (!fatfsFileClose(fil)) {
+		pr("Savegame export: close failed for /SAVE/%s\n", result->saveName);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusFileCloseFailed);
+	}
+
+out_close_dir:
+	if (!fatfsDirClose(saveDir)) {
+		pr("Savegame export: close failed for /SAVE\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusDirCloseFailed);
+	}
+
+	return result->status == SaveExportStatusOk;
+}
+
+static bool uiPrvVerifyExportedSavestate(struct FatfsVol *vol, struct SaveExportResult *result)
+{
+	struct FatfsDir *saveDir;
+	struct FatfsFil *fil;
+	const uint8_t *expected = (const uint8_t*)QSPI_RAM_COPY_START;
+	uint8_t buf[512];
+	uint32_t pos = 0;
+
+	saveDir = fatfsDirOpen(vol, "/SAVE");
+	if (!saveDir) {
+		pr("Savegame export: verify cannot open /SAVE\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifySaveDirFailed);
+		return false;
+	}
+
+	fil = fatfsFileOpenAt(saveDir, result->saveName, OPEN_MODE_READ);
+	if (!fil) {
+		pr("Savegame export: verify cannot reopen /SAVE/%s\n", result->saveName);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyOpenFailed);
+		goto out_close_dir;
+	}
+
+	if (fatfsFileGetSize(fil) != result->bytesExpected) {
+		pr("Savegame export: verify size mismatch for /SAVE/%s (%u/%u)\n", result->saveName, fatfsFileGetSize(fil), result->bytesExpected);
+		result->bytesDone = fatfsFileGetSize(fil);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifySizeMismatch);
+		goto out_close_file;
+	}
+
+	while (pos < result->bytesExpected) {
+		uint32_t numRead = 0, now = result->bytesExpected - pos;
+
+		if (now > sizeof(buf))
+			now = sizeof(buf);
+		if (!fatfsFileRead(fil, buf, now, &numRead) || numRead != now) {
+			pr("Savegame export: verify read failed for /SAVE/%s at %u (%u/%u)\n", result->saveName, pos, numRead, now);
+			result->bytesDone = pos + numRead;
+			result->verifyOffset = pos;
+			uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyReadFailed);
+			goto out_close_file;
+		}
+		if (memcmp(buf, expected + pos, now)) {
+			uint32_t i;
+
+			for (i = 0; i < now; i++) {
+				if (buf[i] != expected[pos + i]) {
+					result->verifyOffset = pos + i;
+					result->verifyActual = buf[i];
+					result->verifyExpected = expected[pos + i];
+					pr("Savegame export: verify mismatch for /SAVE/%s at %u (sd=%02x flash=%02x)\n", result->saveName, result->verifyOffset, result->verifyActual, result->verifyExpected);
+					break;
+				}
+			}
+			uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyMismatch);
+			goto out_close_file;
+		}
+		pos += now;
+	}
+
+out_close_file:
+	if (!fatfsFileClose(fil)) {
+		pr("Savegame export: verify close failed for /SAVE/%s\n", result->saveName);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyFileCloseFailed);
+	}
+
+out_close_dir:
+	if (!fatfsDirClose(saveDir)) {
+		pr("Savegame export: verify close failed for /SAVE\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyDirCloseFailed);
+	}
+
+	if (result->status == SaveExportStatusOk)
+		pr("Savegame export: verified /SAVE/%s (%u bytes)\n", result->saveName, result->bytesExpected);
+	return result->status == SaveExportStatusOk;
+}
+
+static bool uiPrvFlushCurrentSaveToCardAttempt(bool forceReinit, struct SaveExportResult *result)
+{
+	struct FatfsVol *vol;
+
+	uiPrvSaveExportBeginAttempt(result);
+	result->attemptNo++;
+	result->forceReinitUsed = forceReinit;
+	sdClearLastError();
+	vol = uiPrvMountCardEx(NULL, true, forceReinit);
+	if (!vol) {
+		pr("Savegame export: cannot mount SD card\n");
+		result->sdFlags = sdGetFlags();
+		uiPrvSaveExportSetStatus(result, SaveExportStatusMountFailed);
+		return false;
+	}
+
+	(void)uiPrvWriteExportedSavestate(vol, result);
+	if (!uiPrvCardPreUnmount()) {
+		pr("Savegame export: SD stream close failed\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusStreamCloseFailed);
+	}
+	if (!fatfsUnmount(vol)) {
+		pr("Savegame export: FAT unmount failed\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusUnmountFailed);
+	}
+	if (result->status != SaveExportStatusOk)
+		return false;
+
+	sdClearLastError();
+	vol = uiPrvMountCardEx(NULL, true, false);
+	if (!vol) {
+		pr("Savegame export: cannot remount SD card for verification\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyMountFailed);
+		return false;
+	}
+
+	(void)uiPrvVerifyExportedSavestate(vol, result);
+	if (!uiPrvCardPreUnmount()) {
+		pr("Savegame export: verify SD stream close failed\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyStreamCloseFailed);
+	}
+	if (!fatfsUnmount(vol)) {
+		pr("Savegame export: verify FAT unmount failed\n");
+		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyUnmountFailed);
+	}
+
+	return result->status == SaveExportStatusOk;
+}
+
+static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *result)
 {
 	struct GameSelection selection;
 
-	(void)force;
+	uiPrvSaveExportResultInit(result);
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
 		return true;
+
+	result->forceRequested = force;
+	result->bytesExpected = selection.saveRamSize;
+	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->primarySaveName, sizeof(result->primarySaveName));
+	uiPrvSaveFallbackFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
+	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
 	if (!uiSaveSavestate()) {
+		result->flashCacheFailed = true;
 		pr("Savegame export: failed to copy current save RAM to flash; exporting cached flash copy anyway\n");
 	}
-	return uiPrvExportSavestate(vol, selection.saveRamSize);
+
+	pr("Savegame export: flushing /SAVE/%s to SD (force=%u)\n", result->saveName, force ? 1u : 0u);
+	if (uiPrvFlushCurrentSaveToCardAttempt(force, result))
+		return true;
+
+	if (!force) {
+		pr("Savegame export: retrying with forced SD reinit\n");
+		result->retryAttempted = true;
+		if (uiPrvFlushCurrentSaveToCardAttempt(true, result))
+			return true;
+	}
+
+	return false;
 }
 
 bool uiFlushCurrentSaveToCard(bool force)
 {
-	struct FatfsVol *vol;
-	struct GameSelection selection;
-	bool writeOk, cleanupOk = true;
+	struct SaveExportResult result;
 
-	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-		return true;
-
-	pr("Savegame export: flushing to SD (force=%u)\n", force ? 1u : 0u);
-	vol = uiPrvMountCardEx(NULL, true, force);
-	if (!vol) {
-		pr("Savegame export: cannot mount SD card\n");
-		return false;
-	}
-
-	writeOk = uiPrvFlushCurrentSaveToMountedCard(vol, force);
-	if (!uiPrvCardPreUnmount()) {
-		pr("Savegame export: SD stream close failed\n");
-		cleanupOk = false;
-	}
-	if (!fatfsUnmount(vol)) {
-		pr("Savegame export: FAT unmount failed\n");
-		cleanupOk = false;
-	}
-
-	if (!writeOk && !force) {
-		pr("Savegame export: retrying with forced SD reinit\n");
-		return uiFlushCurrentSaveToCard(true);
-	}
-
-	if (writeOk && !cleanupOk)
-		pr("Savegame export: write succeeded but cleanup reported errors\n");
-
-	return writeOk;
+	return uiPrvFlushCurrentSaveToCardEx(force, &result);
 }
 	
 	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
@@ -2719,13 +3064,14 @@ bool uiFlushCurrentSaveToCard(bool force)
 		bool ret = false;
 		
 		uiPrvSetHeaderTitle("Select Game");
+		// ROM selection reuses cartridge RAM, so export the current save through the normal SD pipeline first.
+		if (savegameExportSz)
+			(void)uiPrvExportCurrentSavestate(cnv, false);
+		uiPrvSetHeaderTitle("Select Game");
+
 		vol = uiPrvMountCardEx(cnv, false, forceSdReinit);
 		if (!vol)
 			return false;
-		
-		//rom selection will corrupt our cart RAM, save it
-		if (savegameExportSz && !uiPrvFlushCurrentSaveToMountedCard(vol, true))
-			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
 		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
@@ -2736,32 +3082,209 @@ bool uiFlushCurrentSaveToCard(bool force)
 		return ret;
 	}
 
-static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
+static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
 {
-	struct GameSelection selection;
-	union SdFlags flags;
-	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
-	char msg[UI_PICK_FILE_NAME_BUF_SZ + 32];
-
-	pr("Savegame export: explicit pause-menu save requested\n");
-	flags.value = sdGetFlags();
-	if (flags.RO) {
-		uiAlert(cnv, "SD card is read-only/write-protected. Cannot write save.", DialogTypeOk);
-		return;
+	switch (status) {
+		case SaveExportStatusMountFailed:
+			return "Could not mount the SD card.";
+		case SaveExportStatusSaveDirFailed:
+			return "Could not create or open /SAVE.";
+		case SaveExportStatusCreateFailed:
+			return "Could not create the missing save file.";
+		case SaveExportStatusOpenExistingFailed:
+			return "Could not open the existing save file for writing.";
+		case SaveExportStatusOpenCreatedFailed:
+			return "Created the save file but could not reopen it for writing.";
+		case SaveExportStatusWriteFailed:
+			return "The FAT write did not complete.";
+		case SaveExportStatusTruncateFailed:
+			return "Could not truncate the save file to the exact size.";
+		case SaveExportStatusFileCloseFailed:
+			return "The save file did not close cleanly.";
+		case SaveExportStatusDirCloseFailed:
+			return "The /SAVE directory did not close cleanly.";
+		case SaveExportStatusStreamCloseFailed:
+			return "The SD write stream did not close cleanly.";
+		case SaveExportStatusUnmountFailed:
+			return "The FAT volume did not unmount cleanly after writing.";
+		case SaveExportStatusVerifyMountFailed:
+			return "Could not remount the SD card for verification.";
+		case SaveExportStatusVerifySaveDirFailed:
+			return "Could not reopen /SAVE for verification.";
+		case SaveExportStatusVerifyOpenFailed:
+			return "Could not reopen the save file for verification.";
+		case SaveExportStatusVerifySizeMismatch:
+			return "Verification found the wrong save file size.";
+		case SaveExportStatusVerifyReadFailed:
+			return "Verification could not read the save file back.";
+		case SaveExportStatusVerifyMismatch:
+			return "Verification found bytes that differ from flash.";
+		case SaveExportStatusVerifyFileCloseFailed:
+			return "The verified save file did not close cleanly.";
+		case SaveExportStatusVerifyDirCloseFailed:
+			return "The verified /SAVE directory did not close cleanly.";
+		case SaveExportStatusVerifyStreamCloseFailed:
+			return "The SD read stream did not close cleanly after verification.";
+		case SaveExportStatusVerifyUnmountFailed:
+			return "The FAT volume did not unmount cleanly after verification.";
+		case SaveExportStatusOk:
+		default:
+			return "No SD save error was reported.";
 	}
-	if (!uiFlushCurrentSaveToCard(true)) {
-		uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
+}
+
+static const char* uiPrvSaveExportStatusName(enum SaveExportStatus status)
+{
+	switch (status) {
+		case SaveExportStatusMountFailed:
+			return "MountFailed";
+		case SaveExportStatusSaveDirFailed:
+			return "SaveDirFailed";
+		case SaveExportStatusCreateFailed:
+			return "CreateFailed";
+		case SaveExportStatusOpenExistingFailed:
+			return "OpenExistingFailed";
+		case SaveExportStatusOpenCreatedFailed:
+			return "OpenCreatedFailed";
+		case SaveExportStatusWriteFailed:
+			return "WriteFailed";
+		case SaveExportStatusTruncateFailed:
+			return "TruncateFailed";
+		case SaveExportStatusFileCloseFailed:
+			return "FileCloseFailed";
+		case SaveExportStatusDirCloseFailed:
+			return "DirCloseFailed";
+		case SaveExportStatusStreamCloseFailed:
+			return "StreamCloseFailed";
+		case SaveExportStatusUnmountFailed:
+			return "UnmountFailed";
+		case SaveExportStatusVerifyMountFailed:
+			return "VerifyMountFailed";
+		case SaveExportStatusVerifySaveDirFailed:
+			return "VerifySaveDirFailed";
+		case SaveExportStatusVerifyOpenFailed:
+			return "VerifyOpenFailed";
+		case SaveExportStatusVerifySizeMismatch:
+			return "VerifySizeMismatch";
+		case SaveExportStatusVerifyReadFailed:
+			return "VerifyReadFailed";
+		case SaveExportStatusVerifyMismatch:
+			return "VerifyMismatch";
+		case SaveExportStatusVerifyFileCloseFailed:
+			return "VerifyFileCloseFailed";
+		case SaveExportStatusVerifyDirCloseFailed:
+			return "VerifyDirCloseFailed";
+		case SaveExportStatusVerifyStreamCloseFailed:
+			return "VerifyStreamCloseFailed";
+		case SaveExportStatusVerifyUnmountFailed:
+			return "VerifyUnmountFailed";
+		case SaveExportStatusOk:
+		default:
+			return "Ok";
+	}
+}
+
+static void uiPrvSaveExportAppend(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const char *str)
+{
+	uint32_t pos = strlen(msg);
+
+	if (pos >= SAVE_EXPORT_MSG_BUF_SZ - 1)
 		return;
+	uiPrvCopyStr(msg + pos, SAVE_EXPORT_MSG_BUF_SZ - pos, str);
+}
+
+static void uiPrvSaveExportAppendPath(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const char *label, const char *name)
+{
+	uiPrvSaveExportAppend(msg, "\n");
+	uiPrvSaveExportAppend(msg, label);
+	if (name && name[0]) {
+		uiPrvSaveExportAppend(msg, "/SAVE/");
+		uiPrvSaveExportAppend(msg, name);
+	}
+	else
+		uiPrvSaveExportAppend(msg, "(none)");
+}
+
+static void uiPrvSaveExportAppendDiagLine(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const char *label, const char *value)
+{
+	uiPrvSaveExportAppend(msg, "\n");
+	uiPrvSaveExportAppend(msg, label);
+	uiPrvSaveExportAppend(msg, value && value[0] ? value : "none");
+}
+
+static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, char msg[static SAVE_EXPORT_MSG_BUF_SZ])
+{
+	char tmp[128];
+
+	(void)sprintf(msg, "SD save failed; flash cache preserved.\n%s", uiPrvSaveExportStatusText(result->status));
+	(void)sprintf(tmp, "\nStatus:%u %s", (unsigned)result->status, uiPrvSaveExportStatusName(result->status));
+	uiPrvSaveExportAppend(msg, tmp);
+	(void)sprintf(tmp, "\nAttempt:%u force_req=%u reinit=%u retry=%u manual=%u",
+		(unsigned)result->attemptNo, result->forceRequested ? 1u : 0u, result->forceReinitUsed ? 1u : 0u,
+		result->retryAttempted ? 1u : 0u, result->manualRequest ? 1u : 0u);
+	uiPrvSaveExportAppend(msg, tmp);
+	(void)sprintf(tmp, "\nBytes:%lu/%lu", (unsigned long)result->bytesDone, (unsigned long)result->bytesExpected);
+	uiPrvSaveExportAppend(msg, tmp);
+	(void)sprintf(tmp, "\nFlags:0x%02x RO=%u flash=%s fallback=%u",
+		result->sdFlags, result->cardReportedReadOnly ? 1u : 0u, result->flashCacheFailed ? "cached" : "fresh",
+		result->fallbackUsed ? 1u : 0u);
+	uiPrvSaveExportAppend(msg, tmp);
+	uiPrvSaveExportAppendDiagLine(msg, "Open:", result->openPath);
+	uiPrvSaveExportAppendDiagLine(msg, "FAT primary:", result->primaryCreateErrorName);
+	uiPrvSaveExportAppendDiagLine(msg, "FAT fallback:", result->fallbackCreateErrorName);
+	uiPrvSaveExportAppendDiagLine(msg, "FAT last:", result->fatCreateErrorName);
+
+	if (result->status == SaveExportStatusVerifyReadFailed)
+		(void)sprintf(tmp, "\nRead through:%lu/%lu", (unsigned long)result->bytesDone, (unsigned long)result->bytesExpected);
+	else if (result->status == SaveExportStatusVerifyMismatch)
+		(void)sprintf(tmp, "\nMismatch:%lu sd=%02x flash=%02x", (unsigned long)result->verifyOffset, result->verifyActual, result->verifyExpected);
+	else if (result->status == SaveExportStatusVerifySizeMismatch)
+		(void)sprintf(tmp, "\nVerify size:%lu/%lu", (unsigned long)result->bytesDone, (unsigned long)result->bytesExpected);
+	else
+		tmp[0] = 0;
+	if (tmp[0])
+		uiPrvSaveExportAppend(msg, tmp);
+
+	(void)sprintf(tmp, "\nSD:%u %s LBA=%lu data=0x%08lx", result->sdError.type,
+		result->sdError.name ? result->sdError.name : "unknown",
+		(unsigned long)result->sdError.sector, (unsigned long)result->sdError.data);
+	uiPrvSaveExportAppend(msg, tmp);
+	uiPrvSaveExportAppendPath(msg, "Chosen:", result->saveName);
+	uiPrvSaveExportAppendPath(msg, "Primary:", result->primarySaveName);
+	uiPrvSaveExportAppendPath(msg, "Fallback:", result->fallbackSaveName);
+}
+
+static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual)
+{
+	struct SaveExportResult result;
+	char msg[SAVE_EXPORT_MSG_BUF_SZ];
+
+	pr("Savegame export: %s save requested\n", manual ? "manual" : "safe-exit");
+	if (!uiPrvFlushCurrentSaveToCardEx(manual, &result)) {
+		result.manualRequest = manual;
+		uiPrvSaveExportFormatFailure(&result, msg);
+		uiAlert(cnv, msg, DialogTypeOk);
+		return false;
 	}
 
-	if (!uiGetGameSelection(&selection)) {
-		uiAlert(cnv, "Save written to /SAVE", DialogTypeOk);
-		return;
+	if (result.flashCacheFailed) {
+		if (result.saveName[0])
+			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result.saveName);
+		else
+			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
+		uiAlert(cnv, msg, DialogTypeOk);
+		return true;
 	}
 
-	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
-	snprintf(msg, sizeof(msg), "Save written to /SAVE/%s", saveName);
+	if (!manual)
+		return true;
+
+	if (result.saveName[0])
+		(void)sprintf(msg, "Save written to /SAVE/%s", result.saveName);
+	else
+		(void)sprintf(msg, "Save written to /SAVE");
 	uiAlert(cnv, msg, DialogTypeOk);
+	return true;
 }
 
 	static bool uiPrvHaveGamePath(void)
@@ -6158,7 +6681,7 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 
 	#ifndef NO_SD_CARD
 		if (!mDeferredGameSelect && mLastGameMenuAction == UiGameActionSwitchTool)
-			uiPrvExportCurrentSavestate(cnv);
+			uiPrvExportCurrentSavestate(cnv, false);
 
 		if (mDeferredGameSelect && mLastGameMenuAction == UiGameActionSelectGame) {
 			uint32_t ramSz = 0;
@@ -6337,7 +6860,7 @@ enum UiGameAction uiGameMenu(void)
 		return mLastGameMenuAction;
 	}
 	if (optionIds[selOption] == GameMenuOptionSaveToSd) {
-		uiPrvExportCurrentSavestate(cnv);
+		uiPrvExportCurrentSavestate(cnv, true);
 		mLastGameMenuAction = UiGameActionResume;
 		return mLastGameMenuAction;
 	}

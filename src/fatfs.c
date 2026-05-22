@@ -160,6 +160,7 @@ static uint8_t mVolumesUsed = ~((1 << FATFS_MAX_VOLUMES) - 1);
 static uint8_t mFilesUsed = ~((1 << FATFS_MAX_FILES_REAL) - 1);
 static struct FatfsVol mVolumes[FATFS_MAX_VOLUMES];
 static struct FatfsFil mFiles[FATFS_MAX_FILES_REAL];
+static enum FatfsCreateError mLastCreateError = FatfsCreateErrorNone;
 
 static bool fatfsPrvSomethingFind(struct FatfsVol *vol, const char *name, uint32_t nameMaxLen, bool wantDir, struct FatFileLocator *locP);
 static bool fatfsPrvChainFree(struct FatfsVol* vol, uint32_t firstClus);
@@ -175,6 +176,64 @@ static bool fatfsPrvDirRead(struct FatfsDir *dir, char *name, uint32_t *sizeP, u
 	static void fatfsPrvLfnListInit(struct FatfsLfnState *state, char *outStr);
 	static bool fatfsPrvLfnWasFirstLfn(struct FatfsLfnState *state);		//was the last ingsted entry the first in an LFN chain (last words of filename)
 #endif
+
+static bool fatfsPrvCreateFail(enum FatfsCreateError error)
+{
+	mLastCreateError = error;
+	return false;
+}
+
+void fatfsClearLastCreateError(void)
+{
+	mLastCreateError = FatfsCreateErrorNone;
+}
+
+enum FatfsCreateError fatfsLastCreateError(void)
+{
+	return mLastCreateError;
+}
+
+const char* fatfsLastCreateErrorName(void)
+{
+	switch (mLastCreateError) {
+		case FatfsCreateErrorNone:
+			return "none";
+		case FatfsCreateErrorNameInvalid:
+			return "name validation";
+		case FatfsCreateErrorAlreadyExists:
+			return "directory scan matched existing name";
+		case FatfsCreateErrorDirRewind:
+			return "directory rewind";
+		case FatfsCreateErrorDirScan:
+			return "directory scan";
+		case FatfsCreateErrorSfnIterate:
+			return "short-name collision iteration";
+		case FatfsCreateErrorDirSeekEnd:
+			return "directory seek to end";
+		case FatfsCreateErrorDirRootFull:
+			return "root directory full";
+		case FatfsCreateErrorDirState:
+			return "directory state";
+		case FatfsCreateErrorDirAlloc:
+			return "directory extension allocation";
+		case FatfsCreateErrorDirSeekPartialFree:
+			return "directory seek to partial free run";
+		case FatfsCreateErrorDirLink:
+			return "directory extension link";
+		case FatfsCreateErrorDirSeekWrite:
+			return "directory seek for write";
+		case FatfsCreateErrorLfnWrite:
+			return "long-name entry write";
+		case FatfsCreateErrorSfnLocation:
+			return "short-name location";
+		case FatfsCreateErrorSfnWrite:
+			return "short-name entry write";
+		case FatfsCreateErrorTerminatorWrite:
+			return "directory terminator write";
+		default:
+			return "unknown";
+	}
+}
 
 
 static uint16_t fatfsPrvGetLE16(const void *ptr)
@@ -1589,9 +1648,10 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 	struct FatDirEntry curEntry;
 	
 	//process the name and bail out early if issues exist
+	fatfsClearLastCreateError();
 	numEntriesNeeded = fatfsPrvNameCalculate(newEntry, name);
 	if (!numEntriesNeeded)
-		return false;
+		return fatfsPrvCreateFail(FatfsCreateErrorNameInvalid);
 	
 	if (VERBOSE)
 		pr("fatfsPrvDirEntryCreate: %u entries needed\n", numEntriesNeeded);
@@ -1602,7 +1662,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 
 	//first pass: find space, check for long name perfect match, check for SFN conflict
 	if (!fatfsDirRewind(dir))
-		return false;
+		return fatfsPrvCreateFail(FatfsCreateErrorDirRewind);
 	while (fatfsPrvDirEntryRawRead(dirAsFile, &curEntry, NULL, NULL)) {
 		
 		bool curEntryIsFree;
@@ -1613,7 +1673,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		
 		//LFN match means we're done
 		if (fatfsPrvLfnDidMatch(&lfn))
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorAlreadyExists);
 #endif
 		
 		if (curEntry.attrs & FATFS_ATTR_VOL_LBL)				//skip volume labels and LFN from further code below
@@ -1646,6 +1706,9 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!lookingForSpace && sfnMatchSeen)
 			break;
 	}
+
+	if (!fatfsPrvIsEOC(dirAsFile) && (lookingForSpace || !sfnMatchSeen))
+		return fatfsPrvCreateFail(FatfsCreateErrorDirScan);
 	
 	endPos = dirAsFile->curPos;		//fatfsPrvSfnIterateForNewDirEntry() may move the pointer, but code below expects to find it at the end
 	
@@ -1655,7 +1718,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 	if (sfnMatchSeen) {
 		
 		if (!fatfsPrvSfnIterateForNewDirEntry(dir, newEntry))
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorSfnIterate);
 	}
 	
 	if (lookingForSpace) {
@@ -1668,7 +1731,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!fatfsPrvSomethingSeek(dirAsFile, endPos)) {
 			if (VERBOSE)
 				pr("seek 0 error\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirSeekEnd);
 		}
 		
 		//we get here if we failed to find enough entries, numEntriesFoundSoFar tells us how many usable
@@ -1677,7 +1740,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		//the directory does not have many free entries in the end. We should also remember that the root
 		//directory in FAT16 does not extend, so if we get there in that case, we fail.
 		if (fatfsPrvIsFat12_16rootDir(dirAsFile))
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirRootFull);
 	
 		//for all other chases, we MUST be at end. verify. Keep in mind that no directory may ever exist
 		//without a cluster chain. At least one cluster is required. All non-root dirs have a "." and
@@ -1687,7 +1750,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!dirAsFile->atEnd || !dirAsFile->curClus) {
 			if (VERBOSE)
 				pr("consistency issue\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirState);
 		}
 	
 		//extend the directory
@@ -1697,7 +1760,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		numNewClusters = extraClustersNeeded;
 		firstNewCluster = fatfsPrvChainNew(dirAsFile->vol, dirAsFile->curClus, &numNewClusters, false);
 		if (!firstNewCluster)
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirAlloc);
 		
 		if (VERBOSE)
 			pr("allocated a new chain of %u clusters starting at %u\n", numNewClusters, firstNewCluster);
@@ -1706,14 +1769,14 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (numEntriesFoundSoFar && !fatfsPrvSomethingSeek(dirAsFile, firstEntryPos)) {
 			if (VERBOSE)
 				pr("seek 1 error\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirSeekPartialFree);
 		}
 
 		//link the new chain into our existing chain and update dir's state as no longer at end
 		if (!fatfsPrvSetNextClus(dirAsFile->vol, dirAsFile->curClus, firstNewCluster)) {
 			if (VERBOSE)
 				pr("cannot set new cluster for dir\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorDirLink);
 		}
 		
 		//if we're at end, adjust the structure of the file to point properly to the next cluster
@@ -1737,7 +1800,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 	if (!fatfsPrvSomethingSeek(dirAsFile, firstEntryPos)) {
 		if (VERBOSE)
 			pr("seek error\n");
-		return false;
+		return fatfsPrvCreateFail(FatfsCreateErrorDirSeekWrite);
 	}
 	
 	if (VERBOSE)
@@ -1749,7 +1812,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!fatfsPrvWriteLfnEntries(dirAsFile, newEntry, name, numEntriesNeeded - 1)) {
 			if (VERBOSE)
 				pr("lfn write err\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorLfnWrite);
 		}
 		
 	#endif
@@ -1765,7 +1828,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!fatfsPrvCurPosToSecAndOfst(dirAsFile, dirEntSecP, &sfnByteOfstInSec)) {
 			if (VERBOSE)
 				pr("get loc err\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorSfnLocation);
 		}
 		
 		if (dirEntIdxInSecP)
@@ -1776,7 +1839,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 	if (!fatfsSomethingWrite(dirAsFile, newEntry, sizeof(struct FatDirEntry), &bytesWritten) || bytesWritten != sizeof(struct FatDirEntry)) {
 		if (VERBOSE)
 			pr("sfn write err\n");
-		return false;
+		return fatfsPrvCreateFail(FatfsCreateErrorSfnWrite);
 	}
 	
 	if (VERBOSE)
@@ -1789,7 +1852,7 @@ static bool fatfsPrvDirEntryCreate(struct FatDirEntry *newEntry, struct FatfsDir
 		if (!fatfsSomethingWrite(dirAsFile, &curEntry, sizeof(struct FatDirEntry), &bytesWritten) || bytesWritten != sizeof(struct FatDirEntry)) {
 			if (VERBOSE)
 				pr("sfn write error\n");
-			return false;
+			return fatfsPrvCreateFail(FatfsCreateErrorTerminatorWrite);
 		}
 	}
 	

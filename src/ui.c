@@ -2723,11 +2723,27 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
-	{
-		if (!uiFlushCurrentSaveToCard(false))
-			uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
+static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
+{
+	struct GameSelection selection;
+	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char msg[UI_PICK_FILE_NAME_BUF_SZ + 32];
+
+	pr("Savegame export: explicit pause-menu save requested\n");
+	if (!uiFlushCurrentSaveToCard(true)) {
+		uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
+		return;
 	}
+
+	if (!uiGetGameSelection(&selection)) {
+		uiAlert(cnv, "Save written to /SAVE", DialogTypeOk);
+		return;
+	}
+
+	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
+	snprintf(msg, sizeof(msg), "Save written to /SAVE/%s", saveName);
+	uiAlert(cnv, msg, DialogTypeOk);
+}
 
 	static bool uiPrvHaveGamePath(void)
 	{
@@ -6218,13 +6234,16 @@ enum UiGameAction uiGameMenu(void)
 	enum {
 		GameMenuOptionRun,
 		GameMenuOptionSelect,
+		GameMenuOptionSaveToSd,
 		GameMenuOptionSettings,
 		GameMenuOptionSwitch,
 	};
-	uint_fast8_t optionIds[4], numOptions = 0, selOption, i;
-	const char *labels[4];
+	uint_fast8_t optionIds[5], numOptions = 0, selOption, i;
+	const char *labels[5];
 	char name[ROM_NAME_LEN + 1];
 	char title[UI_GAME_TITLE_BUF_SZ];
+	struct GameSelection selection;
+	bool hasSaveRam = uiGetGameSelection(&selection) && selection.saveRamSize > 0;
 	uint32_t ramSz = 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
@@ -6242,6 +6261,10 @@ enum UiGameAction uiGameMenu(void)
 #ifndef NO_SD_CARD
 	labels[numOptions] = validRom ? "Select game" : "Load game";
 	optionIds[numOptions++] = GameMenuOptionSelect;
+	if (validRom && hasSaveRam) {
+		labels[numOptions] = "Save to SD";
+		optionIds[numOptions++] = GameMenuOptionSaveToSd;
+	}
 #endif
 	labels[numOptions] = "Settings";
 	optionIds[numOptions++] = GameMenuOptionSettings;
@@ -6292,6 +6315,11 @@ enum UiGameAction uiGameMenu(void)
 		else
 			mLastGameMenuAction = UiGameActionSwitchTool;
 		toolWorkspaceEnd();
+		return mLastGameMenuAction;
+	}
+	if (optionIds[selOption] == GameMenuOptionSaveToSd) {
+		uiPrvExportCurrentSavestate(cnv);
+		mLastGameMenuAction = UiGameActionResume;
 		return mLastGameMenuAction;
 	}
 #endif

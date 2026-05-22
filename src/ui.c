@@ -2598,21 +2598,27 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz)
-	{
-		struct FatfsDir *saveDir = fatfsDirOpen(vol, "/SAVE");
-		struct FatfsFil *fil;
-		struct GameSelection selection;
-		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
-		bool ret = true;
+static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz)
+{
+	struct FatfsDir *saveDir = fatfsDirOpen(vol, "/SAVE");
+	struct FatfsFil *fil;
+	struct GameSelection selection;
+	union SdFlags flags;
+	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+	bool ret = true;
 	
 		if (!savegameExportSz)
 			return true;
-		if (!uiGetGameSelection(&selection)) {
-			pr("Savegame export: no selected game\n");
-			return false;
-		}
-		uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
+	if (!uiGetGameSelection(&selection)) {
+		pr("Savegame export: no selected game\n");
+		return false;
+	}
+	flags.value = sdGetFlags();
+	if (flags.RO) {
+		pr("Savegame export: SD card is read-only/write-protected\n");
+		return false;
+	}
+	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
 
 		if (!saveDir) {		//we might have ti make the savedir
 			
@@ -2672,7 +2678,7 @@ bool uiFlushCurrentSaveToCard(bool force)
 {
 	struct FatfsVol *vol;
 	struct GameSelection selection;
-	bool ret;
+	bool writeOk, cleanupOk = true;
 
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
 		return true;
@@ -2684,22 +2690,25 @@ bool uiFlushCurrentSaveToCard(bool force)
 		return false;
 	}
 
-	ret = uiPrvFlushCurrentSaveToMountedCard(vol, force);
+	writeOk = uiPrvFlushCurrentSaveToMountedCard(vol, force);
 	if (!uiPrvCardPreUnmount()) {
 		pr("Savegame export: SD stream close failed\n");
-		ret = false;
+		cleanupOk = false;
 	}
 	if (!fatfsUnmount(vol)) {
-			pr("Savegame export: FAT unmount failed\n");
-			ret = false;
-		}
+		pr("Savegame export: FAT unmount failed\n");
+		cleanupOk = false;
+	}
 
-	if (!ret && !force) {
+	if (!writeOk && !force) {
 		pr("Savegame export: retrying with forced SD reinit\n");
 		return uiFlushCurrentSaveToCard(true);
 	}
 
-	return ret;
+	if (writeOk && !cleanupOk)
+		pr("Savegame export: write succeeded but cleanup reported errors\n");
+
+	return writeOk;
 }
 	
 	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
@@ -2730,10 +2739,16 @@ bool uiFlushCurrentSaveToCard(bool force)
 static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
 {
 	struct GameSelection selection;
+	union SdFlags flags;
 	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 	char msg[UI_PICK_FILE_NAME_BUF_SZ + 32];
 
 	pr("Savegame export: explicit pause-menu save requested\n");
+	flags.value = sdGetFlags();
+	if (flags.RO) {
+		uiAlert(cnv, "SD card is read-only/write-protected. Cannot write save.", DialogTypeOk);
+		return;
+	}
 	if (!uiFlushCurrentSaveToCard(true)) {
 		uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
 		return;

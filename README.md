@@ -11,7 +11,7 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
-- **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save before switching games when save RAM is present.
+- **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save as `/SAVE/<rom base>.sav` from the emulator menu, exit, and switch-game paths.
 - **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for `/IR/ac.ir`, `/IR/audio.ir`, `/IR/projector.ir`, and `/IR/tv.ir`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
 - **USB Storage** - Exposes the full microSD card to a host computer as a standalone USB Mass Storage device. Eject or unmount from the host before leaving the tool; other SD-card tools are unavailable while storage mode is active.
@@ -47,11 +47,13 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | Path | Used by |
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
-| `/SAVE` | Imported/exported save RAM files for the selected game. |
+| `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
 | `/IR` | Universal IR files, including `ac.ir`, `audio.ir`, `projector.ir`, `tv.ir`, and optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
 | `/IMAGES` | Image viewer files. Run `/IMAGES/image_converter.py` on a PC to convert still images into badge-native `.dci` files and animated GIF/APNG/WebP files into `.dca` animations. |
+
+In-game save confirmations update the emulator's battery-backed RAM first. When the emulator menu opens or gameplay exits, the firmware copies that RAM to the QSPI save cache. SD-card export happens from safe UI paths such as selecting another game or leaving the emulator, so gameplay is not interrupted by FAT writes. Older save files named exactly like the ROM, such as `Pokemon.gbc` or `Game.nes`, are still imported as a fallback and will be re-exported with the `.sav` name.
 
 Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extract `SD.zip` directly to the SD card root so `IR/`, `BADUSB/`, `MUSIC/`, `ROMS/`, and `IMAGES/` land alongside any existing folders. The bundle is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md` inside the zip.
 

@@ -2334,27 +2334,22 @@ bool uiSaveSavestate(void)
 
 	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
 	{
-		const char *dot = NULL, *src;
+		const char *base, *dot = NULL, *src;
 		uint32_t pos = 0;
 
+		(void)runtime;
 		if (!dstLen)
 			return;
 
-		for (src = romName; *src; src++) {
+		base = uiPrvBaseName(romName);
+		for (src = base; *src; src++) {
 			if (*src == '.')
 				dot = src;
 		}
+		if (!dot)
+			dot = src;
 
-		if (runtime != GameRuntimeNes || !dot) {
-			while (pos + 1 < dstLen && romName[pos]) {
-				dst[pos] = romName[pos];
-				pos++;
-			}
-			dst[pos] = 0;
-			return;
-		}
-
-		for (src = romName; src != dot && pos + 1 < dstLen; src++)
+		for (src = base; src != dot && pos + 5 < dstLen; src++)
 			dst[pos++] = *src;
 		if (pos + 4 < dstLen) {
 			dst[pos++] = '.';
@@ -2365,18 +2360,69 @@ bool uiSaveSavestate(void)
 		dst[pos] = 0;
 	}
 
+	static struct FatfsFil *uiPrvOpenSaveFileIfSizeMatches(struct FatfsDir *dir, const char *saveName, uint32_t expectedSize, bool *badSizeP)
+	{
+		struct FatfsFil *fil = fatfsFileOpenAt(dir, saveName, OPEN_MODE_READ);
+
+		if (!fil)
+			return NULL;
+		if (fatfsFileGetSize(fil) == expectedSize)
+			return fil;
+
+		pr("Savegame file size does not match the expected size. It will not be loaded. Expected %u, file is %u\n", expectedSize, fatfsFileGetSize(fil));
+		if (badSizeP)
+			*badSizeP = true;
+		fatfsFileClose(fil);
+		return NULL;
+	}
+
+	static struct FatfsFil *uiPrvOpenSaveFile(struct FatfsVol *vol, const char *romName, enum GameRuntime runtime, uint32_t expectedSize, bool *badSizeP)
+	{
+		struct FatfsDir *dir;
+		struct FatfsFil *fil = NULL;
+		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+
+		if (!expectedSize)
+			return NULL;
+
+		dir = fatfsDirOpen(vol, "/SAVE");
+		if (!dir)
+			return NULL;
+
+		uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
+		fil = uiPrvOpenSaveFileIfSizeMatches(dir, saveName, expectedSize, badSizeP);
+		if (!fil && strcmp(saveName, romName))
+			fil = uiPrvOpenSaveFileIfSizeMatches(dir, romName, expectedSize, badSizeP);
+
+		fatfsDirClose(dir);
+		return fil;
+	}
+
+	static bool uiPrvExportSavestate(struct FatfsVol *vol, uint32_t savegameExportSz);
+
+	static bool uiPrvSelectionMatchesCachedGame(const char *romName, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)
+	{
+		struct GameSelection selection;
+
+		if (!uiGetGameSelection(&selection))
+			return false;
+		return selection.runtime == runtime &&
+			selection.romSize == romSize &&
+			selection.saveRamSize == saveRamSize &&
+			!strcmp((const char*)QSPI_FILENAME_START, romName);
+	}
+
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
 		char internalName[ROM_NAME_LEN + 1];
-		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		struct FatfsFil *filR, *filS = NULL;
 		enum RomColorSupport colorSupport;
 		enum GameRuntime runtime = uiPrvRuntimeForName(romName);
 		struct NesRomInfo nesInfo;
 		struct FatfsDir *dir;
 		struct CartHeader hdr;
-		bool ret = false;
+		bool ret = false, badSaveSize = false, preserveCachedSave = false;
 		
 		static const char colorTypes[][10] = {
 			[RomNoColor] = "B&W",
@@ -2397,15 +2443,6 @@ bool uiSaveSavestate(void)
 		if (!filR) {
 			uiAlert(cnv, "Cannot open ROM file", DialogTypeOk);
 			goto out;
-		}
-		
-		dir = fatfsDirOpen(vol, "/SAVE");
-		if (dir) {
-			uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
-			filS = fatfsFileOpenAt(dir, saveName, OPEN_MODE_READ);
-			if (!filS && runtime == GameRuntimeNes)
-				filS = fatfsFileOpenAt(dir, romName, OPEN_MODE_READ);
-			fatfsDirClose(dir);
 		}
 		
 		fileSz = fatfsFileGetSize(filR);
@@ -2458,14 +2495,11 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "ROM file size does not match the expected size", DialogTypeOk);
 			goto out_close_file;
 		}
-		
-		if (filS && fatfsFileGetSize(filS) != ramSzExpected) {
-			
-			pr("Savegame file size does not match the expected size. It will not be loaded. Expected %u, file is %u\n", ramSzExpected, fatfsFileGetSize(filS));
+
+		filS = uiPrvOpenSaveFile(vol, romName, runtime, ramSzExpected, &badSaveSize);
+		if (!filS && badSaveSize)
 			uiAlert(cnv, "Savegame file size does not match the expected size. It will not be loaded.", DialogTypeOk);
-			fatfsFileClose(filS);
-			filS = NULL;
-		}
+		preserveCachedSave = !filS && ramSzExpected && uiPrvSelectionMatchesCachedGame(romName, runtime, romSzExpected, ramSzExpected);
 	
 		if (!fatfsFileSeek(filR, 0)) {
 			
@@ -2544,9 +2578,12 @@ bool uiSaveSavestate(void)
 			//ROM is loaded
 			(void)uiPrvSetGamePath(romName, runtime, romSzExpected, ramSzExpected);
 			
-			if (filS)
+			if (filS) {
 				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE", QSPI_RAM_SIZE_MAX) && ret;
-			else
+				fatfsFileClose(filS);
+				filS = NULL;
+			}
+			else if (!preserveCachedSave)
 				ret = flashWrite(QSPI_RAM_COPY_START, QSPI_RAM_SIZE_MAX, NULL, 0) && ret;
 			
 			uiPrvReset(cnv, false);
@@ -2565,42 +2602,99 @@ bool uiSaveSavestate(void)
 	{
 		struct FatfsDir *saveDir = fatfsDirOpen(vol, "/SAVE");
 		struct FatfsFil *fil;
+		struct GameSelection selection;
+		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ret = true;
 	
+		if (!savegameExportSz)
+			return true;
+		if (!uiGetGameSelection(&selection)) {
+			pr("Savegame export: no selected game\n");
+			return false;
+		}
+		uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
+
 		if (!saveDir) {		//we might have ti make the savedir
 			
 			struct FatFileLocator loc;
 			
-			if (!fatfsDirCreate(vol, "/SAVE", &loc) || !(saveDir = fatfsDirOpenWithLocator(vol, &loc)))
+			if (!fatfsDirCreate(vol, "/SAVE", &loc) || !(saveDir = fatfsDirOpenWithLocator(vol, &loc))) {
+				pr("Savegame export: cannot create/open /SAVE\n");
 				return false;
+			}
 		}
-		
-		{
-			struct GameSelection selection;
-			char saveName[UI_PICK_FILE_NAME_BUF_SZ];
-			const char *fileName = (const char*)QSPI_FILENAME_START;
 
-			if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
-				uiPrvSaveFileName((const char*)QSPI_FILENAME_START, GameRuntimeNes, saveName, sizeof(saveName));
-				fileName = saveName;
+		fil = fatfsFileOpenAt(saveDir, saveName, OPEN_MODE_WRITE | OPEN_MODE_CREATE);
+		if (fil) {
+			uint32_t bytesWritten = 0;
+
+			if (!fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, savegameExportSz, &bytesWritten) || bytesWritten != savegameExportSz) {
+				pr("Savegame export: write failed for /SAVE/%s (%u/%u)\n", saveName, bytesWritten, savegameExportSz);
+				ret = false;
+			}
+			else if (!fatfsFileTruncate(fil, savegameExportSz)) {
+				pr("Savegame export: truncate failed for /SAVE/%s to %u bytes\n", saveName, savegameExportSz);
+				ret = false;
 			}
 
-			fil = fatfsFileOpenAt(saveDir, fileName, OPEN_MODE_WRITE | OPEN_MODE_CREATE);
+			if (!fatfsFileClose(fil)) {
+				pr("Savegame export: close failed for /SAVE/%s\n", saveName);
+				ret = false;
+			}
 		}
-		if (fil) {
-			
-			uint32_t bytesWritten;
-					
-			if (fatfsFileGetSize(fil) > savegameExportSz)
-				ret = ret && fatfsFileTruncate(fil, savegameExportSz);
-					
-			ret = ret && fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, savegameExportSz, &bytesWritten) && bytesWritten == savegameExportSz;
-			
-			ret = fatfsFileClose(fil) && ret;
+		else {
+			pr("Savegame export: cannot open /SAVE/%s for writing\n", saveName);
+			ret = false;
 		}
 		
-		fatfsDirClose(saveDir);
+		if (!fatfsDirClose(saveDir)) {
+			pr("Savegame export: close failed for /SAVE\n");
+			ret = false;
+		}
 		
+		return ret;
+	}
+
+	static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
+	{
+		struct GameSelection selection;
+
+		(void)force;
+		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+			return true;
+		if (!uiSaveSavestate()) {
+			pr("Savegame export: failed to copy current save RAM to flash\n");
+			return false;
+		}
+		return uiPrvExportSavestate(vol, selection.saveRamSize);
+	}
+
+	bool uiFlushCurrentSaveToCard(bool force)
+	{
+		struct FatfsVol *vol;
+		struct GameSelection selection;
+		bool ret;
+
+		(void)force;
+		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+			return true;
+
+		vol = uiPrvMountCard(NULL, true);
+		if (!vol) {
+			pr("Savegame export: cannot mount SD card\n");
+			return false;
+		}
+
+		ret = uiPrvFlushCurrentSaveToMountedCard(vol, true);
+		if (!uiPrvCardPreUnmount()) {
+			pr("Savegame export: SD stream close failed\n");
+			ret = false;
+		}
+		if (!fatfsUnmount(vol)) {
+			pr("Savegame export: FAT unmount failed\n");
+			ret = false;
+		}
+
 		return ret;
 	}
 	
@@ -2617,7 +2711,7 @@ bool uiSaveSavestate(void)
 			return false;
 		
 		//rom selection will corrupt our cart RAM, save it
-		if (savegameExportSz && !uiPrvExportSavestate(vol, savegameExportSz))
+		if (savegameExportSz && !uiPrvFlushCurrentSaveToMountedCard(vol, true))
 			uiAlert(cnv, "Failed to write current savegame out to card. If you load another game, it will be lost", DialogTypeOk);
 
 		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
@@ -2627,6 +2721,12 @@ bool uiSaveSavestate(void)
 		(void)uiPrvCardPreUnmount();
 		fatfsUnmount(vol);
 		return ret;
+	}
+
+	static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
+	{
+		if (!uiFlushCurrentSaveToCard(false))
+			uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
 	}
 
 	static bool uiPrvHaveGamePath(void)
@@ -5007,6 +5107,14 @@ reload_dir:
 
 #endif //NO_SD_CARD
 
+#ifdef NO_SD_CARD
+bool uiFlushCurrentSaveToCard(bool force)
+{
+	(void)force;
+	return uiSaveSavestate();
+}
+#endif
+
 #define HID_TEST_ENUM_WAIT_MS	5000
 #define HID_TEST_KEY_DELAY_MS	12
 
@@ -6014,6 +6122,9 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 		uiPrvExitTool(UiToolGame);
 
 	#ifndef NO_SD_CARD
+		if (!mDeferredGameSelect && mLastGameMenuAction == UiGameActionSwitchTool)
+			uiPrvExportCurrentSavestate(cnv);
+
 		if (mDeferredGameSelect && mLastGameMenuAction == UiGameActionSelectGame) {
 			uint32_t ramSz = 0;
 			bool validRom = uiPrvHaveValidRom(NULL, NULL, &ramSz);
@@ -6121,7 +6232,7 @@ enum UiGameAction uiGameMenu(void)
 	uiPrvSetHeaderTitle("Emulation");
 	uiPrvReset(cnv, false);
 
-	if (!uiSaveSavestate())
+	if (validRom && !uiSaveSavestate())
 		uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 
 	if (validRom) {

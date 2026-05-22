@@ -465,18 +465,19 @@ static bool mbc3prvLatch(uint16_t fullAddr, uint8_t data)
 	
 	if (!mMbcPrivate[MBC3_DATA_LATCH_VAL] && data) {
 		
-		uint32_t curTime = gbExtRtcGet();
+		uint32_t curTime = gbExtRtcGet(), rtcTime = curTime, days;
 
 		//we will only update our internal regs if HALT is clear and value has changed since we last updated them. This is to match MBC3 behaviour
 		if (!(mMbcPrivate[MBC3_DATA_DAYS_HI] & 0x40) && curTime != mMbcPrivate2) {
 
 			mMbcPrivate2 = curTime;
 
-			mMbcPrivate[MBC3_DATA_SECS] = curTime % 60; curTime /= 60;
-			mMbcPrivate[MBC3_DATA_MINS] = curTime % 60; curTime /= 60;
-			mMbcPrivate[MBC3_DATA_HOURS] = curTime % 24; curTime /= 24;
-			mMbcPrivate[MBC3_DATA_DAYS_LO] = curTime % 256; curTime /= 256;
-			mMbcPrivate[MBC3_DATA_DAYS_HI] = (mMbcPrivate[MBC3_DATA_DAYS_HI] & 0x40) | (curTime & 1) | ((curTime >> 1) ? 0x80 : 0x00);		//halt flag preserved
+			mMbcPrivate[MBC3_DATA_SECS] = rtcTime % 60; rtcTime /= 60;
+			mMbcPrivate[MBC3_DATA_MINS] = rtcTime % 60; rtcTime /= 60;
+			mMbcPrivate[MBC3_DATA_HOURS] = rtcTime % 24; rtcTime /= 24;
+			days = rtcTime % 512;
+			mMbcPrivate[MBC3_DATA_DAYS_LO] = days;
+			mMbcPrivate[MBC3_DATA_DAYS_HI] = (mMbcPrivate[MBC3_DATA_DAYS_HI] & 0xc0) | ((days >> 8) & 1);
 		}
 	}
 	
@@ -659,8 +660,13 @@ static uint8_t mbc7prvMicrowireDeselected(uint8_t curMiso)
 
 static void mbc7prvMicrowireDataWrite(uint32_t addr, uint_fast16_t data)
 {
-	mRam[addr * 2 + 0] = data >> 8;
-	mRam[addr * 2 + 1] = data;
+	uint8_t hi = data >> 8, lo = data;
+	uint8_t *dst = mRam + addr * 2;
+
+	if (dst[0] != hi || dst[1] != lo) {
+		dst[0] = hi;
+		dst[1] = lo;
+	}
 }
 
 static uint_fast16_t mbc7prvMicrowireDataRead(uint32_t addr)

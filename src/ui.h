@@ -54,6 +54,7 @@ enum UiGameAction uiGameMenu(void);
 
 
 bool uiSaveSavestate(void);
+bool uiFlushCurrentSaveToCard(bool force);
 bool uiGetGameSelection(struct GameSelection *selectionP);
 
 //lower level, externally provided. debounced Game Boy key state for menu flows

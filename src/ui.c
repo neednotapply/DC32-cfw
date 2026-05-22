@@ -2663,11 +2663,10 @@ static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
 		return true;
 	if (!uiSaveSavestate()) {
-		pr("Savegame export: failed to copy current save RAM to flash\n");
-		return false;
-		}
-		return uiPrvExportSavestate(vol, selection.saveRamSize);
+		pr("Savegame export: failed to copy current save RAM to flash; exporting cached flash copy anyway\n");
 	}
+	return uiPrvExportSavestate(vol, selection.saveRamSize);
+}
 
 bool uiFlushCurrentSaveToCard(bool force)
 {
@@ -2686,17 +2685,22 @@ bool uiFlushCurrentSaveToCard(bool force)
 	}
 
 	ret = uiPrvFlushCurrentSaveToMountedCard(vol, force);
-		if (!uiPrvCardPreUnmount()) {
-			pr("Savegame export: SD stream close failed\n");
-			ret = false;
-		}
-		if (!fatfsUnmount(vol)) {
+	if (!uiPrvCardPreUnmount()) {
+		pr("Savegame export: SD stream close failed\n");
+		ret = false;
+	}
+	if (!fatfsUnmount(vol)) {
 			pr("Savegame export: FAT unmount failed\n");
 			ret = false;
 		}
 
-		return ret;
+	if (!ret && !force) {
+		pr("Savegame export: retrying with forced SD reinit\n");
+		return uiFlushCurrentSaveToCard(true);
 	}
+
+	return ret;
+}
 	
 	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
 	{

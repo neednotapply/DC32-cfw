@@ -383,6 +383,7 @@ int InfoNES_LoadFrame(void)
 {
 	dispPrvFrameCtrWait();
 	nesPortPresentFrame();
+	SRAMwritten = false;
 	return 0;
 }
 

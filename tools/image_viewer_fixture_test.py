@@ -185,6 +185,7 @@ def main():
     expect("image sequence reads rotation setting", "settingsGet(&settings)" in ui_src and "viewerCanvas.flipped = settings.rotation" in ui_src)
     expect("image sequence passes viewer canvas", "imageViewerRun(&viewerCanvas" in ui_src)
     expect("image adjacent navigation uses picker sort order", "uiPrvFindAdjacentImage" in ui_src and "strsCaselesslyCompareUtf(fname, curName" in ui_src and "candidateName" in ui_src)
+    expect("caseless UTF compare stops at nul", "if (!ac && !bc)" in ui_src and "return 0;" in ui_src)
     expect("image menu waits for opener release", "uiPrvWaitKeysReleased();" in ui_src and "action = uiPrvImageViewerMenu(cnv)" in ui_src)
     expect("image picker text names only DCI and DCA", "No .dci or .dca files found in /IMAGES" in ui_src)
     expect("badge GIF sidecars removed from picker", ".badge.gif" not in ui_src)

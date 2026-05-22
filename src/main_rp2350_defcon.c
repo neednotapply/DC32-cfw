@@ -1355,8 +1355,6 @@ uint32_t gbExtRtcGet(void)
 void gbExtRtcSet(uint32_t time)
 {
         mRtcTickOffset = getTime() - (uint64_t)time * TICKS_PER_SECOND;
-
-        rtcPrvWriteU32(time);
 }
 
 static void gbExtAccelReadCbk(void *userData, const struct I2Creq *req, bool likelySuccess)

@@ -484,8 +484,11 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     break;
 
   case 0x6000: /* SRAM */
-    SRAMBANK[wAddr & 0x1fff] = byData;
-    SRAMwritten = true;
+    if (SRAMBANK[wAddr & 0x1fff] != byData)
+    {
+      SRAMBANK[wAddr & 0x1fff] = byData;
+      SRAMwritten = true;
+    }
 
     /* Let mapper handle SRAM writes (e.g. bankswitched WRAM) */
     MapperSram(wAddr, byData);

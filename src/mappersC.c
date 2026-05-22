@@ -27,7 +27,6 @@ void gbExtWrite(uint16_t addr, uint8_t val)
 	uint8_t *base = mWritePtrs[addr / MEMMAP_MAP_CHUNK_SZ];
 	
 	if (base) {
-		
 		base[addr] = val;
 		return;
 	}

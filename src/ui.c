@@ -2655,48 +2655,52 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
-	{
-		struct GameSelection selection;
+static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
+{
+	struct GameSelection selection;
 
-		(void)force;
-		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-			return true;
-		if (!uiSaveSavestate()) {
-			pr("Savegame export: failed to copy current save RAM to flash\n");
-			return false;
-		}
-		return uiPrvExportSavestate(vol, selection.saveRamSize);
+	(void)force;
+	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+		return true;
+	if (!uiSaveSavestate()) {
+		pr("Savegame export: failed to copy current save RAM to flash; exporting cached flash copy anyway\n");
+	}
+	return uiPrvExportSavestate(vol, selection.saveRamSize);
+}
+
+bool uiFlushCurrentSaveToCard(bool force)
+{
+	struct FatfsVol *vol;
+	struct GameSelection selection;
+	bool ret;
+
+	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+		return true;
+
+	pr("Savegame export: flushing to SD (force=%u)\n", force ? 1u : 0u);
+	vol = uiPrvMountCardEx(NULL, true, force);
+	if (!vol) {
+		pr("Savegame export: cannot mount SD card\n");
+		return false;
 	}
 
-	bool uiFlushCurrentSaveToCard(bool force)
-	{
-		struct FatfsVol *vol;
-		struct GameSelection selection;
-		bool ret;
-
-		(void)force;
-		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-			return true;
-
-		vol = uiPrvMountCard(NULL, true);
-		if (!vol) {
-			pr("Savegame export: cannot mount SD card\n");
-			return false;
-		}
-
-		ret = uiPrvFlushCurrentSaveToMountedCard(vol, true);
-		if (!uiPrvCardPreUnmount()) {
-			pr("Savegame export: SD stream close failed\n");
-			ret = false;
-		}
-		if (!fatfsUnmount(vol)) {
+	ret = uiPrvFlushCurrentSaveToMountedCard(vol, force);
+	if (!uiPrvCardPreUnmount()) {
+		pr("Savegame export: SD stream close failed\n");
+		ret = false;
+	}
+	if (!fatfsUnmount(vol)) {
 			pr("Savegame export: FAT unmount failed\n");
 			ret = false;
 		}
 
-		return ret;
+	if (!ret && !force) {
+		pr("Savegame export: retrying with forced SD reinit\n");
+		return uiFlushCurrentSaveToCard(true);
 	}
+
+	return ret;
+}
 	
 	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
 	{
@@ -2723,11 +2727,27 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
-	{
-		if (!uiFlushCurrentSaveToCard(false))
-			uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
+static void uiPrvExportCurrentSavestate(struct Canvas *cnv)
+{
+	struct GameSelection selection;
+	char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char msg[UI_PICK_FILE_NAME_BUF_SZ + 32];
+
+	pr("Savegame export: explicit pause-menu save requested\n");
+	if (!uiFlushCurrentSaveToCard(true)) {
+		uiAlert(cnv, "Failed to write current savegame out to card. It remains cached in flash.", DialogTypeOk);
+		return;
 	}
+
+	if (!uiGetGameSelection(&selection)) {
+		uiAlert(cnv, "Save written to /SAVE", DialogTypeOk);
+		return;
+	}
+
+	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, saveName, sizeof(saveName));
+	snprintf(msg, sizeof(msg), "Save written to /SAVE/%s", saveName);
+	uiAlert(cnv, msg, DialogTypeOk);
+}
 
 	static bool uiPrvHaveGamePath(void)
 	{
@@ -6218,13 +6238,16 @@ enum UiGameAction uiGameMenu(void)
 	enum {
 		GameMenuOptionRun,
 		GameMenuOptionSelect,
+		GameMenuOptionSaveToSd,
 		GameMenuOptionSettings,
 		GameMenuOptionSwitch,
 	};
-	uint_fast8_t optionIds[4], numOptions = 0, selOption, i;
-	const char *labels[4];
+	uint_fast8_t optionIds[5], numOptions = 0, selOption, i;
+	const char *labels[5];
 	char name[ROM_NAME_LEN + 1];
 	char title[UI_GAME_TITLE_BUF_SZ];
+	struct GameSelection selection;
+	bool hasSaveRam = uiGetGameSelection(&selection) && selection.saveRamSize > 0;
 	uint32_t ramSz = 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
@@ -6242,6 +6265,10 @@ enum UiGameAction uiGameMenu(void)
 #ifndef NO_SD_CARD
 	labels[numOptions] = validRom ? "Select game" : "Load game";
 	optionIds[numOptions++] = GameMenuOptionSelect;
+	if (validRom && hasSaveRam) {
+		labels[numOptions] = "Save to SD";
+		optionIds[numOptions++] = GameMenuOptionSaveToSd;
+	}
 #endif
 	labels[numOptions] = "Settings";
 	optionIds[numOptions++] = GameMenuOptionSettings;
@@ -6292,6 +6319,11 @@ enum UiGameAction uiGameMenu(void)
 		else
 			mLastGameMenuAction = UiGameActionSwitchTool;
 		toolWorkspaceEnd();
+		return mLastGameMenuAction;
+	}
+	if (optionIds[selOption] == GameMenuOptionSaveToSd) {
+		uiPrvExportCurrentSavestate(cnv);
+		mLastGameMenuAction = UiGameActionResume;
 		return mLastGameMenuAction;
 	}
 #endif

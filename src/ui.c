@@ -2655,37 +2655,37 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
-	static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
-	{
-		struct GameSelection selection;
+static bool uiPrvFlushCurrentSaveToMountedCard(struct FatfsVol *vol, bool force)
+{
+	struct GameSelection selection;
 
-		(void)force;
-		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-			return true;
-		if (!uiSaveSavestate()) {
-			pr("Savegame export: failed to copy current save RAM to flash\n");
-			return false;
+	(void)force;
+	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+		return true;
+	if (!uiSaveSavestate()) {
+		pr("Savegame export: failed to copy current save RAM to flash\n");
+		return false;
 		}
 		return uiPrvExportSavestate(vol, selection.saveRamSize);
 	}
 
-	bool uiFlushCurrentSaveToCard(bool force)
-	{
-		struct FatfsVol *vol;
-		struct GameSelection selection;
-		bool ret;
+bool uiFlushCurrentSaveToCard(bool force)
+{
+	struct FatfsVol *vol;
+	struct GameSelection selection;
+	bool ret;
 
-		(void)force;
-		if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-			return true;
+	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+		return true;
 
-		vol = uiPrvMountCard(NULL, true);
-		if (!vol) {
-			pr("Savegame export: cannot mount SD card\n");
-			return false;
-		}
+	pr("Savegame export: flushing to SD (force=%u)\n", force ? 1u : 0u);
+	vol = uiPrvMountCardEx(NULL, true, force);
+	if (!vol) {
+		pr("Savegame export: cannot mount SD card\n");
+		return false;
+	}
 
-		ret = uiPrvFlushCurrentSaveToMountedCard(vol, true);
+	ret = uiPrvFlushCurrentSaveToMountedCard(vol, force);
 		if (!uiPrvCardPreUnmount()) {
 			pr("Savegame export: SD stream close failed\n");
 			ret = false;

@@ -1306,6 +1306,151 @@ struct GameSelectionFlashMeta {
 	uint32_t reserved[4];
 };
 
+enum SaveNameKind {
+	SaveNameKindAuto = 0,
+	SaveNameKindClean = 1,
+	SaveNameKindFull = 2,
+	SaveNameKindFallback = 3,
+	SaveNameKindLegacy = 4,
+};
+
+struct CartRamOwner {
+	bool valid;
+	enum GameRuntime runtime;
+	uint32_t romSize;
+	uint32_t saveRamSize;
+	uint32_t gameHash;
+};
+
+static struct CartRamOwner mCartRamOwner;
+
+static uint32_t uiPrvHashBytes(const void *data, uint32_t size)
+{
+	const uint8_t *bytes = data;
+	uint32_t hash = 2166136261u;
+
+	while (size--) {
+		hash ^= *bytes++;
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static uint32_t uiPrvHashString(const char *str)
+{
+	uint32_t hash = 2166136261u;
+
+	while (*str) {
+		hash ^= (uint8_t)*str++;
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static const char *uiPrvRuntimeName(enum GameRuntime runtime)
+{
+	switch (runtime) {
+		case GameRuntimeGb:
+			return "GB";
+		case GameRuntimeNes:
+			return "NES";
+		case GameRuntimeNone:
+		default:
+			return "none";
+	}
+}
+
+static const char *uiPrvSaveNameKindName(enum SaveNameKind kind)
+{
+	switch (kind) {
+		case SaveNameKindClean:
+			return "clean";
+		case SaveNameKindFull:
+			return "full";
+		case SaveNameKindFallback:
+			return "fallback";
+		case SaveNameKindLegacy:
+			return "legacy";
+		case SaveNameKindAuto:
+		default:
+			return "auto";
+	}
+}
+
+static uint32_t uiPrvSaveFingerprint(const void *data, uint32_t size)
+{
+	return uiPrvHashBytes(data, size);
+}
+
+static bool uiPrvCartRamOwnerMatches(enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize, const char *romName)
+{
+	return mCartRamOwner.valid &&
+		mCartRamOwner.runtime == runtime &&
+		mCartRamOwner.romSize == romSize &&
+		mCartRamOwner.saveRamSize == saveRamSize &&
+		mCartRamOwner.gameHash == uiPrvHashString(romName);
+}
+
+static bool uiPrvCartRamOwnerMatchesSelection(const struct GameSelection *selection)
+{
+	return uiPrvCartRamOwnerMatches(selection->runtime, selection->romSize, selection->saveRamSize, (const char*)QSPI_FILENAME_START);
+}
+
+static void uiPrvCartRamOwnerClear(const char *reason)
+{
+	if (mCartRamOwner.valid)
+		pr("Save RAM owner: cleared (%s, runtime=%s rom=%lu ram=%lu hash=%08lx)\n",
+			reason ? reason : "unknown", uiPrvRuntimeName(mCartRamOwner.runtime),
+			(unsigned long)mCartRamOwner.romSize, (unsigned long)mCartRamOwner.saveRamSize,
+			(unsigned long)mCartRamOwner.gameHash);
+	memset(&mCartRamOwner, 0, sizeof(mCartRamOwner));
+}
+
+static void uiPrvCartRamOwnerSet(enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize, const char *romName, const char *reason)
+{
+	mCartRamOwner.valid = true;
+	mCartRamOwner.runtime = runtime;
+	mCartRamOwner.romSize = romSize;
+	mCartRamOwner.saveRamSize = saveRamSize;
+	mCartRamOwner.gameHash = uiPrvHashString(romName);
+	pr("Save RAM owner: set (%s, runtime=%s rom=%lu ram=%lu hash=%08lx)\n",
+		reason ? reason : "unknown", uiPrvRuntimeName(runtime), (unsigned long)romSize,
+		(unsigned long)saveRamSize, (unsigned long)mCartRamOwner.gameHash);
+}
+
+static bool uiPrvHydrateSaveRamFromFlash(enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize,
+	const char *romName, const char *reason, bool markOwner)
+{
+	uint32_t qspiHash, cartHash;
+
+	if (saveRamSize > QSPI_RAM_SIZE_MAX) {
+		pr("Savegame hydrate: refusing oversized save RAM (%lu bytes)\n", (unsigned long)saveRamSize);
+		uiPrvCartRamOwnerClear("hydrate oversized");
+		return false;
+	}
+
+	if (saveRamSize)
+		memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, saveRamSize);
+	if (saveRamSize < QSPI_RAM_SIZE_MAX)
+		memset(CART_RAM_ADDR_IN_RAM + saveRamSize, 0xff, QSPI_RAM_SIZE_MAX - saveRamSize);
+
+	qspiHash = uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, saveRamSize);
+	cartHash = uiPrvSaveFingerprint(CART_RAM_ADDR_IN_RAM, saveRamSize);
+	pr("Savegame hydrate: %s /%s (%lu bytes, qspi=%08lx cart=%08lx, rom=%s)\n",
+		reason ? reason : "load", uiPrvRuntimeName(runtime), (unsigned long)saveRamSize,
+		(unsigned long)qspiHash, (unsigned long)cartHash, romName ? romName : "");
+
+	if (saveRamSize && memcmp(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, saveRamSize)) {
+		pr("Savegame hydrate: cart RAM verification failed\n");
+		uiPrvCartRamOwnerClear("hydrate verify failed");
+		return false;
+	}
+
+	if (markOwner)
+		uiPrvCartRamOwnerSet(runtime, romSize, saveRamSize, romName, reason);
+	return true;
+}
+
 static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 {
 	if (uiPrvStrEndsWithNoCase(fname, ".nes"))
@@ -1579,6 +1724,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 			uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
 			return false;
 		}
+		uiPrvCartRamOwnerClear("file picker workspace");
 
 		uiPrvCopyStr(path, UI_PICK_FILE_PATH_BUF_SZ, rootPath);
 reload_dir:
@@ -2338,56 +2484,54 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 
 static void uiPrvLoadSavestate(void)
 {
-	uint32_t romSzExpected, ramSzExpected;
 	struct GameSelection selection;
 
-	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
-		uint32_t saveSz = selection.saveRamSize;
-
-		if (saveSz > QSPI_RAM_SIZE_MAX)
-			saveSz = QSPI_RAM_SIZE_MAX;
-		if (saveSz)
-			memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, saveSz);
-		if (saveSz < QSPI_RAM_SIZE_MAX)
-			memset(CART_RAM_ADDR_IN_RAM + saveSz, 0xff, QSPI_RAM_SIZE_MAX - saveSz);
+	if (uiGetGameSelection(&selection)) {
+		(void)uiPrvHydrateSaveRamFromFlash(selection.runtime, selection.romSize, selection.saveRamSize,
+			(const char*)QSPI_FILENAME_START, "load selected", true);
 		return;
 	}
-	
-	if (mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL) && ramSzExpected <= QSPI_RAM_SIZE_MAX)
-		memcpy(CART_RAM_ADDR_IN_RAM, (const void*)QSPI_RAM_COPY_START, ramSzExpected);
-	else
-		memset(CART_RAM_ADDR_IN_RAM, 0xff, QSPI_RAM_SIZE_MAX);
+
+	pr("Savegame hydrate: no valid selected game; clearing cart RAM\n");
+	uiPrvCartRamOwnerClear("no selected game");
+	memset(CART_RAM_ADDR_IN_RAM, 0xff, QSPI_RAM_SIZE_MAX);
 }
 
 bool uiSaveSavestate(void)
 {
-	uint32_t romSzExpected, ramSzExpected;
 	struct GameSelection selection;
+	uint32_t ramSzExpected;
 
-	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes) {
-		ramSzExpected = selection.saveRamSize;
-		if (ramSzExpected > QSPI_RAM_SIZE_MAX)
-			return false;
-		if (ramSzExpected && memcmp((const void*)QSPI_RAM_COPY_START, CART_RAM_ADDR_IN_RAM, ramSzExpected)) {
-			uint32_t writeSz = (ramSzExpected + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
-			uint32_t erzSz = (ramSzExpected + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY;
-			
-			if (!flashWrite(QSPI_RAM_COPY_START, erzSz, CART_RAM_ADDR_IN_RAM, writeSz))
-				return false;
-		}
+	if (!uiGetGameSelection(&selection))
+		return false;
+
+	ramSzExpected = selection.saveRamSize;
+	if (ramSzExpected > QSPI_RAM_SIZE_MAX)
+		return false;
+	if (!ramSzExpected)
+		return true;
+
+	if (!uiPrvCartRamOwnerMatchesSelection(&selection)) {
+		pr("Savegame cache: cart RAM is not owned by selected %s game; keeping QSPI copy (ram=%lu qspi=%08lx cart=%08lx ownerValid=%u)\n",
+			uiPrvRuntimeName(selection.runtime), (unsigned long)ramSzExpected,
+			(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, ramSzExpected),
+			(unsigned long)uiPrvSaveFingerprint(CART_RAM_ADDR_IN_RAM, ramSzExpected),
+			mCartRamOwner.valid ? 1u : 0u);
 		return true;
 	}
-	
-	if (!mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, NULL, NULL))
-		return false;
-	
+
 	if (ramSzExpected && memcmp((const void*)QSPI_RAM_COPY_START, CART_RAM_ADDR_IN_RAM, ramSzExpected)) {
-		
 		uint32_t writeSz = (ramSzExpected + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
 		uint32_t erzSz = (ramSzExpected + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY;
-		
+
+		pr("Savegame cache: updating QSPI from cart RAM (%lu bytes, qspi=%08lx cart=%08lx)\n",
+			(unsigned long)ramSzExpected,
+			(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, ramSzExpected),
+			(unsigned long)uiPrvSaveFingerprint(CART_RAM_ADDR_IN_RAM, ramSzExpected));
 		if (!flashWrite(QSPI_RAM_COPY_START, erzSz, CART_RAM_ADDR_IN_RAM, writeSz))
 			return false;
+		pr("Savegame cache: QSPI updated (qspi=%08lx)\n",
+			(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, ramSzExpected));
 	}
 	
 	return true;
@@ -2472,12 +2616,116 @@ bool uiSaveSavestate(void)
 		return base;
 	}
 
+	static void uiPrvRomStemBounds(const char *path, const char **baseP, const char **endP)
+	{
+		const char *base = uiPrvBaseName(path);
+		const char *end = base + strlen(base);
+		const char *dot;
+
+		for (dot = end; dot != base; dot--) {
+			if (dot[-1] == '.') {
+				end = dot - 1;
+				break;
+			}
+		}
+
+		*baseP = base;
+		*endP = end;
+	}
+
+	static void uiPrvCopyRomStem(char *dst, uint32_t dstLen, const char *path)
+	{
+		const char *base, *end, *src;
+		uint32_t pos = 0;
+
+		if (!dstLen)
+			return;
+
+		uiPrvRomStemBounds(path, &base, &end);
+		for (src = base; src != end && pos + 1 < dstLen; src++)
+			dst[pos++] = *src;
+		dst[pos] = 0;
+	}
+
+	static void uiPrvCleanGameTitleFromPath(char *dst, uint32_t dstLen, const char *path, const char *fallbackName)
+	{
+		const char *base, *end, *src;
+		uint32_t outLen = 0, parenDepth = 0;
+		bool pendingSpace = false;
+
+		if (!dstLen)
+			return;
+		if (!fallbackName)
+			fallbackName = "";
+
+		uiPrvRomStemBounds(path, &base, &end);
+		while (base != end && (*base == ' ' || *base == '\t'))
+			base++;
+		while (end != base && (end[-1] == ' ' || end[-1] == '\t'))
+			end--;
+
+		for (src = base; src != end; src++) {
+			char ch = *src;
+
+			if (ch == '(') {
+				parenDepth++;
+				continue;
+			}
+			if (ch == ')') {
+				if (parenDepth)
+					parenDepth--;
+				continue;
+			}
+			if (parenDepth)
+				continue;
+
+			if (ch == ' ' || ch == '\t') {
+				if (outLen)
+					pendingSpace = true;
+				continue;
+			}
+
+			if (pendingSpace) {
+				if (outLen + 2 >= dstLen)
+					break;
+				dst[outLen++] = ' ';
+			}
+			else if (outLen + 1 >= dstLen)
+				break;
+
+			pendingSpace = false;
+			dst[outLen++] = ch;
+		}
+
+		dst[outLen] = 0;
+		if (!outLen)
+			uiPrvCopyStr(dst, dstLen, fallbackName);
+	}
+
+	static bool uiPrvSaveNameKindValid(uint32_t kind)
+	{
+		return kind == SaveNameKindAuto ||
+			kind == SaveNameKindClean ||
+			kind == SaveNameKindFull ||
+			kind == SaveNameKindFallback ||
+			kind == SaveNameKindLegacy;
+	}
+
+	static enum SaveNameKind uiPrvSelectedSaveNameKind(void)
+	{
+		const struct GameSelectionFlashMeta *meta = (const struct GameSelectionFlashMeta*)(QSPI_FILENAME_START + GAME_META_OFFSET);
+
+		if (meta->magic == GAME_META_MAGIC && uiPrvSaveNameKindValid(meta->reserved[0]))
+			return (enum SaveNameKind)meta->reserved[0];
+		return SaveNameKindAuto;
+	}
+
 	static bool uiPrvEraseGamePath(void)		//this will also mark the ROM as invalid
 	{
 		return flashWrite(QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN, NULL, 0);
 	}
 	
-	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)		//also marks ROM as possibly valid
+	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize, enum SaveNameKind saveNameKind)		//also marks ROM as possibly valid
 	{
 		static uint8_t pathBuf[GAME_META_OFFSET];
 		uint8_t metaBuf[QSPI_WRITE_GRANULARITY];
@@ -2493,6 +2741,7 @@ bool uiSaveSavestate(void)
 			.romSize = romSize,
 			.saveRamSize = saveRamSize,
 		};
+		meta->reserved[0] = saveNameKind;
 
 		while (pathLen + 1 < sizeof(pathBuf) && buf[pathLen]) {
 			pathBuf[pathLen] = buf[pathLen];
@@ -2507,9 +2756,10 @@ bool uiSaveSavestate(void)
 		return flashWrite(QSPI_FILENAME_START + GAME_META_OFFSET, 0, metaBuf, QSPI_WRITE_GRANULARITY);
 	}
 	
-	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr, uint32_t maxSize)
+	static bool uiPrvLoadFileWithOptions(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr,
+		uint32_t maxSize, uint8_t padByte, uint32_t preEraseSize)
 	{
-		uint32_t row, now, nowDone, pos, totalSz = fatfsFileGetSize(fil), bufSz = 32768;
+		uint32_t row, now, nowDone, pos, totalSz = fatfsFileGetSize(fil), bufSz = 32768, baseFlashAddr = flashAddr;
 		struct ToolWorkspaceSpan bufMem;
 		uint8_t *buf;
 		bool ret = false;
@@ -2530,6 +2780,11 @@ bool uiSaveSavestate(void)
 		if (bufSz > bufMem.size)
 			bufSz = bufMem.size;
 		bufSz &=~ (QSPI_ERASE_GRANULARITY - 1);
+
+		if (preEraseSize && !flashWrite(baseFlashAddr, preEraseSize, NULL, 0)) {
+			uiAlert(cnv, "Flash erase failure", DialogTypeOk);
+			goto out_release;
+		}
 		
 		uiPrvSetHeaderTitle("Loading");
 		cnv->font = FontLarge;
@@ -2557,8 +2812,8 @@ bool uiSaveSavestate(void)
 			//over-erasing up to boundary is safe, same for writing
 			nowDone = (now + QSPI_WRITE_GRANULARITY - 1) / QSPI_WRITE_GRANULARITY * QSPI_WRITE_GRANULARITY;
 			if (nowDone != now)
-				memset(buf + now, 0, nowDone - now);
-			if (!flashWrite(flashAddr, (now + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY, buf, nowDone)) {
+				memset(buf + now, padByte, nowDone - now);
+			if (!flashWrite(flashAddr, preEraseSize ? 0 : (now + QSPI_ERASE_GRANULARITY - 1) / QSPI_ERASE_GRANULARITY * QSPI_ERASE_GRANULARITY, buf, nowDone)) {
 				uiAlert(cnv, "Flash writing failure", DialogTypeOk);
 				goto out_release;
 			}
@@ -2572,25 +2827,97 @@ bool uiSaveSavestate(void)
 		return ret;
 	}
 
+	static bool uiPrvLoadFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t flashAddr, const char *nameStr, uint32_t maxSize)
+	{
+		return uiPrvLoadFileWithOptions(cnv, fil, flashAddr, nameStr, maxSize, 0x00, 0);
+	}
+
+	static bool uiPrvVerifySaveFileInFlash(struct Canvas *cnv, struct FatfsFil *fil, uint32_t expectedSize)
+	{
+		struct ToolWorkspaceSpan bufMem;
+		uint8_t *buf;
+		uint32_t pos = 0;
+		bool ret = false;
+
+		if (!fatfsFileSeek(fil, 0)) {
+			uiAlert(cnv, "Cannot seek save file for verification", DialogTypeOk);
+			return false;
+		}
+
+		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &bufMem)) {
+			uiAlert(cnv, "Tool workspace is busy; cannot verify save", DialogTypeOk);
+			return false;
+		}
+		buf = bufMem.ptr;
+
+		while (pos < expectedSize) {
+			uint32_t now = expectedSize - pos, numRead = 0;
+
+			if (now > bufMem.size)
+				now = bufMem.size;
+			if (!fatfsFileRead(fil, buf, now, &numRead) || numRead != now) {
+				uiAlert(cnv, "Save verification read failure", DialogTypeOk);
+				goto out_release;
+			}
+			if (memcmp(buf, (const uint8_t*)QSPI_RAM_COPY_START + pos, now)) {
+				uiAlert(cnv, "Save verification mismatch", DialogTypeOk);
+				goto out_release;
+			}
+			pos += now;
+		}
+
+		ret = true;
+	out_release:
+		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
+		return ret;
+	}
+
+	static bool uiPrvLoadSaveFile(struct Canvas *cnv, struct FatfsFil *fil, uint32_t expectedSize)
+	{
+		if (fatfsFileGetSize(fil) != expectedSize) {
+			uiAlert(cnv, "Savegame file size does not match the expected size", DialogTypeOk);
+			return false;
+		}
+		if (!uiPrvLoadFileWithOptions(cnv, fil, QSPI_RAM_COPY_START, "SAVE", QSPI_RAM_SIZE_MAX, 0xff, QSPI_RAM_SIZE_MAX))
+			return false;
+		if (!uiPrvVerifySaveFileInFlash(cnv, fil, expectedSize))
+			return false;
+		pr("Savegame import: loaded %lu bytes into QSPI cache (hash=%08lx)\n",
+			(unsigned long)expectedSize, (unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, expectedSize));
+		return true;
+	}
+
+	static void uiPrvSaveNameFromStem(const char *stem, char *dst, uint32_t dstLen);
+
 	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
 	{
-		const char *base, *dot = NULL, *src;
-		uint32_t pos = 0;
+		char stem[UI_PICK_FILE_NAME_BUF_SZ];
+		char fallbackStem[UI_PICK_FILE_NAME_BUF_SZ];
 
 		(void)runtime;
+		uiPrvCopyRomStem(fallbackStem, sizeof(fallbackStem), romName);
+		uiPrvCleanGameTitleFromPath(stem, sizeof(stem), romName, fallbackStem);
+		uiPrvSaveNameFromStem(stem, dst, dstLen);
+	}
+
+	static void uiPrvRawSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
+	{
+		char stem[UI_PICK_FILE_NAME_BUF_SZ];
+
+		(void)runtime;
+		uiPrvCopyRomStem(stem, sizeof(stem), romName);
+		uiPrvSaveNameFromStem(stem, dst, dstLen);
+	}
+
+	static void uiPrvSaveNameFromStem(const char *stem, char *dst, uint32_t dstLen)
+	{
+		uint32_t pos = 0;
+
 		if (!dstLen)
 			return;
 
-		base = uiPrvBaseName(romName);
-		for (src = base; *src; src++) {
-			if (*src == '.')
-				dot = src;
-		}
-		if (!dot)
-			dot = src;
-
-		for (src = base; src != dot && pos + 5 < dstLen; src++)
-			dst[pos++] = *src;
+		while (*stem && pos + 5 < dstLen)
+			dst[pos++] = *stem++;
 		if (pos + 4 < dstLen) {
 			dst[pos++] = '.';
 			dst[pos++] = 's';
@@ -2673,12 +3000,16 @@ bool uiSaveSavestate(void)
 		return NULL;
 	}
 
-	static struct FatfsFil *uiPrvOpenSaveFile(struct FatfsVol *vol, const char *romName, enum GameRuntime runtime, uint32_t expectedSize, bool *badSizeP)
+	static struct FatfsFil *uiPrvOpenSaveFile(struct FatfsVol *vol, const char *romName, enum GameRuntime runtime,
+		uint32_t expectedSize, enum SaveNameKind *saveNameKindP, bool *badSizeP)
 	{
 		struct FatfsDir *dir;
 		struct FatfsFil *fil = NULL;
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackName[13];
+		const char *foundName = NULL;
+		enum SaveNameKind foundKind = SaveNameKindAuto;
 
 		if (!expectedSize)
 			return NULL;
@@ -2689,12 +3020,48 @@ bool uiSaveSavestate(void)
 
 		uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
 		fil = uiPrvOpenSaveFileIfSizeMatches(dir, saveName, expectedSize, badSizeP);
+		if (fil) {
+			foundName = saveName;
+			foundKind = SaveNameKindClean;
+			if (saveNameKindP)
+				*saveNameKindP = foundKind;
+		}
+		uiPrvRawSaveFileName(romName, runtime, fullSaveName, sizeof(fullSaveName));
+		if (!fil && fullSaveName[0] && strcmp(saveName, fullSaveName)) {
+			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fullSaveName, expectedSize, badSizeP);
+			if (fil) {
+				foundName = fullSaveName;
+				foundKind = SaveNameKindFull;
+				if (saveNameKindP)
+					*saveNameKindP = foundKind;
+			}
+		}
 		uiPrvSaveFallbackFileName(romName, runtime, fallbackName, sizeof(fallbackName));
-		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName))
+		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName) && strcmp(fullSaveName, fallbackName)) {
 			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fallbackName, expectedSize, badSizeP);
-		if (!fil && strcmp(saveName, romName))
+			if (fil) {
+				foundName = fallbackName;
+				foundKind = SaveNameKindFallback;
+				if (saveNameKindP)
+					*saveNameKindP = foundKind;
+			}
+		}
+		if (!fil && strcmp(saveName, romName) && strcmp(fullSaveName, romName) && strcmp(fallbackName, romName)) {
 			fil = uiPrvOpenSaveFileIfSizeMatches(dir, romName, expectedSize, badSizeP);
+			if (fil) {
+				foundName = romName;
+				foundKind = SaveNameKindLegacy;
+				if (saveNameKindP)
+					*saveNameKindP = foundKind;
+			}
+		}
 
+		if (fil)
+			pr("Savegame import: found /SAVE/%s (%lu bytes, source=%s) for %s\n",
+				foundName, (unsigned long)expectedSize, uiPrvSaveNameKindName(foundKind), romName);
+		else
+			pr("Savegame import: no matching save found for %s (%lu bytes expected)\n",
+				romName, (unsigned long)expectedSize);
 		fatfsDirClose(dir);
 		return fil;
 	}
@@ -2730,11 +3097,15 @@ bool uiSaveSavestate(void)
 		enum SaveExportStatus status;
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char legacySaveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackSaveName[13];
 		const char *openPath;
 		uint32_t bytesExpected;
 		uint32_t bytesDone;
 		uint32_t verifyOffset;
+		enum SaveNameKind preferredSaveNameKind;
+		enum SaveNameKind chosenSaveNameKind;
 		enum FatfsCreateError fatCreateError;
 		const char *fatCreateErrorName;
 		enum FatfsCreateError primaryCreateError;
@@ -2770,6 +3141,18 @@ bool uiSaveSavestate(void)
 			!strcmp((const char*)QSPI_FILENAME_START, romName);
 	}
 
+	static void uiPrvPrepareForRomReplacement(struct Canvas *cnv, uint32_t savegameExportSz, const char *reason)
+	{
+		uiPrvSetHeaderTitle("Select Game");
+		if (savegameExportSz) {
+			pr("Game selection: exporting current save before ROM replacement (%s, %lu bytes)\n",
+				reason ? reason : "unknown", (unsigned long)savegameExportSz);
+			(void)uiPrvExportCurrentSavestate(cnv, false);
+		}
+		uiPrvCartRamOwnerClear(reason ? reason : "ROM replacement");
+		uiPrvSetHeaderTitle("Select Game");
+	}
+
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
 	{
 		uint32_t numRead, fileSz, romSzExpected, ramSzExpected, col = 1, row = 17;
@@ -2777,6 +3160,7 @@ bool uiSaveSavestate(void)
 		struct FatfsFil *filR, *filS = NULL;
 		enum RomColorSupport colorSupport;
 		enum GameRuntime runtime = uiPrvRuntimeForName(romName);
+		enum SaveNameKind saveNameKind = SaveNameKindClean;
 		struct NesRomInfo nesInfo;
 		struct FatfsDir *dir;
 		struct CartHeader hdr;
@@ -2854,10 +3238,14 @@ bool uiSaveSavestate(void)
 			goto out_close_file;
 		}
 
-		filS = uiPrvOpenSaveFile(vol, romName, runtime, ramSzExpected, &badSaveSize);
-		if (!filS && badSaveSize)
+		filS = uiPrvOpenSaveFile(vol, romName, runtime, ramSzExpected, &saveNameKind, &badSaveSize);
+		if (!filS && badSaveSize) {
 			uiAlert(cnv, "Savegame file size does not match the expected size. It will not be loaded.", DialogTypeOk);
+			goto out_close_file;
+		}
 		preserveCachedSave = !filS && ramSzExpected && uiPrvSelectionMatchesCachedGame(romName, runtime, romSzExpected, ramSzExpected);
+		if (preserveCachedSave)
+			saveNameKind = uiPrvSelectedSaveNameKind();
 	
 		if (!fatfsFileSeek(filR, 0)) {
 			
@@ -2923,6 +3311,7 @@ bool uiSaveSavestate(void)
 		if (uiPrvGetSimpleAnswer(cnv, DialogTypeYesNo)) {
 			
 			//erase old path and thus mark the ROM as invalid. This will prevent a poweroff mid-load from causing us to try to play a half-loaded ROM
+			uiPrvCartRamOwnerClear("selecting new ROM");
 			(void)uiPrvEraseGamePath();
 			
 			ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM", QSPI_ROM_SIZE_MAX);
@@ -2933,16 +3322,34 @@ bool uiSaveSavestate(void)
 				goto out_close_file;
 			}
 			
-			//ROM is loaded
-			(void)uiPrvSetGamePath(romName, runtime, romSzExpected, ramSzExpected);
-			
 			if (filS) {
-				ret = uiPrvLoadFile(cnv, filS, QSPI_RAM_COPY_START, "SAVE", QSPI_RAM_SIZE_MAX) && ret;
+				ret = uiPrvLoadSaveFile(cnv, filS, ramSzExpected) && ret;
 				fatfsFileClose(filS);
 				filS = NULL;
 			}
 			else if (!preserveCachedSave)
 				ret = flashWrite(QSPI_RAM_COPY_START, QSPI_RAM_SIZE_MAX, NULL, 0) && ret;
+
+			if (ret)
+				ret = uiPrvHydrateSaveRamFromFlash(runtime, romSzExpected, ramSzExpected, romName, "selection import", false);
+
+			if (!ret) {
+				(void)flashWrite(QSPI_ROM_START, QSPI_ERASE_GRANULARITY, NULL, 0);
+				uiPrvCartRamOwnerClear("selection load failed");
+				goto out_close_file;
+			}
+
+			ret = uiPrvSetGamePath(romName, runtime, romSzExpected, ramSzExpected, saveNameKind);
+			if (!ret) {
+				uiAlert(cnv, "Failed to store selected game metadata", DialogTypeOk);
+				uiPrvCartRamOwnerClear("selection metadata failed");
+			}
+			else {
+				uiPrvCartRamOwnerSet(runtime, romSzExpected, ramSzExpected, romName, "selection finalized");
+				pr("Game selection: finalized %s save source=%s saveHash=%08lx\n",
+					romName, uiPrvSaveNameKindName(saveNameKind),
+					(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, ramSzExpected));
+			}
 			
 			uiPrvReset(cnv, false);
 		}
@@ -2970,22 +3377,30 @@ static void uiPrvSaveExportResultInit(struct SaveExportResult *result)
 static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
 {
 	char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char legacySaveName[UI_PICK_FILE_NAME_BUF_SZ];
 	char fallbackSaveName[13];
 	uint32_t bytesExpected = result->bytesExpected;
 	uint8_t attemptNo = result->attemptNo;
+	enum SaveNameKind preferredSaveNameKind = result->preferredSaveNameKind;
 	bool flashCacheFailed = result->flashCacheFailed;
 	bool forceRequested = result->forceRequested;
 	bool retryAttempted = result->retryAttempted;
 	bool manualRequest = result->manualRequest;
 
 	uiPrvCopyStr(primarySaveName, sizeof(primarySaveName), result->primarySaveName);
+	uiPrvCopyStr(fullSaveName, sizeof(fullSaveName), result->fullSaveName);
+	uiPrvCopyStr(legacySaveName, sizeof(legacySaveName), result->legacySaveName);
 	uiPrvCopyStr(fallbackSaveName, sizeof(fallbackSaveName), result->fallbackSaveName);
 	uiPrvSaveExportResultInit(result);
 	uiPrvCopyStr(result->primarySaveName, sizeof(result->primarySaveName), primarySaveName);
+	uiPrvCopyStr(result->fullSaveName, sizeof(result->fullSaveName), fullSaveName);
+	uiPrvCopyStr(result->legacySaveName, sizeof(result->legacySaveName), legacySaveName);
 	uiPrvCopyStr(result->fallbackSaveName, sizeof(result->fallbackSaveName), fallbackSaveName);
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), primarySaveName);
 	result->bytesExpected = bytesExpected;
 	result->attemptNo = attemptNo;
+	result->preferredSaveNameKind = preferredSaveNameKind;
 	result->flashCacheFailed = flashCacheFailed;
 	result->forceRequested = forceRequested;
 	result->retryAttempted = retryAttempted;
@@ -3021,6 +3436,92 @@ static void uiPrvSaveExportRecordFallbackCreateError(struct SaveExportResult *re
 	uiPrvSaveExportRecordFatCreateError(result);
 }
 
+static bool uiPrvSaveExportNameExists(struct FatfsDir *saveDir, const char *name)
+{
+	struct FatFileLocator loc;
+
+	return name && name[0] && fatfsFindFileAt(saveDir, name, &loc);
+}
+
+static void uiPrvSaveExportSetTarget(struct SaveExportResult *result, const char *name, enum SaveNameKind kind)
+{
+	uiPrvCopyStr(result->saveName, sizeof(result->saveName), name);
+	result->chosenSaveNameKind = kind;
+	result->fallbackUsed = kind == SaveNameKindFallback && strcmp(result->primarySaveName, name);
+}
+
+static bool uiPrvSaveExportNameMatches(const char *a, const char *b)
+{
+	return a && b && a[0] && b[0] && !strcmp(a, b);
+}
+
+static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExportResult *result)
+{
+	if (uiPrvSaveExportNameExists(saveDir, result->primarySaveName)) {
+		uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindClean);
+		return;
+	}
+
+	switch (result->preferredSaveNameKind) {
+		case SaveNameKindFull:
+			if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
+				return;
+			}
+			break;
+
+		case SaveNameKindFallback:
+			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
+				return;
+			}
+			break;
+
+		case SaveNameKindLegacy:
+			if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
+				uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
+				return;
+			}
+			break;
+
+		case SaveNameKindAuto:
+			if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
+				return;
+			}
+			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
+				return;
+			}
+			if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
+				uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
+				return;
+			}
+			break;
+
+		case SaveNameKindClean:
+		default:
+			break;
+	}
+
+	if (result->preferredSaveNameKind != SaveNameKindAuto && result->preferredSaveNameKind != SaveNameKindClean) {
+		if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
+			uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
+			return;
+		}
+		if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
+			uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
+			return;
+		}
+		if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
+			uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
+			return;
+		}
+	}
+
+	uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindClean);
+}
+
 static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportResult *result)
 {
 	struct FatfsDir *saveDir = NULL;
@@ -3035,11 +3536,6 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 	if (flags.RO)
 		pr("Savegame export: card reports write protect; attempting verified write anyway\n");
 
-	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
-	result->fallbackUsed = false;
-	pr("Savegame export: preparing /SAVE/%s (%u bytes)\n", result->primarySaveName, result->bytesExpected);
-	if (result->fallbackSaveName[0])
-		pr("Savegame export: fallback save name is /SAVE/%s\n", result->fallbackSaveName);
 	saveDir = fatfsDirOpen(vol, "/SAVE");
 	if (!saveDir) {
 		struct FatFileLocator loc;
@@ -3052,36 +3548,52 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 		}
 	}
 
-	if (fatfsFindFileAt(saveDir, result->primarySaveName, &loc)) {
-		result->openPath = "primary existing";
+	uiPrvChooseSaveExportTarget(saveDir, result);
+	pr("Savegame export: preparing /SAVE/%s (%u bytes, preferred=%u chosen=%u)\n", result->saveName, result->bytesExpected,
+		(unsigned)result->preferredSaveNameKind, (unsigned)result->chosenSaveNameKind);
+	pr("Savegame export: primary save name is /SAVE/%s\n", result->primarySaveName);
+	if (result->fullSaveName[0] && strcmp(result->primarySaveName, result->fullSaveName))
+		pr("Savegame export: old full save name is /SAVE/%s\n", result->fullSaveName);
+	if (result->fallbackSaveName[0])
+		pr("Savegame export: fallback save name is /SAVE/%s\n", result->fallbackSaveName);
+	if (result->legacySaveName[0] && strcmp(result->legacySaveName, result->primarySaveName) &&
+		strcmp(result->legacySaveName, result->fullSaveName) && strcmp(result->legacySaveName, result->fallbackSaveName))
+		pr("Savegame export: legacy save name is /SAVE/%s\n", result->legacySaveName);
+
+	if (fatfsFindFileAt(saveDir, result->saveName, &loc)) {
+		result->openPath = "chosen existing";
 		fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 		if (!fil) {
-			pr("Savegame export: cannot open existing /SAVE/%s for writing\n", result->primarySaveName);
+			pr("Savegame export: cannot open existing /SAVE/%s for writing\n", result->saveName);
 			uiPrvSaveExportSetStatus(result, SaveExportStatusOpenExistingFailed);
 			goto out_close_dir;
 		}
 	}
 	else {
-		pr("Savegame export: /SAVE/%s missing, creating it\n", result->primarySaveName);
+		pr("Savegame export: /SAVE/%s missing, creating it\n", result->saveName);
 		fatfsClearLastCreateError();
-		if (fatfsFileCreateAt(saveDir, result->primarySaveName, &loc)) {
-			result->openPath = "primary created";
+		if (fatfsFileCreateAt(saveDir, result->saveName, &loc)) {
+			result->openPath = "chosen created";
 			fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 			if (!fil) {
-				pr("Savegame export: created /SAVE/%s but cannot reopen for writing\n", result->primarySaveName);
+				pr("Savegame export: created /SAVE/%s but cannot reopen for writing\n", result->saveName);
 				uiPrvSaveExportSetStatus(result, SaveExportStatusOpenCreatedFailed);
 				goto out_close_dir;
 			}
 		}
 		else {
-			uiPrvSaveExportRecordPrimaryCreateError(result);
-			pr("Savegame export: cannot create /SAVE/%s (FAT stage: %s)\n", result->primarySaveName, result->primaryCreateErrorName);
-			if (!result->fallbackSaveName[0] || !strcmp(result->primarySaveName, result->fallbackSaveName)) {
+			if (uiPrvSaveExportNameMatches(result->saveName, result->fallbackSaveName))
+				uiPrvSaveExportRecordFallbackCreateError(result);
+			else
+				uiPrvSaveExportRecordPrimaryCreateError(result);
+			pr("Savegame export: cannot create /SAVE/%s (FAT stage: %s)\n", result->saveName, result->fatCreateErrorName);
+			if (!result->fallbackSaveName[0] || uiPrvSaveExportNameMatches(result->saveName, result->fallbackSaveName)) {
 				uiPrvSaveExportSetStatus(result, SaveExportStatusCreateFailed);
 				goto out_close_dir;
 			}
 
 			uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->fallbackSaveName);
+			result->chosenSaveNameKind = SaveNameKindFallback;
 			result->fallbackUsed = true;
 			pr("Savegame export: trying fallback /SAVE/%s\n", result->fallbackSaveName);
 
@@ -3114,7 +3626,8 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 		}
 	}
 
-	pr("Savegame export: writing /SAVE/%s\n", result->saveName);
+	pr("Savegame export: writing /SAVE/%s (hash=%08lx)\n", result->saveName,
+		(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected));
 	ret = fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, result->bytesExpected, &result->bytesDone);
 	if (!ret || result->bytesDone != result->bytesExpected) {
 		pr("Savegame export: write failed for /SAVE/%s (%u/%u)\n", result->saveName, result->bytesDone, result->bytesExpected);
@@ -3211,7 +3724,8 @@ out_close_dir:
 	}
 
 	if (result->status == SaveExportStatusOk)
-		pr("Savegame export: verified /SAVE/%s (%u bytes)\n", result->saveName, result->bytesExpected);
+		pr("Savegame export: verified /SAVE/%s (%u bytes, hash=%08lx)\n", result->saveName, result->bytesExpected,
+			(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected));
 	return result->status == SaveExportStatusOk;
 }
 
@@ -3264,25 +3778,42 @@ static bool uiPrvFlushCurrentSaveToCardAttempt(bool forceReinit, struct SaveExpo
 	return result->status == SaveExportStatusOk;
 }
 
-static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *result)
+static bool uiPrvPrepareSaveExportResult(bool force, struct SaveExportResult *result)
 {
 	struct GameSelection selection;
 
 	uiPrvSaveExportResultInit(result);
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
-		return true;
+		return false;
 
 	result->forceRequested = force;
 	result->bytesExpected = selection.saveRamSize;
+	result->preferredSaveNameKind = uiPrvSelectedSaveNameKind();
 	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->primarySaveName, sizeof(result->primarySaveName));
+	uiPrvRawSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fullSaveName, sizeof(result->fullSaveName));
 	uiPrvSaveFallbackFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
+	uiPrvCopyStr(result->legacySaveName, sizeof(result->legacySaveName), (const char*)QSPI_FILENAME_START);
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
 	if (!uiSaveSavestate()) {
 		result->flashCacheFailed = true;
 		pr("Savegame export: failed to copy current save RAM to flash; exporting cached flash copy anyway\n");
 	}
+	pr("Savegame export: cache ready for %s (%lu bytes, qspi=%08lx cart=%08lx owner=%u preferred=%s)\n",
+		(const char*)QSPI_FILENAME_START, (unsigned long)result->bytesExpected,
+		(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected),
+		(unsigned long)uiPrvSaveFingerprint(CART_RAM_ADDR_IN_RAM, result->bytesExpected),
+		uiPrvCartRamOwnerMatchesSelection(&selection) ? 1u : 0u,
+		uiPrvSaveNameKindName(result->preferredSaveNameKind));
 
 	pr("Savegame export: flushing /SAVE/%s to SD (force=%u)\n", result->saveName, force ? 1u : 0u);
+	return true;
+}
+
+static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *result)
+{
+	if (!uiPrvPrepareSaveExportResult(force, result))
+		return true;
+
 	if (uiPrvFlushCurrentSaveToCardAttempt(force, result))
 		return true;
 
@@ -3294,6 +3825,19 @@ static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *r
 	}
 
 	return false;
+}
+
+static bool uiPrvFlushCurrentSaveToMountedCardEx(struct FatfsVol *vol, bool force, struct SaveExportResult *result)
+{
+	if (!uiPrvPrepareSaveExportResult(force, result))
+		return true;
+
+	pr("Savegame export: using already-mounted SD volume\n");
+	sdClearLastError();
+	(void)uiPrvWriteExportedSavestate(vol, result);
+	if (result->status == SaveExportStatusOk)
+		(void)uiPrvVerifyExportedSavestate(vol, result);
+	return result->status == SaveExportStatusOk;
 }
 
 bool uiFlushCurrentSaveToCard(bool force)
@@ -3310,11 +3854,8 @@ bool uiFlushCurrentSaveToCard(bool force)
 		char name[UI_PICK_FILE_NAME_BUF_SZ];
 		bool ret = false;
 		
-		uiPrvSetHeaderTitle("Select Game");
 		// ROM selection reuses cartridge RAM, so export the current save through the normal SD pipeline first.
-		if (savegameExportSz)
-			(void)uiPrvExportCurrentSavestate(cnv, false);
-		uiPrvSetHeaderTitle("Select Game");
+		uiPrvPrepareForRomReplacement(cnv, savegameExportSz, "ROM picker");
 
 		vol = uiPrvMountCardEx(cnv, false, forceSdReinit);
 		if (!vol)
@@ -3476,6 +4017,8 @@ static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, 
 		result->sdFlags, result->cardReportedReadOnly ? 1u : 0u, result->flashCacheFailed ? "cached" : "fresh",
 		result->fallbackUsed ? 1u : 0u);
 	uiPrvSaveExportAppend(msg, tmp);
+	(void)sprintf(tmp, "\nSave kind:%u->%u", (unsigned)result->preferredSaveNameKind, (unsigned)result->chosenSaveNameKind);
+	uiPrvSaveExportAppend(msg, tmp);
 	uiPrvSaveExportAppendDiagLine(msg, "Open:", result->openPath);
 	uiPrvSaveExportAppendDiagLine(msg, "FAT primary:", result->primaryCreateErrorName);
 	uiPrvSaveExportAppendDiagLine(msg, "FAT fallback:", result->fallbackCreateErrorName);
@@ -3498,7 +4041,9 @@ static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, 
 	uiPrvSaveExportAppend(msg, tmp);
 	uiPrvSaveExportAppendPath(msg, "Chosen:", result->saveName);
 	uiPrvSaveExportAppendPath(msg, "Primary:", result->primarySaveName);
+	uiPrvSaveExportAppendPath(msg, "Old full:", result->fullSaveName);
 	uiPrvSaveExportAppendPath(msg, "Fallback:", result->fallbackSaveName);
+	uiPrvSaveExportAppendPath(msg, "Legacy:", result->legacySaveName);
 }
 
 static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual)
@@ -3508,6 +4053,39 @@ static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual)
 
 	pr("Savegame export: %s save requested\n", manual ? "manual" : "safe-exit");
 	if (!uiPrvFlushCurrentSaveToCardEx(manual, &result)) {
+		result.manualRequest = manual;
+		uiPrvSaveExportFormatFailure(&result, msg);
+		uiAlert(cnv, msg, DialogTypeOk);
+		return false;
+	}
+
+	if (result.flashCacheFailed) {
+		if (result.saveName[0])
+			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result.saveName);
+		else
+			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
+		uiAlert(cnv, msg, DialogTypeOk);
+		return true;
+	}
+
+	if (!manual)
+		return true;
+
+	if (result.saveName[0])
+		(void)sprintf(msg, "Save written to /SAVE/%s", result.saveName);
+	else
+		(void)sprintf(msg, "Save written to /SAVE");
+	uiAlert(cnv, msg, DialogTypeOk);
+	return true;
+}
+
+static bool uiPrvExportCurrentSavestateToMountedCard(struct Canvas *cnv, struct FatfsVol *vol, bool manual)
+{
+	struct SaveExportResult result;
+	char msg[SAVE_EXPORT_MSG_BUF_SZ];
+
+	pr("Savegame export: %s save requested on mounted SD volume\n", manual ? "manual" : "safe-exit");
+	if (!uiPrvFlushCurrentSaveToMountedCardEx(vol, manual, &result)) {
 		result.manualRequest = manual;
 		uiPrvSaveExportFormatFailure(&result, msg);
 		uiAlert(cnv, msg, DialogTypeOk);
@@ -6158,63 +6736,7 @@ static void uiPrvCopyGameTitleFallback(char *dst, uint32_t dstLen, const char *f
 #ifndef NO_SD_CARD
 static void uiPrvTitleFromGamePath(char *dst, uint32_t dstLen, const char *path, const char *fallbackName)
 {
-	const char *base = uiPrvBaseName(path);
-	const char *end = base + strlen(base);
-	const char *dot, *src;
-	uint32_t outLen = 0, parenDepth = 0;
-	bool pendingSpace = false;
-
-	if (!dstLen)
-		return;
-
-	for (dot = end; dot != base; dot--) {
-		if (dot[-1] == '.') {
-			end = dot - 1;
-			break;
-		}
-	}
-
-	while (base != end && (*base == ' ' || *base == '\t'))
-		base++;
-	while (end != base && (end[-1] == ' ' || end[-1] == '\t'))
-		end--;
-
-	for (src = base; src != end; src++) {
-		char ch = *src;
-
-		if (ch == '(') {
-			parenDepth++;
-			continue;
-		}
-		if (ch == ')') {
-			if (parenDepth)
-				parenDepth--;
-			continue;
-		}
-		if (parenDepth)
-			continue;
-
-		if (ch == ' ' || ch == '\t') {
-			if (outLen)
-				pendingSpace = true;
-			continue;
-		}
-
-		if (pendingSpace) {
-			if (outLen + 2 >= dstLen)
-				break;
-			dst[outLen++] = ' ';
-		}
-		else if (outLen + 1 >= dstLen)
-			break;
-
-		pendingSpace = false;
-		dst[outLen++] = ch;
-	}
-
-	dst[outLen] = 0;
-	if (!outLen)
-		uiPrvCopyGameTitleFallback(dst, dstLen, fallbackName);
+	uiPrvCleanGameTitleFromPath(dst, dstLen, path, fallbackName);
 }
 #endif
 
@@ -6722,7 +7244,19 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	}
 
 	case UiBrowserOpenGame:
-		uiPrvSetHeaderTitle("Select Game");
+		{
+			struct GameSelection selection;
+			uint32_t savegameExportSz = uiGetGameSelection(&selection) ? selection.saveRamSize : 0;
+
+			uiPrvSetHeaderTitle("Select Game");
+			if (savegameExportSz) {
+				pr("Game selection: exporting current save before browser ROM replacement (%lu bytes)\n",
+					(unsigned long)savegameExportSz);
+				(void)uiPrvExportCurrentSavestateToMountedCard(cnv, vol, false);
+			}
+			uiPrvCartRamOwnerClear("browser game open");
+			uiPrvSetHeaderTitle("Select Game");
+		}
 		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
 		return UiToolBrowser;
@@ -6760,6 +7294,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 		uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
 		return UiToolBrowser;
 	}
+	uiPrvCartRamOwnerClear("file browser workspace");
 	browserPath[0] = '/';
 	browserPath[1] = 0;
 
@@ -6927,8 +7462,10 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 		uiPrvExitTool(UiToolGame);
 
 	#ifndef NO_SD_CARD
-		if (!mDeferredGameSelect && mLastGameMenuAction == UiGameActionSwitchTool)
+		if (!mDeferredGameSelect && mLastGameMenuAction == UiGameActionSwitchTool) {
 			uiPrvExportCurrentSavestate(cnv, false);
+			uiPrvCartRamOwnerClear("switching away from game");
+		}
 
 		if (mDeferredGameSelect && mLastGameMenuAction == UiGameActionSelectGame) {
 			uint32_t ramSz = 0;

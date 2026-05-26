@@ -346,6 +346,15 @@ bool mbcInitMBC2(const void *romP, void *ramP, uint_fast8_t features)
 #define MBC3_DATA_DAYS_HI			6	//low bit is day counter, bit 7 is carry (sticky), bit 6 is HALT
 #define MBC3_FEATURES				7
 
+static enum GbExtRtcMode mbc3prvRtcModeForRom(const void *romP)
+{
+	const struct CartHeader *hdr = (const struct CartHeader*)romP;
+
+	if (!memcmp(hdr->titleCGB, "DEFCONBADGE", sizeof(hdr->titleCGB)))
+		return GbExtRtcModeDefcon32BadgeGame;
+	return GbExtRtcModeDefault;
+}
+
 static uint8_t mbc3prvRtcRead(uint16_t fullAddr)
 {
 	(void)fullAddr;
@@ -493,8 +502,10 @@ static bool mbcInitMBC3(const void *romP, void *ramP, uint_fast8_t features)
 	mbcPrvFillWriteFunc(0x4000, 0x2000, mbc3prvRamAndRtcBank);
 	mbcPrvFillWriteFunc(0x6000, 0x2000, mbc3prvLatch);
 	
+	memset(mMbcPrivate, 0, sizeof(mMbcPrivate));
 	mMbcPrivate[MBC3_FEATURES] = features;
 
+	gbExtRtcReset(mbc3prvRtcModeForRom(romP));
 	mMbcPrivate2 = ~gbExtRtcGet();
 
 	return mbcFillDefaults(romP, ramP);

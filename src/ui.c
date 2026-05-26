@@ -4,6 +4,7 @@
 #include "gbCartHeader.h"
 #include "settings.h"
 #include "badgeLeds.h"
+#include "badgeRtc.h"
 #include "bootGuard.h"
 #include "memMap.h"
 #include "printf.h"
@@ -85,6 +86,8 @@ static bool mToolExitEnabled;
 static bool mToolExitRequested;
 static const char mUiAppTitle[] = "DC32-cfw";
 static const char *mUiHeaderTitle = "Main Menu";
+static bool mUiHeaderInverted;
+static uint32_t mUiHeaderClockMinute = 0xffffffffu;
 
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
@@ -612,6 +615,103 @@ static bool uiPrvCenterExitPressedRaw(void)
 	return false;
 }
 
+static uint32_t uiPrvHeaderCurrentClockMinute(void)
+{
+	if (!badgeRtcIsValid())
+		return 0xffffffffu;
+
+	return badgeRtcGet() / 60u;
+}
+
+static void uiPrvHeaderTimeText(char text[static 9])
+{
+	uint_fast8_t hour, minute;
+	uint_fast8_t hour12;
+
+	if (!badgeRtcGetTimeOfDay(&hour, &minute, NULL)) {
+		strcpy(text, "--:-- --");
+		return;
+	}
+
+	hour12 = hour % 12u;
+	if (!hour12)
+		hour12 = 12;
+	(void)sprintf(text, "%u:%02u %s", (unsigned)hour12, (unsigned)minute, hour >= 12 ? "PM" : "AM");
+}
+
+static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
+{
+	const char *windowTitle = mUiHeaderTitle;
+	char timeText[9];
+	uint32_t titleLen, titleWidth, titleMaxRight, titleMaxWidth, timeWidth, clockMinute;
+	int8_t foreColor = cnv->foreColor, backColor = cnv->backColor;
+	uint8_t font = cnv->font;
+
+	clockMinute = uiPrvHeaderCurrentClockMinute();
+	if (!force && clockMinute == mUiHeaderClockMinute)
+		return;
+	mUiHeaderClockMinute = clockMinute;
+
+	uiPrvHeaderTimeText(timeText);
+
+	cnv->font = FontLarge;
+	cnv->foreColor = invert ? 0 : 9;
+	uiPrvFillRect(cnv, 0, 0, cnv->w - 1, uiPrvGlyphHeight(cnv));
+
+	cnv->foreColor = invert ? 9 : 0;
+	cnv->backColor = invert ? 0 : 9;
+
+	timeWidth = uiPrvCharsWidth(cnv, timeText, strlen(timeText));
+	if (timeWidth + 1 < cnv->w)
+		uiPuts(cnv, 0, cnv->w - timeWidth - 1, timeText, -1);
+
+	titleMaxRight = cnv->w;
+	if (timeWidth + 4 < cnv->w)
+		titleMaxRight = cnv->w - timeWidth - 4;
+	titleMaxWidth = titleMaxRight > 2 ? titleMaxRight - 2 : titleMaxRight;
+	titleLen = uiPrvCharsFit(cnv, windowTitle, strlen(windowTitle), titleMaxWidth);
+	titleWidth = uiPrvCharsWidth(cnv, windowTitle, titleLen);
+	uiPuts(cnv, 0, titleWidth < titleMaxRight ? (titleMaxRight - titleWidth) / 2 : 0, windowTitle, titleLen);
+
+	cnv->font = font;
+	cnv->foreColor = foreColor;
+	cnv->backColor = backColor;
+}
+
+static void uiPrvRefreshHeaderClock(struct Canvas *cnv)
+{
+	uiPrvDrawHeader(cnv, mUiHeaderInverted, false);
+}
+
+static uint_fast16_t uiPrvRecvMenuKeypress(struct Canvas *cnv)
+{
+	uint_fast16_t val, prevVal = 0;
+
+	while (!uiGetUiKeys())
+		uiPrvRefreshHeaderClock(cnv);
+	while ((val = uiGetUiKeys()) != 0) {
+		prevVal = val;
+		uiPrvRefreshHeaderClock(cnv);
+	}
+
+	if (prevVal & UI_KEY_BIT_CENTER)
+		return UI_KEY_BIT_CENTER;
+	if (prevVal & KEY_BIT_A)
+		return KEY_BIT_A;
+	if (prevVal & KEY_BIT_B)
+		return KEY_BIT_B;
+	if (prevVal & KEY_BIT_UP)
+		return KEY_BIT_UP;
+	if (prevVal & KEY_BIT_DOWN)
+		return KEY_BIT_DOWN;
+	if (prevVal & KEY_BIT_LEFT)
+		return KEY_BIT_LEFT;
+	if (prevVal & KEY_BIT_RIGHT)
+		return KEY_BIT_RIGHT;
+
+	return prevVal;
+}
+
 static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint_fast16_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
 {
 	uint_fast8_t i, itemHeight = uiPrvMenuItemHeight(cnv), row = uiPrvContentTop(cnv), fore = cnv->foreColor, back = cnv->backColor;
@@ -626,7 +726,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 			uiPrvDrawOneChar(cnv, row + itemHeight * i, 1, MENU_SELECTION_CHAR);
 		}
 		
-		switch (gotKey = uiPrvRecvKeypress()) {
+		switch (gotKey = uiPrvRecvMenuKeypress(cnv)) {
 			case UI_KEY_BIT_CENTER:
 				if (mToolExitEnabled) {
 					uiPrvRequestToolExit();
@@ -660,19 +760,10 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 
 static void uiPrvReset(struct Canvas *cnv, bool invert)
 {
-	const char *windowTitle = mUiHeaderTitle;
-	uint32_t titleLen, titleWidth;
 	memset(cnv->framebuffer, invert ? 0xff : 0, cnv->w * cnv->h * DISP_BPP / 8);
 	
-	//draw title
-	cnv->foreColor = invert ? 0 : 9;
-	cnv->font = FontLarge;
-	uiPrvFillRect(cnv, 0, 0, cnv->w - 1, uiPrvGlyphHeight(cnv));
-	cnv->foreColor = invert ? 9 : 0;
-	cnv->backColor = invert ? 0 : 9;
-	titleLen = uiPrvCharsFit(cnv, windowTitle, strlen(windowTitle), cnv->w > 2 ? cnv->w - 2 : cnv->w);
-	titleWidth = uiPrvCharsWidth(cnv, windowTitle, titleLen);
-	uiPuts(cnv, 0, titleWidth < cnv->w ? (cnv->w - titleWidth) / 2 : 0, windowTitle, titleLen);
+	mUiHeaderInverted = invert;
+	uiPrvDrawHeader(cnv, invert, true);
 
 	//set colors for ui
 	cnv->font = FontMedium;
@@ -2040,11 +2131,164 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 	}
 }
 
+enum ClockSettingsOption {
+	ClockSettingSet,
+	ClockSettingYear,
+	ClockSettingMonth,
+	ClockSettingDay,
+	ClockSettingHour,
+	ClockSettingMinute,
+	ClockSettingSecond,
+	ClockSettingCancel,
+	ClockSettingNum,
+};
+
+static uint_fast8_t uiPrvClockHour12(const struct BadgeRtcDateTime *time)
+{
+	uint_fast8_t hour = time->hour % 12u;
+
+	return hour ? hour : 12;
+}
+
+static void uiPrvClockClampDay(struct BadgeRtcDateTime *time)
+{
+	uint_fast8_t maxDay = badgeRtcDaysInMonth(time->year, time->month);
+
+	if (time->day < 1)
+		time->day = 1;
+	if (time->day > maxDay)
+		time->day = maxDay;
+}
+
+static uint_fast16_t uiPrvClockWrap(uint_fast16_t val, uint_fast16_t min, uint_fast16_t max, bool inc)
+{
+	if (inc)
+		return val < max ? val + 1 : min;
+	return val > min ? val - 1 : max;
+}
+
+static void uiPrvClockAdjust(struct BadgeRtcDateTime *time, enum ClockSettingsOption option, bool inc)
+{
+	switch (option) {
+		case ClockSettingYear:
+			time->year = uiPrvClockWrap(time->year, BADGE_RTC_MIN_YEAR, BADGE_RTC_MAX_YEAR, inc);
+			uiPrvClockClampDay(time);
+			break;
+
+		case ClockSettingMonth:
+			time->month = uiPrvClockWrap(time->month, 1, 12, inc);
+			uiPrvClockClampDay(time);
+			break;
+
+		case ClockSettingDay:
+			time->day = uiPrvClockWrap(time->day, 1, badgeRtcDaysInMonth(time->year, time->month), inc);
+			break;
+
+		case ClockSettingHour:
+			time->hour = uiPrvClockWrap(time->hour, 0, 23, inc);
+			break;
+
+		case ClockSettingMinute:
+			time->minute = uiPrvClockWrap(time->minute, 0, 59, inc);
+			break;
+
+		case ClockSettingSecond:
+			time->second = uiPrvClockWrap(time->second, 0, 59, inc);
+			break;
+
+		default:
+			break;
+	}
+}
+
+static void uiPrvClockDefault(struct BadgeRtcDateTime *time)
+{
+	if (badgeRtcGetDateTime(time) || badgeRtcReadHardware(time))
+		return;
+
+	time->year = 2026;
+	time->month = 1;
+	time->day = 1;
+	time->hour = 12;
+	time->minute = 0;
+	time->second = 0;
+}
+
+static void __attribute__((noinline)) uiPrvClockSettings(struct Canvas *cnv)
+{
+	struct BadgeRtcDateTime time;
+	int_fast8_t selOption = 0;
+
+	uiPrvClockDefault(&time);
+	uiPrvClockClampDay(&time);
+	uiPrvSetHeaderTitle("Clock");
+	uiPrvReset(cnv, false);
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvReset(cnv, false);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingSet), 10, "Set Clock", -1);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingYear), 10, "YEAR:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingYear), 111, "%u       ", (unsigned)time.year);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingMonth), 10, "MONTH:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingMonth), 111, "%02u        ", (unsigned)time.month);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingDay), 10, "DAY:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingDay), 111, "%02u        ", (unsigned)time.day);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingHour), 10, "HOUR:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingHour), 111, "%u %s      ", (unsigned)uiPrvClockHour12(&time), time.hour >= 12 ? "PM" : "AM");
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingMinute), 10, "MINUTE:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingMinute), 111, "%02u        ", (unsigned)time.minute);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingSecond), 10, "SECOND:", -1);
+		cnv->foreColor = 15;
+		uiPrintf(cnv, uiPrvMenuRow(cnv, ClockSettingSecond), 111, "%02u        ", (unsigned)time.second);
+
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, ClockSettingCancel), 10, "Cancel", -1);
+
+		selOption = uiPrvMenu(cnv, selOption, ClockSettingNum, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || (selOption == ClockSettingCancel && button == KEY_BIT_A))
+			return;
+		if (selOption == ClockSettingSet) {
+			if (button != KEY_BIT_A)
+				continue;
+			if (badgeRtcSetDateTime(&time)) {
+				uiAlert(cnv, "Clock set", DialogTypeOk);
+				return;
+			}
+			uiAlert(cnv, "RTC write failed", DialogTypeOk);
+			continue;
+		}
+
+		if (button == KEY_BIT_LEFT || button == KEY_BIT_RIGHT)
+			uiPrvClockAdjust(&time, (enum ClockSettingsOption)selOption, button == KEY_BIT_RIGHT);
+	}
+}
+
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exitOnDone)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
 	struct Settings settings;
-	uint_fast8_t numOptions = exitOnDone ? 4 : 3;
+	uint_fast8_t numOptions = exitOnDone ? 5 : 4;
 
 	uiPrvSetHeaderTitle("Settings");
 	settingsGet(&settings);
@@ -2056,7 +2300,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	uiPrvReset(cnv, false);
 
 	while (1) {
-		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, ledSettingsOption = exitOnDone ? 2 : 1, screenOption = exitOnDone ? 3 : 2, selOption;
+		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, clockOption = gameOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvSetHeaderTitle("Settings");
@@ -2064,6 +2308,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 		if (exitOnDone)
 			uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, gameOption), 10, "Game", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, clockOption), 10, "Clock", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, screenOption), 10, "Screen", -1);
 
@@ -2080,6 +2325,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			uiPrvScreenSettings(cnv, &settings);
 		else if (selOption == gameOption)
 			restartCurGame = uiPrvGameSettings(cnv, &settings) || restartCurGame;
+		else if (selOption == clockOption)
+			uiPrvClockSettings(cnv);
 		else if (selOption == ledSettingsOption)
 			uiPrvLedSettings(cnv, &settings);
 		if (uiPrvToolExitRequested()) {

@@ -46,6 +46,13 @@ void gbIoInit(void);
 uint32_t gbExtRtcGet(void);
 void gbExtRtcSet(uint32_t time);
 
+enum GbExtRtcMode {
+	GbExtRtcModeDefault,
+	GbExtRtcModeDefcon32BadgeGame,
+};
+
+void gbExtRtcReset(enum GbExtRtcMode mode);
+
 void gbExtAccelRead(uint16_t *xP, uint16_t *yP);		//please do not block, middle should be 0x8000, one g is 0x70 in magnitude
 
 #endif

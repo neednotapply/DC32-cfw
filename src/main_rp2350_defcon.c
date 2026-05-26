@@ -5,6 +5,7 @@
 #include "pioIrdaSIR.h"
 #include "dispDefcon.h"
 #include "badgeLeds.h"
+#include "badgeRtc.h"
 #include "bootGuard.h"
 #include "pioWS2812.h"
 #include "frontend.h"
@@ -52,7 +53,10 @@ static enum GameRuntime mActiveGameRuntime;
 static uint8_t mGbUpscaleSrcX[GB_UPSCALED_WIDTH];
 static uint16_t mGbUpscaleLineStart[GB_SRC_HEIGHT + 1];
 
-static uint64_t mRtcTickOffset;         //ticks to add to our ticks to represent RTC
+static bool mRtcValid;
+static enum GbExtRtcMode mGbRtcMode;
+static uint64_t mRtcTickOffset;         //ticks to subtract from getTime() to get badge RTC time
+static uint64_t mGbRtcTickOffset;       //same unit, but adjustable by emulated cartridge RTC writes
 static volatile uint8_t mDefconExtraIoData[3];
 static uint8_t mI2CreadBuf[2];
 static int8_t mEEpos = 0;
@@ -1234,9 +1238,54 @@ bool gbExtraIoRegWrite(uint8_t addr, uint8_t data)
         }
 }
 
-static uint_fast8_t rtcPrvFromBCD(uint_fast8_t val)
+#define RTC_REG_CONTROL_STATUS_1        0x00
+#define RTC_REG_VL_SECONDS             0x02
+#define RTC_TIME_REG_COUNT             7
+#define RTC_CTRL_STOP                  0x20
+#define RTC_SECONDS_VL                 0x80
+#define RTC_CENTURY_2000S              0x80
+
+static bool rtcPrvIsLeapYear(uint_fast16_t year)
 {
-        return (val % 16) + 10 * (val / 16);
+        return !(year & 3u);
+}
+
+uint_fast8_t badgeRtcDaysInMonth(uint_fast16_t year, uint_fast8_t month)
+{
+        static const uint8_t daysPerMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+        if (month < 1 || month > 12)
+                return 31;
+        if (month == 2 && rtcPrvIsLeapYear(year))
+                return 29;
+        return daysPerMonth[month - 1];
+}
+
+static bool rtcPrvDateTimeValid(const struct BadgeRtcDateTime *time)
+{
+        if (time->year < BADGE_RTC_MIN_YEAR || time->year > BADGE_RTC_MAX_YEAR)
+                return false;
+        if (time->month < 1 || time->month > 12)
+                return false;
+        if (time->day < 1 || time->day > badgeRtcDaysInMonth(time->year, time->month))
+                return false;
+        if (time->hour > 23 || time->minute > 59 || time->second > 59)
+                return false;
+        return true;
+}
+
+static bool rtcPrvFromBCD(uint8_t raw, uint8_t mask, uint_fast8_t min, uint_fast8_t max, uint8_t *valP)
+{
+        uint8_t val = raw & mask;
+        uint8_t ret;
+
+        if ((val & 0x0f) > 9 || ((val >> 4) & 0x0f) > 9)
+                return false;
+        ret = (val & 0x0f) + 10 * (val >> 4);
+        if (ret < min || ret > max)
+                return false;
+        *valP = ret;
+        return true;
 }
 
 static uint_fast8_t rtcPrvToBCD(uint_fast8_t val)
@@ -1244,117 +1293,269 @@ static uint_fast8_t rtcPrvToBCD(uint_fast8_t val)
         return (val % 10) + 16 * (val / 10);
 }
 
-static int64_t rtcPrvReadU32(void)
+static uint32_t rtcPrvDateToDays(const struct BadgeRtcDateTime *time)
 {
-        const uint32_t secondsPerMinute = 60, secondsPerHour = 60 * secondsPerMinute, secondsPerDay = 24 * secondsPerHour, secondsPerFourYears = (3 * 365 + 366) * secondsPerDay;
-        static const uint16_t daysBeforeMonthNormal[] = {31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-        static const uint16_t daysBeforeMonthLeap[] = {31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335};
-        bool inLeapYear = false;
-        uint_fast16_t years;
+        uint32_t days = 0;
+        uint_fast16_t year;
         uint_fast8_t month;
-        uint8_t rtcVals[7];
-        uint32_t val = 0;
 
-        if (!i2cRegRead(RTC_I2C_ADDR, 0x02, rtcVals, sizeof(rtcVals))) {
-                pr("RTC READ Fail\n");
-                return -1;
-        }
-
-        //account for years
-        years = rtcPrvFromBCD(rtcVals[6]) + ((rtcVals[5] & 0x80) ? 100 : 0);    //years since 1900
-        val += secondsPerFourYears * (years / 4);       //combos of 4 years that include a leap year
-        years %= 4;
-        if (!years) {
-
-                inLeapYear = true;
-        }
-        else {
-                val += 366 * secondsPerDay;
-                val += 365 * secondsPerDay * (years - 1);
-        }
-
-        //months
-        month = rtcPrvFromBCD(rtcVals[5] & 0x1f) - 1;
-        if (month)
-                val += secondsPerDay * (inLeapYear ? daysBeforeMonthLeap : daysBeforeMonthNormal)[month - 1];
-
-        val += (rtcPrvFromBCD(rtcVals[3]) - 1) * secondsPerDay;
-        val += rtcPrvFromBCD(rtcVals[2]) * secondsPerHour;
-        val += rtcPrvFromBCD(rtcVals[1]) * secondsPerMinute;
-        val += rtcPrvFromBCD(rtcVals[0] & 0x7f);
-
-        return (uint64_t)(uint32_t)val;
+        for (year = BADGE_RTC_MIN_YEAR; year < time->year; year++)
+                days += rtcPrvIsLeapYear(year) ? 366 : 365;
+        for (month = 1; month < time->month; month++)
+                days += badgeRtcDaysInMonth(time->year, month);
+        return days + time->day - 1;
 }
 
-static bool rtcPrvWriteU32(uint32_t time)
+static bool rtcPrvDateTimeToSeconds(const struct BadgeRtcDateTime *time, uint32_t *secondsP)
 {
-        static const uint8_t daysPerMonthNormal[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-        static const uint8_t daysPerMonthLeap[] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-        const uint32_t daysPerFourYears = 3 * 365 + 366;
-        uint_fast16_t years, months = 0;
-        const uint8_t *daysPerMonth;
-        uint8_t rtcVals[8];
+        uint32_t days;
 
-        rtcVals[1] = rtcPrvToBCD(time % 60); time /= 60;                //seconds
-        rtcVals[2] = rtcPrvToBCD(time % 60); time /= 60;                //minutes
-        rtcVals[3] = rtcPrvToBCD(time % 24); time /= 24;                //hours
-        //time is now in days
+        if (!rtcPrvDateTimeValid(time))
+                return false;
+        days = rtcPrvDateToDays(time);
+        *secondsP = days * 86400u + (uint32_t)time->hour * 3600u + (uint32_t)time->minute * 60u + time->second;
+        return true;
+}
 
-        //subtract out units of 4 years (one leap year and four not)
-        years = (time / daysPerFourYears) * 4;
-        time %= daysPerFourYears;
+static bool rtcPrvSecondsToDateTime(uint32_t seconds, struct BadgeRtcDateTime *timeP)
+{
+        uint32_t days = seconds / 86400u;
+        uint_fast16_t year = BADGE_RTC_MIN_YEAR;
+        uint_fast8_t month = 1;
 
-        //now handle any leftover years
-        if (time >= 366) {
+        seconds %= 86400u;
+        while (year <= BADGE_RTC_MAX_YEAR) {
+                uint_fast16_t daysInYear = rtcPrvIsLeapYear(year) ? 366 : 365;
 
-                years++;
-                time -= 366;
-                years += time / 365;
-                time %=365;
-                daysPerMonth = daysPerMonthNormal;
+                if (days < daysInYear)
+                        break;
+                days -= daysInYear;
+                year++;
         }
-        else {
+        if (year > BADGE_RTC_MAX_YEAR)
+                return false;
 
-                daysPerMonth = daysPerMonthLeap;
+        while (month <= 12) {
+                uint_fast8_t daysInMonth = badgeRtcDaysInMonth(year, month);
+
+                if (days < daysInMonth)
+                        break;
+                days -= daysInMonth;
+                month++;
+        }
+        if (month > 12)
+                return false;
+
+        timeP->year = year;
+        timeP->month = month;
+        timeP->day = days + 1;
+        timeP->hour = seconds / 3600u;
+        seconds %= 3600u;
+        timeP->minute = seconds / 60u;
+        timeP->second = seconds % 60u;
+        return true;
+}
+
+static uint_fast8_t rtcPrvWeekday(const struct BadgeRtcDateTime *time)
+{
+        return (6u + rtcPrvDateToDays(time)) % 7u;       //2000-01-01 was Saturday; PCF8563 uses Sunday == 0
+}
+
+static uint32_t rtcPrvGbSecondsForMode(uint32_t seconds, enum GbExtRtcMode mode)
+{
+        struct BadgeRtcDateTime time;
+
+        if (mode != GbExtRtcModeDefcon32BadgeGame || !rtcPrvSecondsToDateTime(seconds, &time))
+                return seconds;
+
+        //DC32BadgeGame uses MBC3 days as DEF CON day index, with Thursday == 0.
+        return (uint32_t)((rtcPrvWeekday(&time) + 3u) % 7u) * 86400u +
+                (uint32_t)time.hour * 3600u + (uint32_t)time.minute * 60u + time.second;
+}
+
+static void rtcPrvResetGbRtc(uint32_t badgeSeconds, uint64_t sampleTicks)
+{
+        uint32_t gbSeconds = rtcPrvGbSecondsForMode(badgeSeconds, mGbRtcMode);
+
+        mGbRtcTickOffset = sampleTicks - (uint64_t)gbSeconds * TICKS_PER_SECOND;
+}
+
+static uint32_t rtcPrvGetFromOffset(uint64_t tickOffset)
+{
+        return (getTime() - tickOffset + TICKS_PER_SECOND / 2) / TICKS_PER_SECOND;
+}
+
+static void rtcPrvCacheSeconds(uint32_t seconds, uint64_t sampleTicks, bool resetGbRtc)
+{
+        mRtcTickOffset = sampleTicks - (uint64_t)seconds * TICKS_PER_SECOND;
+        if (resetGbRtc)
+                rtcPrvResetGbRtc(seconds, sampleTicks);
+        mRtcValid = true;
+}
+
+static bool rtcPrvReadDateTime(struct BadgeRtcDateTime *timeP, uint32_t *secondsP, bool resetGbRtc)
+{
+        uint8_t rtcVals[RTC_REG_VL_SECONDS + RTC_TIME_REG_COUNT];
+        struct BadgeRtcDateTime time;
+        uint32_t seconds;
+        uint64_t sampleTicks = getTime();
+        uint8_t year;
+
+        if (!i2cRegRead(RTC_I2C_ADDR, RTC_REG_CONTROL_STATUS_1, rtcVals, sizeof(rtcVals))) {
+                pr("RTC READ Fail\n");
+                mRtcValid = false;
+                return false;
         }
 
-        while (time >= *daysPerMonth) {
-                
-                months++;
-                time -= *daysPerMonth++;
+        if ((rtcVals[RTC_REG_CONTROL_STATUS_1] & RTC_CTRL_STOP) ||
+                (rtcVals[RTC_REG_VL_SECONDS] & RTC_SECONDS_VL) ||
+                !rtcPrvFromBCD(rtcVals[2], 0x7f, 0, 59, &time.second) ||
+                !rtcPrvFromBCD(rtcVals[3], 0x7f, 0, 59, &time.minute) ||
+                !rtcPrvFromBCD(rtcVals[4], 0x3f, 0, 23, &time.hour) ||
+                !rtcPrvFromBCD(rtcVals[5], 0x3f, 1, 31, &time.day) ||
+                (rtcVals[6] & 0x07) > 6 ||
+                !rtcPrvFromBCD(rtcVals[7], 0x1f, 1, 12, &time.month) ||
+                !rtcPrvFromBCD(rtcVals[8], 0xff, 0, 99, &year)) {
+
+                pr("RTC invalid data\n");
+                mRtcValid = false;
+                return false;
         }
 
-        rtcVals[4] = rtcPrvToBCD(time + 1);
-        rtcVals[6] = (years >= 100 ? 0x80 : 0x00) | rtcPrvToBCD(1 + months);
-        rtcVals[7] = rtcPrvToBCD(years % 100);
-        rtcVals[0] = 0x02;      //register idx itself
-        
-        return i2cSimpleWrite(RTC_I2C_ADDR, rtcVals, sizeof(rtcVals));
+        time.year = BADGE_RTC_MIN_YEAR + year;
+        if (!rtcPrvDateTimeToSeconds(&time, &seconds)) {
+                pr("RTC invalid date\n");
+                mRtcValid = false;
+                return false;
+        }
+
+        rtcPrvCacheSeconds(seconds, sampleTicks, resetGbRtc);
+        if (timeP)
+                *timeP = time;
+        if (secondsP)
+                *secondsP = seconds;
+        return true;
+}
+
+static int64_t rtcPrvReadU32(void)
+{
+        uint32_t seconds;
+
+        if (!rtcPrvReadDateTime(NULL, &seconds, false))
+                return -1;
+        return seconds;
+}
+
+static bool rtcPrvWriteDateTime(const struct BadgeRtcDateTime *time)
+{
+        uint8_t rtcVals[RTC_TIME_REG_COUNT + 1];
+        uint32_t seconds;
+
+        if (!rtcPrvDateTimeToSeconds(time, &seconds))
+                return false;
+        if (!i2cOneByteRegWrite(RTC_I2C_ADDR, RTC_REG_CONTROL_STATUS_1, RTC_CTRL_STOP)) {
+                pr("RTC stop fail\n");
+                mRtcValid = false;
+                return false;
+        }
+
+        rtcVals[0] = RTC_REG_VL_SECONDS;
+        rtcVals[1] = rtcPrvToBCD(time->second);
+        rtcVals[2] = rtcPrvToBCD(time->minute);
+        rtcVals[3] = rtcPrvToBCD(time->hour);
+        rtcVals[4] = rtcPrvToBCD(time->day);
+        rtcVals[5] = rtcPrvWeekday(time);
+        rtcVals[6] = RTC_CENTURY_2000S | rtcPrvToBCD(time->month);
+        rtcVals[7] = rtcPrvToBCD(time->year - BADGE_RTC_MIN_YEAR);
+
+        if (!i2cSimpleWrite(RTC_I2C_ADDR, rtcVals, sizeof(rtcVals))) {
+                pr("RTC time write fail\n");
+                mRtcValid = false;
+                (void)i2cOneByteRegWrite(RTC_I2C_ADDR, RTC_REG_CONTROL_STATUS_1, 0);
+                return false;
+        }
+        if (!i2cOneByteRegWrite(RTC_I2C_ADDR, RTC_REG_CONTROL_STATUS_1, 0)) {
+                pr("RTC start fail\n");
+                mRtcValid = false;
+                return false;
+        }
+
+        rtcPrvCacheSeconds(seconds, getTime(), true);
+        return true;
 }
 
 static void rtcInit(void)
 {
-        uint64_t currentTicks = getTime();              //order here matters since rtcPrvReadU32() gives time at start of the actual read that takes half an ms
-        int64_t rtcTime = rtcPrvReadU32();
-        uint8_t rtcVals[7];
+        if (!rtcPrvReadDateTime(NULL, NULL, true)) {
+                uint64_t currentTicks = getTime();
 
-        if (rtcTime < 0) {
-                pr("RTC comms error\n");
-                return;
+                pr("RTC comms/integrity error\n");
+                mRtcTickOffset = currentTicks;
+                mGbRtcTickOffset = mRtcTickOffset;
         }
+}
 
-        //record the RTC offset so that our tick counter can function as the clock (it is much faster to read)
-        mRtcTickOffset = currentTicks - (uint64_t)(uint32_t)rtcTime * TICKS_PER_SECOND;
+bool badgeRtcIsValid(void)
+{
+        return mRtcValid;
+}
+
+uint32_t badgeRtcGet(void)
+{
+        return mRtcValid ? rtcPrvGetFromOffset(mRtcTickOffset) : 0;
+}
+
+bool badgeRtcGetTimeOfDay(uint_fast8_t *hourP, uint_fast8_t *minuteP, uint_fast8_t *secondP)
+{
+        struct BadgeRtcDateTime time;
+
+        if (!badgeRtcGetDateTime(&time))
+                return false;
+        if (hourP)
+                *hourP = time.hour;
+        if (minuteP)
+                *minuteP = time.minute;
+        if (secondP)
+                *secondP = time.second;
+        return true;
+}
+
+bool badgeRtcGetDateTime(struct BadgeRtcDateTime *timeP)
+{
+        if (!mRtcValid || !timeP)
+                return false;
+        return rtcPrvSecondsToDateTime(badgeRtcGet(), timeP);
+}
+
+bool badgeRtcReadHardware(struct BadgeRtcDateTime *timeP)
+{
+        return rtcPrvReadDateTime(timeP, NULL, false);
+}
+
+bool badgeRtcSetDateTime(const struct BadgeRtcDateTime *timeP)
+{
+        return timeP && rtcPrvWriteDateTime(timeP);
 }
 
 uint32_t gbExtRtcGet(void)
 {
-        return (getTime() - mRtcTickOffset + TICKS_PER_SECOND /  2) / TICKS_PER_SECOND;
+        return rtcPrvGetFromOffset(mGbRtcTickOffset);
 }
 
 void gbExtRtcSet(uint32_t time)
 {
-        mRtcTickOffset = getTime() - (uint64_t)time * TICKS_PER_SECOND;
+        mGbRtcTickOffset = getTime() - (uint64_t)time * TICKS_PER_SECOND;
+}
+
+void gbExtRtcReset(enum GbExtRtcMode mode)
+{
+        uint64_t sampleTicks = getTime();
+
+        mGbRtcMode = mode;
+        if (mRtcValid)
+                rtcPrvResetGbRtc(rtcPrvGetFromOffset(mRtcTickOffset), sampleTicks);
+        else
+                mGbRtcTickOffset = mRtcTickOffset;
 }
 
 static void gbExtAccelReadCbk(void *userData, const struct I2Creq *req, bool likelySuccess)

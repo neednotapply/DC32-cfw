@@ -901,6 +901,8 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 	if (!expect(!strcmp(chosenName, crystalFallback), "lifecycle fallback-imported Crystal exports back to fallback"))
 		return false;
+	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle select-game auto-export persisted Crystal before loading Bubble"))
+		return false;
 
 	fillGeneratedSaveBuffer(cart, TEST_SAVE_MAX_SIZE, 0xe1);
 	if (!expect(lifecycleExportGeneratedSave(volP, crystalClean, crystalFull, crystalFallback, CRYSTAL_ROM_NAME,
@@ -929,6 +931,8 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 	bubbleSeed = exportedSeed;
 	if (!expect(!strcmp(chosenName, bubbleClean), "lifecycle Bubble exports to cleaned primary"))
+		return false;
+	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/Bubble Bobble.sav", BUBBLE_SAVE_SIZE, bubbleSeed), "lifecycle select-game auto-export persisted Bubble before switching back"))
 		return false;
 
 	fillGeneratedSaveBuffer(cart, TEST_SAVE_MAX_SIZE, 0xd2);

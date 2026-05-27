@@ -3128,6 +3128,9 @@ bool uiSaveSavestate(void)
 
 	static bool uiPrvFlushCurrentSaveToCardEx(bool force, struct SaveExportResult *result);
 	static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual);
+	static bool uiPrvExportCurrentSavestateToMountedCard(struct Canvas *cnv, struct FatfsVol *vol, bool manual);
+	static bool uiPrvExportCurrentSavestateWithOptions(struct Canvas *cnv, bool force, bool showSuccess);
+	static bool uiPrvExportCurrentSavestateToMountedCardWithOptions(struct Canvas *cnv, struct FatfsVol *vol, bool force, bool showSuccess);
 
 	static bool uiPrvSelectionMatchesCachedGame(const char *romName, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize)
 	{
@@ -3141,16 +3144,24 @@ bool uiSaveSavestate(void)
 			!strcmp((const char*)QSPI_FILENAME_START, romName);
 	}
 
-	static void uiPrvPrepareForRomReplacement(struct Canvas *cnv, uint32_t savegameExportSz, const char *reason)
+	static bool uiPrvPrepareForRomReplacement(struct Canvas *cnv, struct FatfsVol *vol, const char *reason)
 	{
+		struct GameSelection selection;
+		uint32_t savegameExportSz = uiGetGameSelection(&selection) ? selection.saveRamSize : 0;
+
 		uiPrvSetHeaderTitle("Select Game");
 		if (savegameExportSz) {
 			pr("Game selection: exporting current save before ROM replacement (%s, %lu bytes)\n",
 				reason ? reason : "unknown", (unsigned long)savegameExportSz);
-			(void)uiPrvExportCurrentSavestate(cnv, false);
+			if (!(vol ? uiPrvExportCurrentSavestateToMountedCardWithOptions(cnv, vol, false, true) :
+				uiPrvExportCurrentSavestateWithOptions(cnv, false, true))) {
+				uiPrvSetHeaderTitle("Select Game");
+				return false;
+			}
 		}
 		uiPrvCartRamOwnerClear(reason ? reason : "ROM replacement");
 		uiPrvSetHeaderTitle("Select Game");
+		return true;
 	}
 
 	static bool __attribute__((noinline)) uiPrvConfirmRomSelection(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *romLocator, const char *romName)
@@ -3847,7 +3858,7 @@ bool uiFlushCurrentSaveToCard(bool force)
 	return uiPrvFlushCurrentSaveToCardEx(force, &result);
 }
 	
-	static bool uiPrvSelectRom(struct Canvas *cnv, uint32_t savegameExportSz, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
+	static bool uiPrvSelectRom(struct Canvas *cnv, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
 	{
 		struct FatFileLocator locator;
 		struct FatfsVol *vol;
@@ -3855,7 +3866,8 @@ bool uiFlushCurrentSaveToCard(bool force)
 		bool ret = false;
 		
 		// ROM selection reuses cartridge RAM, so export the current save through the normal SD pipeline first.
-		uiPrvPrepareForRomReplacement(cnv, savegameExportSz, "ROM picker");
+		if (!uiPrvPrepareForRomReplacement(cnv, NULL, "ROM picker"))
+			return false;
 
 		vol = uiPrvMountCardEx(cnv, false, forceSdReinit);
 		if (!vol)
@@ -4046,70 +4058,71 @@ static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, 
 	uiPrvSaveExportAppendPath(msg, "Legacy:", result->legacySaveName);
 }
 
-static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual)
+static void uiPrvSaveExportShowSuccess(struct Canvas *cnv, const struct SaveExportResult *result, bool showSuccess,
+	char msg[static SAVE_EXPORT_MSG_BUF_SZ])
+{
+	if (result->flashCacheFailed) {
+		if (result->saveName[0])
+			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result->saveName);
+		else
+			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
+		uiAlert(cnv, msg, DialogTypeOk);
+		return;
+	}
+
+	if (!showSuccess)
+		return;
+
+	if (result->saveName[0])
+		(void)sprintf(msg, "Save written to /SAVE/%s", result->saveName);
+	else
+		(void)sprintf(msg, "Save written to /SAVE");
+	uiAlert(cnv, msg, DialogTypeOk);
+}
+
+static bool uiPrvExportCurrentSavestateWithOptions(struct Canvas *cnv, bool force, bool showSuccess)
 {
 	struct SaveExportResult result;
 	char msg[SAVE_EXPORT_MSG_BUF_SZ];
 
-	pr("Savegame export: %s save requested\n", manual ? "manual" : "safe-exit");
-	if (!uiPrvFlushCurrentSaveToCardEx(manual, &result)) {
-		result.manualRequest = manual;
+	pr("Savegame export: %s save requested\n", showSuccess ? "confirmed" : "safe-exit");
+	if (!uiPrvFlushCurrentSaveToCardEx(force, &result)) {
+		result.manualRequest = showSuccess;
 		uiPrvSaveExportFormatFailure(&result, msg);
 		uiAlert(cnv, msg, DialogTypeOk);
 		return false;
 	}
 
-	if (result.flashCacheFailed) {
-		if (result.saveName[0])
-			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result.saveName);
-		else
-			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
+	uiPrvSaveExportShowSuccess(cnv, &result, showSuccess, msg);
+	return true;
+}
+
+static bool uiPrvExportCurrentSavestate(struct Canvas *cnv, bool manual)
+{
+	return uiPrvExportCurrentSavestateWithOptions(cnv, manual, manual);
+}
+
+static bool uiPrvExportCurrentSavestateToMountedCardWithOptions(struct Canvas *cnv, struct FatfsVol *vol, bool force,
+	bool showSuccess)
+{
+	struct SaveExportResult result;
+	char msg[SAVE_EXPORT_MSG_BUF_SZ];
+
+	pr("Savegame export: %s save requested on mounted SD volume\n", showSuccess ? "confirmed" : "safe-exit");
+	if (!uiPrvFlushCurrentSaveToMountedCardEx(vol, force, &result)) {
+		result.manualRequest = showSuccess;
+		uiPrvSaveExportFormatFailure(&result, msg);
 		uiAlert(cnv, msg, DialogTypeOk);
-		return true;
+		return false;
 	}
 
-	if (!manual)
-		return true;
-
-	if (result.saveName[0])
-		(void)sprintf(msg, "Save written to /SAVE/%s", result.saveName);
-	else
-		(void)sprintf(msg, "Save written to /SAVE");
-	uiAlert(cnv, msg, DialogTypeOk);
+	uiPrvSaveExportShowSuccess(cnv, &result, showSuccess, msg);
 	return true;
 }
 
 static bool uiPrvExportCurrentSavestateToMountedCard(struct Canvas *cnv, struct FatfsVol *vol, bool manual)
 {
-	struct SaveExportResult result;
-	char msg[SAVE_EXPORT_MSG_BUF_SZ];
-
-	pr("Savegame export: %s save requested on mounted SD volume\n", manual ? "manual" : "safe-exit");
-	if (!uiPrvFlushCurrentSaveToMountedCardEx(vol, manual, &result)) {
-		result.manualRequest = manual;
-		uiPrvSaveExportFormatFailure(&result, msg);
-		uiAlert(cnv, msg, DialogTypeOk);
-		return false;
-	}
-
-	if (result.flashCacheFailed) {
-		if (result.saveName[0])
-			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result.saveName);
-		else
-			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
-		uiAlert(cnv, msg, DialogTypeOk);
-		return true;
-	}
-
-	if (!manual)
-		return true;
-
-	if (result.saveName[0])
-		(void)sprintf(msg, "Save written to /SAVE/%s", result.saveName);
-	else
-		(void)sprintf(msg, "Save written to /SAVE");
-	uiAlert(cnv, msg, DialogTypeOk);
-	return true;
+	return uiPrvExportCurrentSavestateToMountedCardWithOptions(cnv, vol, manual, manual);
 }
 
 	static bool uiPrvHaveGamePath(void)
@@ -7244,19 +7257,8 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	}
 
 	case UiBrowserOpenGame:
-		{
-			struct GameSelection selection;
-			uint32_t savegameExportSz = uiGetGameSelection(&selection) ? selection.saveRamSize : 0;
-
-			uiPrvSetHeaderTitle("Select Game");
-			if (savegameExportSz) {
-				pr("Game selection: exporting current save before browser ROM replacement (%lu bytes)\n",
-					(unsigned long)savegameExportSz);
-				(void)uiPrvExportCurrentSavestateToMountedCard(cnv, vol, false);
-			}
-			uiPrvCartRamOwnerClear("browser game open");
-			uiPrvSetHeaderTitle("Select Game");
-		}
+		if (!uiPrvPrepareForRomReplacement(cnv, vol, "browser game open"))
+			return UiToolBrowser;
 		if (uiPrvConfirmRomSelection(cnv, vol, &ref->locator, ref->name))
 			return UiToolRunGame;
 		return UiToolBrowser;
@@ -7468,10 +7470,7 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 		}
 
 		if (mDeferredGameSelect && mLastGameMenuAction == UiGameActionSelectGame) {
-			uint32_t ramSz = 0;
-			bool validRom = uiPrvHaveValidRom(NULL, NULL, &ramSz);
-
-			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0, true)) {
+			if (uiPrvSelectRom(cnv, true)) {
 				uiPrvLoadSavestate();
 				continue;
 			}
@@ -7497,11 +7496,9 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		};
 		uint_fast8_t optionIds[3], numOptions = 0, selOption, i;
 		const char *labels[3];
-		enum RomColorSupport romColorSupport;
 		char name[ROM_NAME_LEN + 1];
 		char title[UI_GAME_TITLE_BUF_SZ];
-		uint32_t ramSz = 0;
-		bool validRom = uiPrvHaveValidRom(name, &romColorSupport, &ramSz);
+		bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		if (uiPrvToolExitRequested())
@@ -7543,7 +7540,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		}
 	#ifndef NO_SD_CARD
 		else if (optionIds[selOption] == GameToolOptionSelect) {
-			if (uiPrvSelectRom(cnv, validRom ? ramSz : 0, false)) {
+			if (uiPrvSelectRom(cnv, false)) {
 				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
 					return UiToolBrowser;
 			}
@@ -7570,8 +7567,7 @@ enum UiGameAction uiGameMenu(void)
 	char title[UI_GAME_TITLE_BUF_SZ];
 	struct GameSelection selection;
 	bool hasSaveRam = uiGetGameSelection(&selection) && selection.saveRamSize > 0;
-	uint32_t ramSz = 0;
-	bool validRom = uiPrvHaveValidRom(name, NULL, &ramSz);
+	bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
 	uiPrvSetHeaderTitle("Emulation");
@@ -7624,7 +7620,7 @@ enum UiGameAction uiGameMenu(void)
 		}
 
 		toolWorkspaceBegin();
-		selected = uiPrvSelectRom(cnv, validRom ? ramSz : 0, false);
+		selected = uiPrvSelectRom(cnv, false);
 		if (uiPrvToolExitRequested()) {
 			toolWorkspaceEnd();
 			mLastGameMenuAction = UiGameActionSwitchTool;

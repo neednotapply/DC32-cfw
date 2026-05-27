@@ -2566,6 +2566,17 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	}
 }
 
+static bool __attribute__((noinline)) uiPrvEditGameSettings(struct Canvas *cnv)
+{
+	struct Settings settings;
+	bool restartCurGame;
+
+	settingsGet(&settings);
+	restartCurGame = uiPrvGameSettings(cnv, &settings);
+	settingsSet(&settings);
+	return restartCurGame;
+}
+
 static void uiPrvLoadSavestate(void)
 {
 	struct GameSelection selection;
@@ -5634,8 +5645,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			selOption = uiPrvMenu(cnv, 0, numRemotes, &button);
 			if (uiPrvToolExitRequested())
 				return false;
-			if (button == KEY_BIT_B)
-				continue;
+			if (button == KEY_BIT_B) {
+				uiPrvRequestToolExit();
+				return false;
+			}
 			(void)uiPrvIrUniversalRemote(cnv, &mIrUniversalRemotes[selOption]);
 			if (uiPrvToolExitRequested())
 				return false;
@@ -6169,7 +6182,8 @@ reload_dir:
 						path[pathLenStack[depth]] = 0;
 						goto reload_dir;
 					}
-					break;
+					uiPrvRequestToolExit();
+					goto out_unmount;
 
 				case KEY_BIT_DOWN:
 					if (selectedItem + 1 < totalItems) {
@@ -6577,7 +6591,7 @@ reload_dir:
 			return false;
 
 		while (!uiPrvToolExitRequested()) {
-			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", true, &locator, name, sizeof(name), NULL, 0))
+			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", false, &locator, name, sizeof(name), NULL, 0))
 				break;
 
 			ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name) || ok;
@@ -7396,7 +7410,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 
 	while (1) {
 		uiPrvSetHeaderTitle("File Browser");
-		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", true, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", false, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
 			break;
 		}
 		memset(&ref, 0, sizeof(ref));
@@ -7479,6 +7493,9 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 	union SdFlags flags;
 
 	uiPrvSetHeaderTitle("USB Storage");
+	if (!uiAlert(cnv, "Expose microSD card to the USB host?", DialogTypeYesNo))
+		return;
+
 	uiPrvReset(cnv, false);
 	uiPrvDrawWrappedString(cnv, "Starting USB Storage...", 32, 10);
 
@@ -7580,7 +7597,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		enum {
 			GameToolOptionRun,
 			GameToolOptionSelect,
-			GameToolOptionSwitch,
+			GameToolOptionSettings,
 		};
 		uint_fast8_t optionIds[3], numOptions = 0, selOption, i;
 		const char *labels[3];
@@ -7603,8 +7620,8 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		labels[numOptions] = validRom ? "Select game" : "Load game";
 		optionIds[numOptions++] = GameToolOptionSelect;
 	#endif
-		labels[numOptions] = "Main Menu";
-		optionIds[numOptions++] = GameToolOptionSwitch;
+		labels[numOptions] = "Game Settings";
+		optionIds[numOptions++] = GameToolOptionSettings;
 
 		for (i = 0; i < numOptions; i++) {
 			if (optionIds[i] == GameToolOptionRun) {
@@ -7619,8 +7636,6 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (uiPrvToolExitRequested())
 			return UiToolBrowser;
 		if (button == KEY_BIT_B)
-			continue;
-		if (optionIds[selOption] == GameToolOptionSwitch)
 			return UiToolBrowser;
 		if (optionIds[selOption] == GameToolOptionRun) {
 			if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
@@ -7636,6 +7651,11 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 				return UiToolBrowser;
 		}
 	#endif
+		else if (optionIds[selOption] == GameToolOptionSettings) {
+			(void)uiPrvEditGameSettings(cnv);
+			if (uiPrvToolExitRequested())
+				return UiToolBrowser;
+		}
 	}
 }
 

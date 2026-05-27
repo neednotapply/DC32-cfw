@@ -4,6 +4,7 @@
 #include "gbCartHeader.h"
 #include "settings.h"
 #include "badgeLeds.h"
+#include "badgePower.h"
 #include "badgeRtc.h"
 #include "bootGuard.h"
 #include "memMap.h"
@@ -88,6 +89,7 @@ static const char mUiAppTitle[] = "DC32-cfw";
 static const char *mUiHeaderTitle = "Main Menu";
 static bool mUiHeaderInverted;
 static uint32_t mUiHeaderClockMinute = 0xffffffffu;
+static bool mUiHeaderLowBatt;
 
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
@@ -209,6 +211,61 @@ static uint_fast8_t uiPrvDrawOneChar(struct Canvas *cnv, int32_t r, int32_t c, w
 	
 	return gi.width;
 }
+
+#if DISP_BPP > 8
+
+	static uint_fast8_t uiPrvDrawOneCharRgb565(struct Canvas *cnv, int32_t r, int32_t c, wchar_t chr, uint16_t pxColor)
+	{
+		uint_fast8_t glyphHeight = uiPrvGlyphHeight(cnv), dr, dc;
+		uint16_t *fb16 = cnv->framebuffer;
+		struct FontGlyphInfo gi;
+
+		if (r <= -(signed)glyphHeight || r >= (int32_t)cnv->h || c >= (int32_t)cnv->w)
+			return 0;
+		if (!fontGetGlyphInfo(&gi, (enum Font)cnv->font, chr))
+			return 0;
+		if (c + gi.width <= 0)
+			return 0;
+
+		for (dr = 0; dr < gi.height; dr++) {
+			for (dc = 0; dc < gi.width; dc++) {
+				int32_t er = r + (int_fast16_t)(uint_fast16_t)dr, ec = c + (int_fast16_t)(uint_fast16_t)dc;
+				uint32_t ep;
+
+				if (!fontGetGlyphPixel(&gi, dr, dc))
+					continue;
+
+				if (cnv->flipped)
+					ep = cnv->rotated ? (cnv->w - 1 - ec) * cnv->h + er : (cnv->h - 1 - er) * cnv->w + (cnv->w - 1 - ec);
+				else
+					ep = cnv->rotated ? ec * cnv->h + cnv->h - 1 - er : er * cnv->w + ec;
+
+				if (er >= 0 && (uint32_t)er < cnv->h && ec >= 0 && (uint32_t)ec < cnv->w)
+					fb16[ep] = pxColor;
+			}
+		}
+
+		return gi.width;
+	}
+
+	static uint32_t uiPrvPutsRgb565(struct Canvas *cnv, int32_t r, int32_t c, const char *str, uint16_t pxColor)
+	{
+		int32_t startC = c;
+		struct FontGlyphInfo gi;
+		bool needsPreSpace = false;
+		char ch;
+
+		while ((ch = *str++) != 0) {
+			if (needsPreSpace && fontGetGlyphInfo(&gi, (enum Font)cnv->font, 0x2009))
+				c += uiPrvDrawOneCharRgb565(cnv, r, c, 0x2009, pxColor);
+			needsPreSpace = ch != ' ';
+			c += uiPrvDrawOneCharRgb565(cnv, r, c, (unsigned char)ch, pxColor);
+		}
+
+		return c - startC;
+	}
+
+#endif
 
 static uint32_t uiPrvCharsMeasure(struct Canvas *cnv, const char *chars, uint32_t len, uint32_t maxWidth, uint32_t *numCharsDrawnP)	//returns width used
 {
@@ -642,15 +699,23 @@ static void uiPrvHeaderTimeText(char text[static 9])
 static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 {
 	const char *windowTitle = mUiHeaderTitle;
+	const char lowBattText[] = "LOW BAT";
+	struct BadgePowerStatus powerStatus;
 	char timeText[9];
-	uint32_t titleLen, titleWidth, titleMaxRight, titleMaxWidth, timeWidth, clockMinute;
+	uint32_t titleLen, titleWidth, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft;
+	bool lowBatt = false;
 	int8_t foreColor = cnv->foreColor, backColor = cnv->backColor;
 	uint8_t font = cnv->font;
 
+	badgePowerPoll();
+	if (badgePowerGetCached(&powerStatus) && powerStatus.lowBatt)
+		lowBatt = true;
+
 	clockMinute = uiPrvHeaderCurrentClockMinute();
-	if (!force && clockMinute == mUiHeaderClockMinute)
+	if (!force && clockMinute == mUiHeaderClockMinute && lowBatt == mUiHeaderLowBatt)
 		return;
 	mUiHeaderClockMinute = clockMinute;
+	mUiHeaderLowBatt = lowBatt;
 
 	uiPrvHeaderTimeText(timeText);
 
@@ -661,17 +726,36 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 	cnv->foreColor = invert ? 9 : 0;
 	cnv->backColor = invert ? 0 : 9;
 
+	titleLeft = 0;
+	rightTextLeft = cnv->w;
+	if (lowBatt) {
+		uint32_t lowBattWidth = uiPrvCharsWidth(cnv, lowBattText, strlen(lowBattText));
+
+		if (lowBattWidth + 1 < cnv->w) {
+			#if DISP_BPP > 8
+				uiPrvPutsRgb565(cnv, 0, 1, lowBattText, 0xf800u);
+			#else
+				uiPuts(cnv, 0, 1, lowBattText, -1);
+			#endif
+			titleLeft = lowBattWidth + 5;
+		}
+	}
 	timeWidth = uiPrvCharsWidth(cnv, timeText, strlen(timeText));
-	if (timeWidth + 1 < cnv->w)
-		uiPuts(cnv, 0, cnv->w - timeWidth - 1, timeText, -1);
+	if (timeWidth + 1 < cnv->w) {
+		rightTextLeft = cnv->w - timeWidth - 1;
+		uiPuts(cnv, 0, rightTextLeft, timeText, -1);
+	}
 
 	titleMaxRight = cnv->w;
-	if (timeWidth + 4 < cnv->w)
-		titleMaxRight = cnv->w - timeWidth - 4;
-	titleMaxWidth = titleMaxRight > 2 ? titleMaxRight - 2 : titleMaxRight;
+	if (rightTextLeft < cnv->w)
+		titleMaxRight = rightTextLeft > 3 ? rightTextLeft - 3 : rightTextLeft;
+	if (titleLeft >= titleMaxRight)
+		titleMaxWidth = 0;
+	else
+		titleMaxWidth = titleMaxRight - titleLeft;
 	titleLen = uiPrvCharsFit(cnv, windowTitle, strlen(windowTitle), titleMaxWidth);
 	titleWidth = uiPrvCharsWidth(cnv, windowTitle, titleLen);
-	uiPuts(cnv, 0, titleWidth < titleMaxRight ? (titleMaxRight - titleWidth) / 2 : 0, windowTitle, titleLen);
+	uiPuts(cnv, 0, titleWidth < titleMaxWidth ? titleLeft + (titleMaxWidth - titleWidth) / 2 : titleLeft, windowTitle, titleLen);
 
 	cnv->font = font;
 	cnv->foreColor = foreColor;
@@ -5814,6 +5898,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		uint_fast16_t keys = uiGetUiKeysRaw(), pressed = keys &~ data->prevKeys;
 		uint64_t now = getTime();
 
+		uiPrvRefreshHeaderClock(data->cnv);
 		data->prevKeys = keys;
 		if (pressed & UI_KEY_BIT_CENTER) {
 			uiPrvRequestToolExit();
@@ -6274,6 +6359,7 @@ reload_dir:
 		struct BadUsbStatus badStatus;
 		uint64_t now = getTime();
 
+		uiPrvRefreshHeaderClock(data->cnv);
 		if (uiPrvCenterExitPressedRaw())
 			return false;
 		if (uiGetKeysRaw() & KEY_BIT_B)
@@ -6373,6 +6459,7 @@ reload_dir:
 			uint64_t now = getTime();
 
 			usbHidTask();
+			uiPrvRefreshHeaderClock(data->cnv);
 			if (uiPrvCenterExitPressedRaw()) {
 				uiPrvRequestToolExit();
 				return false;
@@ -7418,6 +7505,7 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 		uint64_t now = getTime();
 
 		usbMscTask();
+		uiPrvRefreshHeaderClock(cnv);
 		if ((uiGetKeysRaw() & KEY_BIT_B) || uiPrvCenterExitPressedRaw()) {
 			uiPrvWaitKeysReleased();
 			if (!usbMscEjected() && !uiAlert(cnv, "The host has not ejected the SD card.\nDisconnect anyway?", DialogTypeYesNo)) {

@@ -5,6 +5,7 @@
 #include "pioIrdaSIR.h"
 #include "dispDefcon.h"
 #include "badgeLeds.h"
+#include "badgePower.h"
 #include "badgeRtc.h"
 #include "bootGuard.h"
 #include "pioWS2812.h"
@@ -1600,26 +1601,6 @@ void gbExtAccelRead(uint16_t *xP, uint16_t *yP)
         (void)i2cTransact(&req, gbExtAccelReadCbk, samples);
 }
 
-static uint_fast16_t prvAdcVal2mv(const uint8_t *val, uint32_t scaleValue)
-{
-        uint32_t v = 256 * val[0] + val[1];             //unsigned 10-bit value referenced to 800mV. Range of the 10 bits is 800-1600mV
-
-        //ignore all previous datashits. ACTUAL ADC behaviour is as follows:
-        //0.92V -> 0x7f00
-        //xV -> 104945.3257 - 78874.41376 * x
-        //1.3V -> ??? ADC starts reporting negatives, but the forumla holds...
-        //ceiling where this stops not tested
-
-        //thus the map from ADC reported 16-bit value to input voltage is
-        // V = (104945.3257 - adcVal) / 78874.41376
-
-        v = 104898 - v;
-        v = v * 831 / 65536;
-        v = v * scaleValue / 65536;
-
-        return v;
-}
-
 static uint_fast16_t uiPrvSelfTestReadNonGbKeys(void)
 {
         uint_fast16_t ret = 0;
@@ -1692,19 +1673,16 @@ static void uiPrvSelfTestsIfNeeded(void)
 
         uint32_t passedTests = 0, failedTests = 0;      //these are sticky, on purpose!!
         uint8_t adcVals[6], stage = 0;
-        uint32_t battMv, usbMv;
+        struct BadgePowerStatus powerStatus;
         struct Canvas cnv;
         bool doSelfTest;
 
-        if (!i2cRegRead(ACCEL_I2C_ADDR, 0x88, adcVals, 4))
+        if (!badgePowerReadNow(&powerStatus))
                 doSelfTest = 1;
         else {
-                battMv = prvAdcVal2mv(adcVals + 0, 65536 / 0.3);
-                usbMv = prvAdcVal2mv(adcVals + 2, 65536 / 0.2);
-                
-                pr("BATT: %umV, USB: %umV\n", battMv, usbMv);
+                pr("BATT: %umV, USB: %umV\n", powerStatus.battMv, powerStatus.usbMv);
         
-                if (usbMv < 4600) {
+                if (powerStatus.usbMv < 4600) {
                         pr("SELF TEST: VBUS too low\n");
                         return;
                 }
@@ -1929,9 +1907,9 @@ static void uiPrvSelfTestsIfNeeded(void)
                                 prevSensorsTime = time;
 
                                 
-                                if (i2cRegRead(ACCEL_I2C_ADDR, 0x88, adcVals, 4)) {
+                                if (badgePowerReadNow(&powerStatus)) {
 
-                                        uint32_t battMv = prvAdcVal2mv(adcVals + 0, 65536 / 0.3), busMv = prvAdcVal2mv(adcVals + 2, 65536 / 0.2);
+                                        uint32_t battMv = powerStatus.battMv, busMv = powerStatus.usbMv;
 
                                         passedTests |= TEST_ID_IMU_COMMS;
 

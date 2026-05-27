@@ -11,6 +11,7 @@ set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
 
 add_executable(${APP}
     ${SRC_DIR}/audioPwm.c
+    ${SRC_DIR}/badgePower.c
     ${SRC_DIR}/badgeLeds.c
     ${SRC_DIR}/badUsb.c
     ${SRC_DIR}/bootGuard.c

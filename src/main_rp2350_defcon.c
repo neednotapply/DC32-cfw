@@ -74,6 +74,7 @@ extern uint32_t __data_start, __data_end, __bss_start, __bss_end, __stack_limit,
 #define ACCEL_I2C_ADDR                  0x18
 #define TOUCH_I2C_ADDR                  0x48
 #define RTC_I2C_ADDR                    0x51
+#define TOUCH_PEN_DOWN_THRESHOLD        100
 
 
 static void stackWatermarkInit(void)
@@ -271,7 +272,31 @@ uint_fast16_t uiGetUiKeys(void)
 uint_fast16_t uiGetUiKeysRaw(void)
 {
 	usbHidTask();
+	return uiGetUiKeysRawNoTask();
+}
+
+uint_fast16_t uiGetUiKeysRawNoTask(void)
+{
 	return prvUiKeysMap(sio_hw->gpio_in);
+}
+
+bool uiReadTouchRaw(struct UiTouchSample *sampleP)
+{
+	uint8_t touchX[2], touchY[2], touchZ[2];
+
+	if (!sampleP)
+		return false;
+
+	if (!i2cRegRead(TOUCH_I2C_ADDR, 0xc0, touchX, sizeof(touchX)) ||
+			!i2cRegRead(TOUCH_I2C_ADDR, 0xd0, touchY, sizeof(touchY)) ||
+			!i2cRegRead(TOUCH_I2C_ADDR, 0xe0, touchZ, sizeof(touchZ)))
+		return false;
+
+	sampleP->x = touchX[0] * 16 + touchX[1] / 16;
+	sampleP->y = touchY[0] * 16 + touchY[1] / 16;
+	sampleP->z = touchZ[0] * 16 + touchZ[1] / 16;
+	sampleP->penDown = sampleP->z > TOUCH_PEN_DOWN_THRESHOLD;
+	return true;
 }
 
 static void exitGame(void)
@@ -1754,12 +1779,11 @@ static void uiPrvSelfTestsIfNeeded(void)
 
                 while(1) {
 
-                        uint8_t touchX[2], touchY[2], touchZ[2];
+                        struct UiTouchSample touch;
                         int64_t curRtc = rtcPrvReadU32();
-                        uint16_t xi, yi, zi, btnsNow;
+                        uint16_t btnsNow;
                         uint64_t time = getTime();
                         int16_t x, y;
-                        bool penDown;
 
                         if (!((passedTests | failedTests) & TEST_ID_LEDS_CYCLED) && time - prevLedTime >= TICKS_PER_SECOND / 8) {
                                 prevLedTime = time;
@@ -1853,22 +1877,14 @@ static void uiPrvSelfTestsIfNeeded(void)
                                 uiSelfTestSetText(&cnv, 115, 50, "%s        ", (failedTests & TEST_ID_IRDA) ? "FAIL" : ((passedTests & TEST_ID_IRDA)  ? "PASS" : "????"));
                         }
 
-                        if (i2cRegRead(TOUCH_I2C_ADDR, 0xc0, touchX, sizeof(touchX)) && 
-                                        i2cRegRead(TOUCH_I2C_ADDR, 0xd0, touchY, sizeof(touchY)) &&
-                                        i2cRegRead(TOUCH_I2C_ADDR, 0xe0, touchZ, sizeof(touchZ))) {
+                        if (uiReadTouchRaw(&touch)) {
 
-                                xi = touchX[0] * 16 + touchX[1] / 16;
-                                yi = touchY[0] * 16 + touchY[1] / 16;
-                                zi = touchZ[0] * 16 + touchZ[1] / 16;
+                                if (touch.penDown) {
 
-                                penDown = zi > 100;
+                                        x = 350 - touch.x * 94 / 1024;
+                                        y = 260 - touch.y * 71 / 1024;
 
-                                if (penDown) {
-
-                                        x = 350 - xi * 94 / 1024;
-                                        y = 260 - yi * 71 / 1024;
-
-                                        uiSelfTestSetText(&cnv, 25, 50, "(%5u %5u) = (%6d %6d)            ", xi, yi, x, y);
+                                        uiSelfTestSetText(&cnv, 25, 50, "(%5u %5u) = (%6d %6d)            ", touch.x, touch.y, x, y);
 
                                         if (x >= 0 && x < (int32_t)cnv.w && y >= 0 && y < (int32_t)cnv.h) {
                                                 uiSelfTestSetText(&cnv, cnv.h - 1 - y, cnv.w - 1 - x, "*");

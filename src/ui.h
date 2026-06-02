@@ -1,6 +1,9 @@
 #ifndef _UI_H_
 #define _UI_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+
 
 
 struct Canvas {
@@ -42,6 +45,13 @@ enum GameRuntime {
 
 #define UI_KEY_BIT_CENTER	0x100u
 
+struct UiTouchSample {
+	uint16_t x;
+	uint16_t y;
+	uint16_t z;
+	bool penDown;
+};
+
 struct GameSelection {
 	enum GameRuntime runtime;
 	uint32_t romSize;
@@ -67,6 +77,9 @@ uint_fast8_t uiGetKeysRaw(void);
 //UI-only key state, including the badge center button above the Game Boy key bits.
 uint_fast16_t uiGetUiKeys(void);
 uint_fast16_t uiGetUiKeysRaw(void);
+uint_fast16_t uiGetUiKeysRawNoTask(void);
+
+bool uiReadTouchRaw(struct UiTouchSample *sampleP);
 
 
 void uiSelfTestInit(struct Canvas *cnv, bool inverted, bool flipped);

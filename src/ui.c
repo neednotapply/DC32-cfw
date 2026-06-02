@@ -34,6 +34,8 @@
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 #define UI_GAME_TITLE_BUF_SZ			64
+#define UI_KEY_REPEAT_INITIAL_TICKS		((uint64_t)TICKS_PER_SECOND * 300u / 1000u)
+#define UI_KEY_REPEAT_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND * 80u / 1000u)
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -91,6 +93,9 @@ static const char *mUiHeaderTitle = "Main Menu";
 static bool mUiHeaderInverted;
 static uint32_t mUiHeaderClockMinute = 0xffffffffu;
 static bool mUiHeaderLowBatt;
+static uint_fast16_t mUiRepeatKey;
+static uint64_t mUiRepeatNextTicks;
+static bool mUiKeyRepeated;
 
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
@@ -616,6 +621,38 @@ static void uiPrvSplash(struct Canvas *cnv)
 	while (getTime() < end);
 }
 
+static uint_fast16_t uiPrvNormalizeKeypress(uint_fast16_t val)
+{
+	if (val & UI_KEY_BIT_CENTER)
+		return UI_KEY_BIT_CENTER;
+	if (val & KEY_BIT_A)
+		return KEY_BIT_A;
+	if (val & KEY_BIT_B)
+		return KEY_BIT_B;
+	if (val & KEY_BIT_UP)
+		return KEY_BIT_UP;
+	if (val & KEY_BIT_DOWN)
+		return KEY_BIT_DOWN;
+	if (val & KEY_BIT_LEFT)
+		return KEY_BIT_LEFT;
+	if (val & KEY_BIT_RIGHT)
+		return KEY_BIT_RIGHT;
+
+	return val;
+}
+
+static bool uiPrvRepeatableDirection(uint_fast16_t key)
+{
+	return key == KEY_BIT_UP || key == KEY_BIT_DOWN || key == KEY_BIT_LEFT || key == KEY_BIT_RIGHT;
+}
+
+static void uiPrvKeyRepeatReset(void)
+{
+	mUiRepeatKey = 0;
+	mUiRepeatNextTicks = 0;
+	mUiKeyRepeated = false;
+}
+
 static uint_fast16_t uiPrvRecvKeypress(void)
 {
 	uint_fast16_t val, prevVal = 0;
@@ -624,27 +661,14 @@ static uint_fast16_t uiPrvRecvKeypress(void)
 	while ((val = uiGetUiKeys()) != 0)
 		prevVal = val;
 
-	if (prevVal & UI_KEY_BIT_CENTER)
-		return UI_KEY_BIT_CENTER;
-	if (prevVal & KEY_BIT_A)
-		return KEY_BIT_A;
-	if (prevVal & KEY_BIT_B)
-		return KEY_BIT_B;
-	if (prevVal & KEY_BIT_UP)
-		return KEY_BIT_UP;
-	if (prevVal & KEY_BIT_DOWN)
-		return KEY_BIT_DOWN;
-	if (prevVal & KEY_BIT_LEFT)
-		return KEY_BIT_LEFT;
-	if (prevVal & KEY_BIT_RIGHT)
-		return KEY_BIT_RIGHT;
-	
-	return prevVal;
+	uiPrvKeyRepeatReset();
+	return uiPrvNormalizeKeypress(prevVal);
 }
 
 static void uiPrvWaitKeysReleased(void)
 {
 	while (uiGetUiKeys());
+	uiPrvKeyRepeatReset();
 }
 
 static void uiPrvRequestToolExit(void)
@@ -770,31 +794,43 @@ static void uiPrvRefreshHeaderClock(struct Canvas *cnv)
 
 static uint_fast16_t uiPrvRecvMenuKeypress(struct Canvas *cnv)
 {
-	uint_fast16_t val, prevVal = 0;
+	while (1) {
+		uint_fast16_t val = uiGetUiKeys();
+		uint_fast16_t key = uiPrvNormalizeKeypress(val);
 
-	while (!uiGetUiKeys())
-		uiPrvRefreshHeaderClock(cnv);
-	while ((val = uiGetUiKeys()) != 0) {
-		prevVal = val;
-		uiPrvRefreshHeaderClock(cnv);
+		if (!key) {
+			uiPrvKeyRepeatReset();
+			uiPrvRefreshHeaderClock(cnv);
+			continue;
+		}
+
+		if (uiPrvRepeatableDirection(key)) {
+			uint64_t now = getTime();
+
+			if (mUiRepeatKey != key) {
+				mUiRepeatKey = key;
+				mUiRepeatNextTicks = now + UI_KEY_REPEAT_INITIAL_TICKS;
+				mUiKeyRepeated = false;
+				return key;
+			}
+			if (now >= mUiRepeatNextTicks) {
+				mUiRepeatNextTicks = now + UI_KEY_REPEAT_INTERVAL_TICKS;
+				mUiKeyRepeated = true;
+				return key;
+			}
+			uiPrvRefreshHeaderClock(cnv);
+			continue;
+		}
+
+		while ((val = uiGetUiKeys()) != 0) {
+			key = uiPrvNormalizeKeypress(val);
+			uiPrvRefreshHeaderClock(cnv);
+		}
+
+		uiPrvKeyRepeatReset();
+		mUiKeyRepeated = false;
+		return key;
 	}
-
-	if (prevVal & UI_KEY_BIT_CENTER)
-		return UI_KEY_BIT_CENTER;
-	if (prevVal & KEY_BIT_A)
-		return KEY_BIT_A;
-	if (prevVal & KEY_BIT_B)
-		return KEY_BIT_B;
-	if (prevVal & KEY_BIT_UP)
-		return KEY_BIT_UP;
-	if (prevVal & KEY_BIT_DOWN)
-		return KEY_BIT_DOWN;
-	if (prevVal & KEY_BIT_LEFT)
-		return KEY_BIT_LEFT;
-	if (prevVal & KEY_BIT_RIGHT)
-		return KEY_BIT_RIGHT;
-
-	return prevVal;
 }
 
 static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_fast8_t numChoices, uint_fast16_t *btnsMaskP /* if passed in, return val is the button that was pressed */)
@@ -824,11 +860,15 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 			case KEY_BIT_DOWN:
 				if (curChoice < numChoices - 1)
 					curChoice++;
+				else if (!mUiKeyRepeated && numChoices)
+					curChoice = 0;
 				break;
 			
 			case KEY_BIT_UP:
 				if (curChoice)
 					curChoice--;
+				else if (!mUiKeyRepeated && numChoices)
+					curChoice = numChoices - 1;
 				break;
 			
 			default:
@@ -1616,6 +1656,36 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		return true;
 	}
 
+	static bool uiPrvFileListAppendTail(struct UiFileListCtx *ctx, const char *fname, uint32_t fileSz, bool isDir, const struct FatFileLocator *locator)
+	{
+		uint32_t nameLen = strlen(fname), spaceNeeded = (sizeof(struct MusicOption) + nameLen + 1 + 3) &~ 3;
+		struct MusicOption *option;
+
+		if (spaceNeeded > ctx->spaceAvail) {
+			ctx->overflow = true;
+			return false;
+		}
+
+		option = ctx->nextAvail;
+		option->locator = *locator;
+		option->size = fileSz;
+		option->isDir = isDir;
+		memcpy(option->name, fname, nameLen + 1);
+		option->prev = ctx->tail;
+		option->next = NULL;
+
+		if (ctx->tail)
+			ctx->tail->next = option;
+		else
+			ctx->head = option;
+		ctx->tail = option;
+
+		ctx->nextAvail = (struct MusicOption*)(((uint8_t*)ctx->nextAvail) + spaceNeeded);
+		ctx->spaceAvail -= spaceNeeded;
+		ctx->count++;
+		return true;
+	}
+
 	static struct MusicOption *uiPrvFileOptionAt(struct MusicOption *head, uint32_t depth, uint32_t selectedItem)
 	{
 		uint32_t skip;
@@ -1895,7 +1965,7 @@ reload_dir:
 			}
 			prevSelOnscreenItem = selectedOnscreenItem;
 
-			switch (uiPrvRecvKeypress()) {
+			switch (uiPrvRecvMenuKeypress(cnv)) {
 				case UI_KEY_BIT_CENTER:
 					uiPrvRequestToolExit();
 					return false;
@@ -1954,6 +2024,10 @@ reload_dir:
 								topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
 						}
 					}
+					else if (!mUiKeyRepeated && totalItems) {
+						selectedItem = 0;
+						topItem = 0;
+					}
 					break;
 
 				case KEY_BIT_UP:
@@ -1967,6 +2041,10 @@ reload_dir:
 							if (selectedItem < topItem)
 								topItem = selectedItem;
 						}
+					}
+					else if (!mUiKeyRepeated && totalItems) {
+						selectedItem = totalItems - 1;
+						topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
 					}
 					break;
 
@@ -2644,7 +2722,12 @@ bool uiSaveSavestate(void)
 	#define IR_FLIPPER_TV_FILE		"/IR/tv.ir"
 	#define IR_FLIPPER_AC_FILE		"/IR/ac.ir"
 	#define IR_FLIPPER_AUDIO_FILE	"/IR/audio.ir"
-	#define IR_FLIPPER_PROJECTOR_FILE	"/IR/projector.ir"
+	#define IR_FLIPPER_PROJECTORS_FILE	"/IR/projectors.ir"
+	#define IR_FLIPPER_FANS_FILE	"/IR/fans.ir"
+	#define IR_FLIPPER_LEDS_FILE	"/IR/leds.ir"
+	#define IR_FLIPPER_MONITOR_FILE	"/IR/monitor.ir"
+	#define IR_FLIPPER_BLURAY_DVD_FILE	"/IR/bluray_dvd.ir"
+	#define IR_FLIPPER_DIGITAL_SIGN_FILE	"/IR/digital_sign.ir"
 	#define IR_FILE_MAGIC			"DC32IR1"
 	#define IR_DEFAULT_CARRIER		38000
 	#define IR_DEFAULT_REPEAT		1
@@ -2693,16 +2776,26 @@ bool uiSaveSavestate(void)
 		uint_fast8_t numButtons;
 	};
 
-	static const char *const mIrTvButtons[] = {"Ch_next", "Ch_prev", "Mute", "Power", "Vol_dn", "Vol_up"};
-	static const char *const mIrAcButtons[] = {"Cool_hi", "Cool_lo", "Dh", "Heat_hi", "Heat_lo", "Off"};
-	static const char *const mIrAudioButtons[] = {"Mute", "Next", "Pause", "Play", "Power", "Prev", "Vol_dn", "Vol_up"};
-	static const char *const mIrProjectorButtons[] = {"Mute", "Power", "Vol_dn", "Vol_up"};
+	static const char *const mIrTvButtons[] = {"Power", "Vol_up", "Vol_dn", "Ch_next", "Ch_prev", "Mute"};
+	static const char *const mIrAcButtons[] = {"Off", "Cool_hi", "Cool_lo", "Heat_hi", "Heat_lo", "Dh"};
+	static const char *const mIrAudioButtons[] = {"Power", "Vol_up", "Vol_dn", "Mute", "Play", "Pause", "Next", "Prev"};
+	static const char *const mIrProjectorsButtons[] = {"Power", "Vol_up", "Vol_dn", "Mute", "Play", "Pause"};
+	static const char *const mIrFansButtons[] = {"Power", "Speed_up", "Speed_dn", "Mode", "Rotate", "Timer"};
+	static const char *const mIrLedsButtons[] = {"Power_on", "Power_off", "Brightness_up", "Brightness_dn", "White", "Red", "Green", "Blue"};
+	static const char *const mIrMonitorButtons[] = {"POWER", "SOURCE", "MENU", "EXIT"};
+	static const char *const mIrBlurayDvdButtons[] = {"Power", "Play", "Pause", "Ok", "Eject", "Fast_fo", "Fast_ba", "Subtitle"};
+	static const char *const mIrDigitalSignButtons[] = {"POWER", "SOURCE", "PLAY", "STOP"};
 
 	static const struct IrUniversalRemote mIrUniversalRemotes[] = {
+		{"TV", IR_FLIPPER_TV_FILE, mIrTvButtons, sizeof(mIrTvButtons) / sizeof(*mIrTvButtons)},
 		{"A/C", IR_FLIPPER_AC_FILE, mIrAcButtons, sizeof(mIrAcButtons) / sizeof(*mIrAcButtons)},
 		{"Audio", IR_FLIPPER_AUDIO_FILE, mIrAudioButtons, sizeof(mIrAudioButtons) / sizeof(*mIrAudioButtons)},
-		{"Projector", IR_FLIPPER_PROJECTOR_FILE, mIrProjectorButtons, sizeof(mIrProjectorButtons) / sizeof(*mIrProjectorButtons)},
-		{"TV", IR_FLIPPER_TV_FILE, mIrTvButtons, sizeof(mIrTvButtons) / sizeof(*mIrTvButtons)},
+		{"Projectors", IR_FLIPPER_PROJECTORS_FILE, mIrProjectorsButtons, sizeof(mIrProjectorsButtons) / sizeof(*mIrProjectorsButtons)},
+		{"Fans", IR_FLIPPER_FANS_FILE, mIrFansButtons, sizeof(mIrFansButtons) / sizeof(*mIrFansButtons)},
+		{"LEDs", IR_FLIPPER_LEDS_FILE, mIrLedsButtons, sizeof(mIrLedsButtons) / sizeof(*mIrLedsButtons)},
+		{"Monitor", IR_FLIPPER_MONITOR_FILE, mIrMonitorButtons, sizeof(mIrMonitorButtons) / sizeof(*mIrMonitorButtons)},
+		{"Blu-ray/DVD", IR_FLIPPER_BLURAY_DVD_FILE, mIrBlurayDvdButtons, sizeof(mIrBlurayDvdButtons) / sizeof(*mIrBlurayDvdButtons)},
+		{"Digital Sign", IR_FLIPPER_DIGITAL_SIGN_FILE, mIrDigitalSignButtons, sizeof(mIrDigitalSignButtons) / sizeof(*mIrDigitalSignButtons)},
 	};
 
 	static const char *uiPrvBaseName(const char *path)
@@ -5390,7 +5483,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			return true;
 
 		memset(&loc, 0, sizeof(loc));
-		return uiPrvFileListAppend(ctx, name, 0, false, &loc);
+		return uiPrvFileListAppendTail(ctx, name, 0, false, &loc);
 	}
 
 	static uint32_t uiPrvIrListButtons(struct FatfsFil *fil, char *line, struct MusicOption **headP, bool *overflowP, bool *lineTooLongP)
@@ -5479,7 +5572,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			}
 			prevSelOnscreenItem = selectedOnscreenItem;
 
-			switch (uiPrvRecvKeypress()) {
+			switch (uiPrvRecvMenuKeypress(cnv)) {
 				case UI_KEY_BIT_CENTER:
 					uiPrvRequestToolExit();
 					return NULL;
@@ -5499,6 +5592,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 								topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
 						}
 					}
+					else if (!mUiKeyRepeated) {
+						selectedItem = 0;
+						topItem = 0;
+					}
 					break;
 
 				case KEY_BIT_UP:
@@ -5512,6 +5609,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 							if (selectedItem < topItem)
 								topItem = selectedItem;
 						}
+					}
+					else if (!mUiKeyRepeated) {
+						selectedItem = numItems - 1;
+						topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
 					}
 					break;
 			}
@@ -6211,7 +6312,7 @@ reload_dir:
 			}
 			prevSelOnscreenItem = selectedOnscreenItem;
 
-			switch (uiPrvRecvKeypress()) {
+			switch (uiPrvRecvMenuKeypress(cnv)) {
 				case UI_KEY_BIT_CENTER:
 					uiPrvRequestToolExit();
 					goto out_unmount;
@@ -6289,6 +6390,11 @@ reload_dir:
 						}
 						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					}
+					else if (!mUiKeyRepeated && totalItems) {
+						selectedItem = 0;
+						topItem = 0;
+						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
+					}
 					break;
 
 				case KEY_BIT_UP:
@@ -6302,6 +6408,11 @@ reload_dir:
 							if (selectedItem < topItem)
 								topItem = selectedItem;
 						}
+						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
+					}
+					else if (!mUiKeyRepeated && totalItems) {
+						selectedItem = totalItems - 1;
+						topItem = totalItems > itemsOnscreen ? totalItems - itemsOnscreen : 0;
 						cur = uiPrvMusicOptionAt(head, depth, selectedItem);
 					}
 					break;
@@ -6706,24 +6817,139 @@ bool uiFlushCurrentSaveToCard(bool force)
 }
 #endif
 
-#define HID_TEST_ENUM_WAIT_MS	5000
-#define HID_TEST_KEY_DELAY_MS	12
+#define USB_KEYBOARD_ENUM_WAIT_MS	5000
+#define USB_KEYBOARD_KEY_DELAY_MS	12
 
-static bool uiPrvHidTestDelay(uint32_t msec)
+enum UiUsbKeyboardAction {
+	UiUsbKeyboardActionKey,
+	UiUsbKeyboardActionString,
+	UiUsbKeyboardActionReleaseAll,
+};
+
+struct UiUsbKeyboardCommand {
+	const char *label;
+	enum UiUsbKeyboardAction action;
+	uint8_t mods;
+	uint8_t usage;
+	const char *text;
+};
+
+static const struct UiUsbKeyboardCommand mUsbKeyboardCommands[] = {
+	{"Release all keys", UiUsbKeyboardActionReleaseAll, 0, 0, NULL},
+	{"Enter", UiUsbKeyboardActionKey, 0, 0x28, NULL},
+	{"Tab", UiUsbKeyboardActionKey, 0, 0x2b, NULL},
+	{"Esc", UiUsbKeyboardActionKey, 0, 0x29, NULL},
+	{"Backspace", UiUsbKeyboardActionKey, 0, 0x2a, NULL},
+	{"Delete", UiUsbKeyboardActionKey, 0, 0x4c, NULL},
+	{"Space", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
+	{"Menu / App key", UiUsbKeyboardActionKey, 0, 0x65, NULL},
+
+	{"Navigate: Up", UiUsbKeyboardActionKey, 0, 0x52, NULL},
+	{"Navigate: Down", UiUsbKeyboardActionKey, 0, 0x51, NULL},
+	{"Navigate: Left", UiUsbKeyboardActionKey, 0, 0x50, NULL},
+	{"Navigate: Right", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
+	{"Navigate: Home", UiUsbKeyboardActionKey, 0, 0x4a, NULL},
+	{"Navigate: End", UiUsbKeyboardActionKey, 0, 0x4d, NULL},
+	{"Navigate: Page Up", UiUsbKeyboardActionKey, 0, 0x4b, NULL},
+	{"Navigate: Page Down", UiUsbKeyboardActionKey, 0, 0x4e, NULL},
+
+	{"Edit: Copy (Ctrl+C)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x06, NULL},
+	{"Edit: Paste (Ctrl+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x19, NULL},
+	{"Edit: Cut (Ctrl+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1b, NULL},
+	{"Edit: Undo (Ctrl+Z)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1d, NULL},
+	{"Edit: Redo (Ctrl+Y)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1c, NULL},
+	{"Edit: Select All (Ctrl+A)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x04, NULL},
+	{"Edit: Find (Ctrl+F)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x09, NULL},
+	{"Edit: New (Ctrl+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x11, NULL},
+	{"Edit: Open (Ctrl+O)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x12, NULL},
+	{"Edit: Save (Ctrl+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x16, NULL},
+	{"Edit: Print (Ctrl+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x13, NULL},
+	{"Edit: Paste Plain (Ctrl+Shift+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x19, NULL},
+
+	{"OS: Run (Win+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x15, NULL},
+	{"OS: Explorer (Win+E)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x08, NULL},
+	{"OS: Show Desktop (Win+D)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x07, NULL},
+	{"OS: Lock (Win+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0f, NULL},
+	{"OS: Search (Win+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x16, NULL},
+	{"OS: Settings (Win+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0c, NULL},
+	{"OS: Power User (Win+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x1b, NULL},
+	{"OS: Clipboard (Win+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x19, NULL},
+	{"OS: Emoji Panel (Win+.)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x37, NULL},
+	{"OS: Project Display (Win+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x13, NULL},
+	{"OS: Task Switch (Alt+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x2b, NULL},
+	{"OS: Task View (Win+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
+	{"OS: Task Manager (Ctrl+Shift+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x29, NULL},
+	{"OS: Close App (Alt+F4)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x3d, NULL},
+	{"OS: Ctrl+Alt+Del", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x4c, NULL},
+	{"OS: Snipping (Win+Shift+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LSHIFT, 0x16, NULL},
+	{"OS: Print Screen", UiUsbKeyboardActionKey, 0, 0x46, NULL},
+	{"OS: Active Screenshot (Alt+PrtSc)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x46, NULL},
+	{"OS: Reset Graphics (Win+Ctrl+Shift+B)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x05, NULL},
+	{"Linux: Terminal (Ctrl+Alt+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x17, NULL},
+	{"Linux: Lock (Ctrl+Alt+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x0f, NULL},
+
+	{"Mac: Spotlight (Cmd+Space)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2c, NULL},
+	{"Mac: App Switch (Cmd+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
+	{"Mac: Force Quit (Cmd+Opt+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LALT, 0x29, NULL},
+	{"Mac: Hide App (Cmd+H)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0b, NULL},
+	{"Mac: Quit App (Cmd+Q)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x14, NULL},
+
+	{"Browser: Address Bar (Ctrl+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x0f, NULL},
+	{"Browser: New Tab (Ctrl+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x17, NULL},
+	{"Browser: Close Tab (Ctrl+W)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1a, NULL},
+	{"Browser: Reopen Tab (Ctrl+Shift+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x17, NULL},
+	{"Browser: Private Window (Ctrl+Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x11, NULL},
+	{"Browser: Refresh (Ctrl+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x15, NULL},
+	{"Browser: Full Screen (F11)", UiUsbKeyboardActionKey, 0, 0x44, NULL},
+	{"Browser: Back (Alt+Left)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x50, NULL},
+	{"Browser: Forward (Alt+Right)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x4f, NULL},
+	{"Browser: Next Tab (Ctrl+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2b, NULL},
+	{"Browser: Prev Tab (Ctrl+Shift+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x2b, NULL},
+	{"Browser: Zoom In (Ctrl+=)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2e, NULL},
+	{"Browser: Zoom Out (Ctrl+-)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2d, NULL},
+	{"Browser: Zoom Reset (Ctrl+0)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x27, NULL},
+	{"Browser: Dev Tools (Ctrl+Shift+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x0c, NULL},
+
+	{"Media: Play/Pause (Space)", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
+	{"Media: YouTube Play/Pause (K)", UiUsbKeyboardActionKey, 0, 0x0e, NULL},
+	{"Media: YouTube Mute (M)", UiUsbKeyboardActionKey, 0, 0x10, NULL},
+	{"Media: YouTube Fullscreen (F)", UiUsbKeyboardActionKey, 0, 0x09, NULL},
+	{"Media: YouTube Captions (C)", UiUsbKeyboardActionKey, 0, 0x06, NULL},
+	{"Media: YouTube Vol Up (Up)", UiUsbKeyboardActionKey, 0, 0x52, NULL},
+	{"Media: YouTube Vol Down (Down)", UiUsbKeyboardActionKey, 0, 0x51, NULL},
+	{"Media: YouTube Back 10s (J)", UiUsbKeyboardActionKey, 0, 0x0d, NULL},
+	{"Media: YouTube Forward 10s (L)", UiUsbKeyboardActionKey, 0, 0x0f, NULL},
+	{"Media: YouTube Previous (Shift+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x13, NULL},
+	{"Media: YouTube Next (Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x11, NULL},
+
+	{"Presentation: Start (F5)", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
+	{"Presentation: Current Slide (Shift+F5)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x3e, NULL},
+	{"Presentation: Next", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
+	{"Presentation: Previous", UiUsbKeyboardActionKey, 0, 0x50, NULL},
+	{"Presentation: Black Screen (B)", UiUsbKeyboardActionKey, 0, 0x05, NULL},
+
+	{"Function: F1 Help", UiUsbKeyboardActionKey, 0, 0x3a, NULL},
+	{"Function: F2 Rename", UiUsbKeyboardActionKey, 0, 0x3b, NULL},
+	{"Function: F5 Refresh", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
+	{"Function: F12 Dev Tools", UiUsbKeyboardActionKey, 0, 0x45, NULL},
+	{"Type: DC32 test line", UiUsbKeyboardActionString, 0, 0, "DC32 USB Keyboard\n"},
+};
+
+static bool uiPrvUsbKeyboardDelay(uint32_t msec)
 {
 	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
 
 	while (getTime() < end) {
 		usbHidTask();
-		if (uiGetKeysRaw() & KEY_BIT_B)
+		if ((uiGetKeysRaw() & KEY_BIT_B) || uiPrvCenterExitPressedRaw())
 			return false;
 	}
 	return true;
 }
 
-static bool uiPrvHidTestWaitReady(struct Canvas *cnv)
+static bool uiPrvUsbKeyboardWaitReady(struct Canvas *cnv)
 {
-	uint64_t end = getTime() + (uint64_t)HID_TEST_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+	uint64_t end = getTime() + (uint64_t)USB_KEYBOARD_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
 	uint64_t lastDraw = 0;
 
 	while (getTime() < end) {
@@ -6735,7 +6961,7 @@ static bool uiPrvHidTestWaitReady(struct Canvas *cnv)
 		if (usbHidReady())
 			return true;
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvSetHeaderTitle("HID Test");
+			uiPrvSetHeaderTitle("USB Keyboard");
 			uiPrvReset(cnv, false);
 			cnv->font = FontMedium;
 			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
@@ -6746,7 +6972,7 @@ static bool uiPrvHidTestWaitReady(struct Canvas *cnv)
 	return usbHidReady();
 }
 
-static bool uiPrvHidTestAsciiKey(char ch, uint8_t *usageP, uint8_t *modsP)
+static bool uiPrvUsbKeyboardAsciiKey(char ch, uint8_t *usageP, uint8_t *modsP)
 {
 	*modsP = 0;
 	if (ch >= 'a' && ch <= 'z') {
@@ -6768,12 +6994,45 @@ static bool uiPrvHidTestAsciiKey(char ch, uint8_t *usageP, uint8_t *modsP)
 	}
 	switch (ch) {
 		case ' ': *usageP = 0x2c; return true;
+		case '\t': *usageP = 0x2b; return true;
 		case '\n': *usageP = 0x28; return true;
+		case '!': *usageP = 0x1e; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '@': *usageP = 0x1f; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '#': *usageP = 0x20; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '$': *usageP = 0x21; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '%': *usageP = 0x22; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '^': *usageP = 0x23; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '&': *usageP = 0x24; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '*': *usageP = 0x25; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '(': *usageP = 0x26; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case ')': *usageP = 0x27; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '-': *usageP = 0x2d; return true;
+		case '_': *usageP = 0x2d; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '=': *usageP = 0x2e; return true;
+		case '+': *usageP = 0x2e; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '[': *usageP = 0x2f; return true;
+		case '{': *usageP = 0x2f; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case ']': *usageP = 0x30; return true;
+		case '}': *usageP = 0x30; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '\\': *usageP = 0x31; return true;
+		case '|': *usageP = 0x31; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case ';': *usageP = 0x33; return true;
+		case ':': *usageP = 0x33; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '\'': *usageP = 0x34; return true;
+		case '"': *usageP = 0x34; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '`': *usageP = 0x35; return true;
+		case '~': *usageP = 0x35; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case ',': *usageP = 0x36; return true;
+		case '<': *usageP = 0x36; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '.': *usageP = 0x37; return true;
+		case '>': *usageP = 0x37; *modsP = USB_HID_MOD_LSHIFT; return true;
+		case '/': *usageP = 0x38; return true;
+		case '?': *usageP = 0x38; *modsP = USB_HID_MOD_LSHIFT; return true;
 		default: return false;
 	}
 }
 
-static bool uiPrvHidTestSendKey(uint8_t mods, uint8_t usage)
+static bool uiPrvUsbKeyboardSendKey(uint8_t mods, uint8_t usage)
 {
 	uint8_t keys[6] = {usage, 0, 0, 0, 0, 0};
 	uint8_t release[6] = {0};
@@ -6781,60 +7040,186 @@ static bool uiPrvHidTestSendKey(uint8_t mods, uint8_t usage)
 
 	if (!usbHidKeyboardReport(mods, keys))
 		return false;
-	if (!uiPrvHidTestDelay(HID_TEST_KEY_DELAY_MS))
+	if (!uiPrvUsbKeyboardDelay(USB_KEYBOARD_KEY_DELAY_MS))
 		ok = false;
 	if (!usbHidKeyboardReport(0, release))
 		ok = false;
 	return ok;
 }
 
-static bool uiPrvHidTestSendString(const char *str)
+static bool uiPrvUsbKeyboardSendString(const char *str)
 {
 	while (*str) {
 		uint8_t usage, mods;
 
-		if (uiPrvHidTestAsciiKey(*str++, &usage, &mods)) {
-			if (!uiPrvHidTestSendKey(mods, usage))
+		if (uiPrvUsbKeyboardAsciiKey(*str++, &usage, &mods)) {
+			if (!uiPrvUsbKeyboardSendKey(mods, usage))
 				return false;
 		}
 	}
 	return true;
 }
 
-static void uiPrvHidTestTool(struct Canvas *cnv)
+static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selectedP, const char *status, uint32_t *choiceP)
 {
-	enum {
-		HidTestText,
-		HidTestEnter,
-		HidTestTab,
-		HidTestGuiR,
-		HidTestQuit,
-		HidTestNum,
-	};
-	static const char *labels[HidTestNum] = {
-		[HidTestText] = "Send text",
-		[HidTestEnter] = "ENTER",
-		[HidTestTab] = "TAB",
-		[HidTestGuiR] = "GUI+R",
-		[HidTestQuit] = "Quit",
-	};
-	uint_fast8_t selected = 0;
-	bool reportsEnabled = false;
+	const uint32_t numCommands = sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands);
+	uint32_t selected = *selectedP, topItem, prevTopItem, prevSelOnscreenItem;
+	uint_fast8_t itemHeight = uiPrvMenuItemHeight(cnv), itemsOnscreen, listTop, itemLeft, footerRows;
+	struct FontGlyphInfo gi;
 
-	uiPrvSetHeaderTitle("HID Test");
-	if (!uiAlert(cnv, "Focus a text field on the host, then start HID test?", DialogTypeYesNo))
+	if (!numCommands)
+		return false;
+	if (selected >= numCommands)
+		selected = 0;
+
+	itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
+	listTop = uiPrvContentTop(cnv);
+	footerRows = status ? 2 : 1;
+	itemsOnscreen = (cnv->h - listTop - footerRows * itemHeight) / itemHeight;
+	if (!itemsOnscreen) {
+		uiAlert(cnv, "Display area too small for USB Keyboard", DialogTypeOk);
+		return false;
+	}
+	if (itemsOnscreen > numCommands)
+		itemsOnscreen = numCommands;
+	topItem = selected >= itemsOnscreen ? selected + 1 - itemsOnscreen : 0;
+	prevTopItem = topItem + 1;
+	prevSelOnscreenItem = selected - topItem + 1;
+
+	while (1) {
+		uint32_t i, selectedOnscreenItem = selected - topItem;
+
+		if (prevTopItem != topItem) {
+			uint_fast8_t scrollWidth;
+
+			uiPrvSetHeaderTitle("USB Keyboard");
+			uiPrvReset(cnv, false);
+			scrollWidth = numCommands > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numCommands, topItem, itemsOnscreen) : 0;
+			cnv->foreColor = 12;
+			for (i = 0; i < itemsOnscreen && topItem + i < numCommands; i++)
+				uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, mUsbKeyboardCommands[topItem + i].label);
+			if (status)
+				uiPrvDrawTruncText(cnv, cnv->h - 2 * itemHeight, 10, cnv->w - 10, status);
+			uiPuts(cnv, cnv->h - itemHeight, 10, "A = Send   B = Quit", -1);
+			prevSelOnscreenItem = selectedOnscreenItem + 1;
+		}
+		prevTopItem = topItem;
+		if (prevSelOnscreenItem != selectedOnscreenItem) {
+			if (prevSelOnscreenItem < itemsOnscreen) {
+				cnv->foreColor = 0;
+				uiPrvDrawOneChar(cnv, listTop + itemHeight * prevSelOnscreenItem, 1, MENU_SELECTION_CHAR);
+			}
+			cnv->foreColor = 15;
+			uiPrvDrawOneChar(cnv, listTop + itemHeight * selectedOnscreenItem, 1, MENU_SELECTION_CHAR);
+		}
+		prevSelOnscreenItem = selectedOnscreenItem;
+
+		switch (uiPrvRecvMenuKeypress(cnv)) {
+			case UI_KEY_BIT_CENTER:
+				uiPrvRequestToolExit();
+				return false;
+
+			case KEY_BIT_A:
+				*selectedP = selected;
+				*choiceP = selected;
+				return true;
+
+			case KEY_BIT_B:
+				return false;
+
+			case KEY_BIT_DOWN:
+				if (selected + 1 < numCommands) {
+					selected++;
+					if (selected >= topItem + itemsOnscreen) {
+						topItem++;
+						if (topItem + itemsOnscreen > numCommands)
+							topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+					}
+				}
+				else if (!mUiKeyRepeated) {
+					selected = 0;
+					topItem = 0;
+				}
+				break;
+
+			case KEY_BIT_UP:
+				if (selected) {
+					selected--;
+					if (selected < topItem)
+						topItem = selected;
+				}
+				else if (!mUiKeyRepeated) {
+					selected = numCommands - 1;
+					topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+				}
+				break;
+
+			case KEY_BIT_RIGHT:
+				if (topItem + itemsOnscreen < numCommands) {
+					uint32_t offset = selected - topItem;
+
+					topItem += itemsOnscreen;
+					if (topItem + itemsOnscreen > numCommands)
+						topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+					selected = topItem + offset;
+					if (selected >= numCommands)
+						selected = numCommands - 1;
+				}
+				break;
+
+			case KEY_BIT_LEFT:
+				if (topItem) {
+					uint32_t offset = selected - topItem;
+
+					topItem = topItem > itemsOnscreen ? topItem - itemsOnscreen : 0;
+					selected = topItem + offset;
+					if (selected >= numCommands)
+						selected = numCommands - 1;
+				}
+				break;
+		}
+	}
+}
+
+static bool uiPrvUsbKeyboardSendCommand(const struct UiUsbKeyboardCommand *cmd)
+{
+	switch (cmd->action) {
+	case UiUsbKeyboardActionString:
+		return uiPrvUsbKeyboardSendString(cmd->text);
+
+	case UiUsbKeyboardActionReleaseAll:
+		usbHidReleaseAll();
+		return true;
+
+	case UiUsbKeyboardActionKey:
+	default:
+		return uiPrvUsbKeyboardSendKey(cmd->mods, cmd->usage);
+	}
+}
+
+static void uiPrvUsbKeyboardTool(struct Canvas *cnv)
+{
+	uint32_t selected = 0;
+	char lastStatus[96] = {0};
+	bool reportsEnabled = false;
+	struct UsbHidDeviceInfo info;
+
+	uiPrvSetHeaderTitle("USB Keyboard");
+	if (!uiAlert(cnv, "Start USB Keyboard?\nConnect to a host, then send keys from the badge.", DialogTypeYesNo))
 		return;
-	if (!usbHidBegin(NULL)) {
+	usbHidDefaultInfo(&info);
+	strcpy(info.product, "DC32 USB Keyboard");
+	if (!usbHidBegin(&info)) {
 		char msg[96];
 
-		(void)sprintf(msg, "USB HID failed to start\n%s", usbHidLastError());
+		(void)sprintf(msg, "USB Keyboard failed to start\n%s", usbHidLastError());
 		uiAlert(cnv, msg, DialogTypeOk);
 		return;
 	}
-	if (!uiPrvHidTestWaitReady(cnv)) {
+	if (!uiPrvUsbKeyboardWaitReady(cnv)) {
 		usbHidEnd();
 		if (!(uiGetKeysRaw() & KEY_BIT_B))
-			uiAlert(cnv, "USB HID failed to enumerate", DialogTypeOk);
+			uiAlert(cnv, "USB Keyboard failed to enumerate", DialogTypeOk);
 		uiPrvWaitKeysReleased();
 		return;
 	}
@@ -6844,33 +7229,18 @@ static void uiPrvHidTestTool(struct Canvas *cnv)
 	uiPrvWaitKeysReleased();
 
 	while (!uiPrvToolExitRequested()) {
-		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
-		bool sent = true;
+		uint32_t choice;
+		const struct UiUsbKeyboardCommand *cmd;
 
-		uiPrvSetHeaderTitle("HID Test");
-		uiPrvReset(cnv, false);
-		cnv->font = FontMedium;
-		for (uint_fast8_t i = 0; i < HidTestNum; i++)
-			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
-		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Quit", -1);
-
-		selected = uiPrvMenu(cnv, selected, HidTestNum, &button);
-		if (button == KEY_BIT_B || selected == HidTestQuit)
+		if (!uiPrvUsbKeyboardSelectCommand(cnv, &selected, lastStatus[0] ? lastStatus : NULL, &choice))
 			break;
-
-		if (selected == HidTestText)
-			sent = uiPrvHidTestSendString("DC32 HID keyboard test\n");
-		else if (selected == HidTestEnter)
-			sent = uiPrvHidTestSendKey(0, 0x28);
-		else if (selected == HidTestTab)
-			sent = uiPrvHidTestSendKey(0, 0x2b);
-		else if (selected == HidTestGuiR)
-			sent = uiPrvHidTestSendKey(USB_HID_MOD_LGUI, 0x15);
-
-		if (!sent) {
-			uiAlert(cnv, "HID report failed", DialogTypeOk);
+		cmd = &mUsbKeyboardCommands[choice];
+		if (!uiPrvUsbKeyboardSendCommand(cmd)) {
+			if (!uiPrvToolExitRequested())
+				uiAlert(cnv, "USB Keyboard report failed", DialogTypeOk);
 			break;
 		}
+		(void)snprintf(lastStatus, sizeof(lastStatus), "Sent: %s", cmd->label);
 	}
 
 	if (reportsEnabled) {
@@ -7023,7 +7393,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolIr: return "Universal IR";
 		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
-		case UiToolHidTest: return "HID Test";
+		case UiToolHidTest: return "USB Keyboard";
 		case UiToolMusic: return "Music";
 		case UiToolImage: return "Image Viewer";
 		case UiToolGame:
@@ -7337,7 +7707,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolIr] = "Universal IR",
 		[UiToolUsbStorage] = "USB Storage",
 		[UiToolBadUsb] = "BadUSB",
-		[UiToolHidTest] = "HID Test",
+		[UiToolHidTest] = "USB Keyboard",
 		[UiToolMusic] = "Music",
 		[UiToolImage] = "Image Viewer",
 		[UiToolGame] = "Emulation",
@@ -7941,7 +8311,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			case UiToolHidTest:
 				uiPrvEnterTool(activeTool);
-				uiPrvHidTestTool(cnv);
+				uiPrvUsbKeyboardTool(cnv);
 				uiPrvExitTool(activeTool);
 				break;
 

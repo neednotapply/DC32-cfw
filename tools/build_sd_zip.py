@@ -14,10 +14,9 @@ import zipfile
 from pathlib import Path
 
 
-IR_REPO = "https://github.com/flipperdevices/flipperzero-firmware.git"
+IR_REPO = "https://github.com/Next-Flip/Momentum-Firmware.git"
 IR_BRANCH = "dev"
 IR_ASSET_PATH = Path("applications/main/infrared/resources/infrared/assets")
-IR_FILES = ("ac.ir", "audio.ir", "projector.ir", "tv.ir")
 
 BADUSB_REPO = "https://github.com/UberGuidoZ/Flipper.git"
 BADUSB_BRANCH = "main"
@@ -31,8 +30,29 @@ MUSIC_ARCHIVE_DIR = "Unsorted 10k Song Archive"
 MUSIC_BUCKET_FILE_LIMIT = 64
 MUSIC_BUCKET_ORDER = ("#", "0-9", *tuple(chr(ch) for ch in range(ord("A"), ord("Z") + 1)))
 
+ARDUBOY_REPO = "https://github.com/eried/ArduboyCollection.git"
+ARDUBOY_BRANCH = "master"
+ARDUBOY_GENRE_DIRS = (
+    "Action",
+    "Application",
+    "Arcade",
+    "Demo",
+    "Misc",
+    "Platformer",
+    "Puzzle",
+    "RPG",
+    "Racing",
+    "Shooter",
+    "Sports",
+)
+
 ROM_DIRS = {
-    "ARDUBOY": "Arduboy",
+    "AB": "Arduboy",
+    "GB": "Game Boy",
+    "GBC": "Game Boy Color",
+    "NES": "Nintendo Entertainment System",
+}
+ROM_PLACEHOLDER_DIRS = {
     "GB": "Game Boy",
     "GBC": "Game Boy Color",
     "NES": "Nintendo Entertainment System",
@@ -69,7 +89,7 @@ def builder_hash() -> str:
     return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
-def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, object]:
+def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> dict[str, object]:
     return {
         "schema": 1,
         "builder_sha256": builder_hash(),
@@ -79,6 +99,7 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, o
                 "branch": IR_BRANCH,
                 "commit": ir_sha,
                 "paths": [IR_ASSET_PATH.as_posix()],
+                "patterns": ["*.ir"],
             },
             "badusb": {
                 "repository": BADUSB_REPO,
@@ -92,6 +113,14 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, o
                 "commit": music_sha,
                 "paths": [*MUSIC_DIRS, MUSIC_ARCHIVE],
             },
+            "arduboy": {
+                "repository": ARDUBOY_REPO,
+                "branch": ARDUBOY_BRANCH,
+                "commit": arduboy_sha,
+                "paths": list(ARDUBOY_GENRE_DIRS),
+                "sd_path": "ROMS/AB",
+                "notes": "Only .hex files are copied. Game folders are flattened into their genre folders.",
+            },
             "roms": {
                 "directories": ROM_DIRS,
             },
@@ -102,20 +131,21 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str) -> dict[str, o
     }
 
 
-def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str) -> None:
+def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(source_manifest(ir_sha, badusb_sha, music_sha), indent=2, sort_keys=True) + "\n",
+        json.dumps(source_manifest(ir_sha, badusb_sha, music_sha, arduboy_sha), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
 
 
-def resolve_source_commits() -> tuple[str, str, str]:
+def resolve_source_commits() -> tuple[str, str, str, str]:
     return (
         resolve_remote_branch(IR_REPO, IR_BRANCH),
         resolve_remote_branch(BADUSB_REPO, BADUSB_BRANCH),
         resolve_remote_branch(MUSIC_REPO, MUSIC_BRANCH),
+        resolve_remote_branch(ARDUBOY_REPO, ARDUBOY_BRANCH),
     )
 
 
@@ -187,12 +217,14 @@ def copy_tree(src: Path, dst: Path) -> None:
 def copy_ir_assets(repo: Path, stage: Path) -> None:
     src = repo / IR_ASSET_PATH
     dst = stage / "IR"
+    ir_files = sorted(src.glob("*.ir"), key=lambda path: (path.name.casefold(), path.name))
+
+    if not ir_files:
+        raise FileNotFoundError(f"Missing required IR assets in: {src}")
+
     dst.mkdir(parents=True)
-    for name in IR_FILES:
-        asset = src / name
-        if not asset.is_file():
-            raise FileNotFoundError(f"Missing required IR asset: {asset}")
-        shutil.copyfile(asset, dst / name)
+    for asset in ir_files:
+        shutil.copyfile(asset, dst / asset.name)
 
 
 def copy_badusb_assets(repo: Path, stage: Path) -> None:
@@ -220,6 +252,56 @@ def copy_music_assets(repo: Path, stage: Path) -> None:
         nested_archive.unlink()
 
     bucket_large_music_dirs(dst)
+
+
+def arduboy_hex_sort_key(path: Path) -> tuple[str, str]:
+    posix = path.as_posix()
+    return (posix.casefold(), posix)
+
+
+def arduboy_game_folder(rel: Path) -> str:
+    return rel.parts[0] if len(rel.parts) > 1 else rel.stem
+
+
+def arduboy_unique_hex_name(rel: Path, used_names: set[str]) -> str:
+    if rel.name.casefold() not in used_names:
+        used_names.add(rel.name.casefold())
+        return rel.name
+
+    base_name = f"{arduboy_game_folder(rel)} - {rel.name}"
+    candidate = base_name
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    idx = 2
+
+    while candidate.casefold() in used_names:
+        candidate = f"{stem} ({idx}){suffix}"
+        idx += 1
+
+    used_names.add(candidate.casefold())
+    return candidate
+
+
+def copy_arduboy_assets(repo: Path, stage: Path) -> None:
+    dst_root = stage / "ROMS" / "AB"
+    dst_root.mkdir(parents=True, exist_ok=True)
+
+    for genre in ARDUBOY_GENRE_DIRS:
+        src = repo / genre
+        if not src.is_dir():
+            raise FileNotFoundError(f"Missing required Arduboy genre directory: {src}")
+
+        dst = dst_root / genre
+        dst.mkdir(parents=True, exist_ok=True)
+        hex_files = sorted(
+            (item.relative_to(src) for item in src.rglob("*") if item.is_file() and item.suffix.lower() == ".hex"),
+            key=arduboy_hex_sort_key,
+        )
+
+        used_names: set[str] = set()
+        for rel in hex_files:
+            target_name = arduboy_unique_hex_name(rel, used_names)
+            shutil.copyfile(src / rel, dst / target_name)
 
 
 def music_file_bucket_key(path: Path) -> tuple[str, str]:
@@ -302,10 +384,6 @@ def bucket_large_music_dirs(music_root: Path) -> None:
 
 def create_rom_dirs(stage: Path) -> None:
     rom_messages = {
-        "ARDUBOY": "Place your classic Arduboy games in this folder.\n"
-                   "Files should be .hex or classic .arduboy package format.\n"
-                   "Arduboy FX flash/cart packages are not supported by this firmware yet.\n",
-
         "GB": "Place your Game Boy roms in this folder.\n"
               "Files should be .gb format.\n"
               "Download GB roms here here: https://tinyurl.com/NoIntro-GB \n",
@@ -319,7 +397,7 @@ def create_rom_dirs(stage: Path) -> None:
                "Download NES roms here: https://tinyurl.com/NoIntro-NES \n",
     }
 
-    for name in ROM_DIRS:
+    for name in ROM_PLACEHOLDER_DIRS:
         rom_dir = stage / "ROMS" / name
         rom_dir.mkdir(parents=True, exist_ok=True)
 
@@ -352,7 +430,7 @@ def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
         zf.extract(member, dest)
 
 
-def write_sources(stage: Path, ir_sha: str, badusb_sha: str, music_sha: str) -> None:
+def write_sources(stage: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
     text = f"""# SD.zip Sources
 
 This release asset was assembled from upstream repositories at build time.
@@ -366,7 +444,7 @@ their upstream projects.
 - Commit: {ir_sha}
 - Source path: {IR_ASSET_PATH.as_posix()}
 - SD path: IR/
-- Files: {', '.join(IR_FILES)}
+- Files: all .ir files in the source path
 
 ## BADUSB
 
@@ -386,10 +464,19 @@ their upstream projects.
 - SD path: MUSIC/
 - Notes: {MUSIC_ARCHIVE} was extracted into MUSIC/{MUSIC_ARCHIVE_DIR}/ and the nested zip was omitted. Music folders with more than {MUSIC_BUCKET_FILE_LIMIT} direct files were split into alphabetic subfolders.
 
+## ARDUBOY
+
+- Repository: {ARDUBOY_REPO}
+- Branch: {ARDUBOY_BRANCH}
+- Commit: {arduboy_sha}
+- Source paths: {', '.join(ARDUBOY_GENRE_DIRS)}
+- SD path: ROMS/AB/
+- Notes: Only .hex files were copied. Game folders were flattened into their genre folders, and duplicate flattened filenames were prefixed with the game folder name.
+
 ## ROMS
 
 - SD paths: {', '.join(f'ROMS/{name}/' for name in ROM_DIRS)}
-- Notes: These folders contain README.txt placeholders. Add only ROM files you can lawfully use and redistribute.
+- Notes: ROMS/AB is populated from ArduboyCollection. Other ROM folders contain README.txt placeholders. Add only ROM files you can lawfully use and redistribute.
 
 ## IMAGES
 
@@ -428,8 +515,8 @@ def main() -> int:
     if args.sources_only:
         if not args.sources_output:
             raise ValueError("--sources-only requires --sources-output")
-        ir_sha, badusb_sha, music_sha = resolve_source_commits()
-        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha)
+        ir_sha, badusb_sha, music_sha, arduboy_sha = resolve_source_commits()
+        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
         print(f"Wrote {args.sources_output.resolve()}")
         return 0
 
@@ -444,22 +531,25 @@ def main() -> int:
     ensure_clean_dir(repos)
     ensure_clean_dir(stage)
 
-    ir_repo = repos / "flipperzero-firmware"
+    ir_repo = repos / "Momentum-Firmware"
     badusb_repo = repos / "UberGuidoZ-Flipper"
     music_repo = repos / "FlipperMusicRTTTL"
+    arduboy_repo = repos / "ArduboyCollection"
 
     ir_sha = clone_repo(IR_REPO, IR_BRANCH, ir_repo, [IR_ASSET_PATH.as_posix()])
     badusb_sha = clone_repo(BADUSB_REPO, BADUSB_BRANCH, badusb_repo, [BADUSB_PATH.as_posix()])
     music_sha = clone_repo(MUSIC_REPO, MUSIC_BRANCH, music_repo)
+    arduboy_sha = clone_repo(ARDUBOY_REPO, ARDUBOY_BRANCH, arduboy_repo, list(ARDUBOY_GENRE_DIRS))
 
     copy_ir_assets(ir_repo, stage)
     copy_badusb_assets(badusb_repo, stage)
     copy_music_assets(music_repo, stage)
+    copy_arduboy_assets(arduboy_repo, stage)
     create_rom_dirs(stage)
     create_image_dir(stage)
-    write_sources(stage, ir_sha, badusb_sha, music_sha)
+    write_sources(stage, ir_sha, badusb_sha, music_sha, arduboy_sha)
     if args.sources_output:
-        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha)
+        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
     build_zip(stage, output)
 
     print(f"Wrote {output}")

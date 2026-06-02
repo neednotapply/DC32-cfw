@@ -7,13 +7,13 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, HID Test, Music, Game, Settings, and Power Off entries. HID Test exposes a direct keyboard report check while mouse/composite HID work remains out of scope.
+- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, USB Keyboard, Music, Game, Settings, and Power Off entries. USB Keyboard exposes a scrollable launcher for common keyboard keys and shortcut chords while mouse/composite HID work remains out of scope.
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.hex`, `.arduboy`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
 - **Arduboy compatibility runtime** - Loads classic Arduboy `.hex` files and `.arduboy` packages from SD, runs them through the default Ardens-derived ATmega32u4 runtime with SSD1306, button, and EEPROM handling, renders the 128x64 monochrome display, and persists the 1 KiB EEPROM through the existing save flow. Arduboy FX flash/cart packages are not supported yet. Arduboy audio is disabled for v1 and no speaker-pin callbacks, synthesis, mixers, tone queues, or PWM updates are run by the Arduboy runtime.
 - **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save as `/SAVE/<rom base>.sav` from the emulator menu, exit, and switch-game paths.
-- **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for `/IR/ac.ir`, `/IR/audio.ir`, `/IR/projector.ir`, and `/IR/tv.ir`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
+- **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for Momentum universal IR files in `/IR`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
 - **USB Storage** - Exposes the full microSD card to a host computer as a standalone USB Mass Storage device. Eject or unmount from the host before leaving the tool; other SD-card tools are unavailable while storage mode is active.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
@@ -48,9 +48,9 @@ The firmware can browse the full card, but the menu tools look in these conventi
 
 | Path | Used by |
 | ---- | ------- |
-| `/ROMS` | Game picker root, conventionally split into `/ROMS/ARDUBOY`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
+| `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
-| `/IR` | Universal IR files, including `ac.ir`, `audio.ir`, `projector.ir`, `tv.ir`, and optional legacy `POWER.IR`. |
+| `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
 | `/IMAGES` | Image viewer files. Run `/IMAGES/image_converter.py` on a PC to convert still images into badge-native `.dci` files and animated GIF/APNG/WebP files into `.dca` animations. |
@@ -65,10 +65,11 @@ Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extra
 
 | SD path | Source |
 | ------- | ------ |
-| `/IR` | [flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware), `applications/main/infrared/resources/infrared/assets` |
+| `/IR` | [Next-Flip/Momentum-Firmware](https://github.com/Next-Flip/Momentum-Firmware), `applications/main/infrared/resources/infrared/assets` |
 | `/BADUSB` | [UberGuidoZ/Flipper](https://github.com/UberGuidoZ/Flipper), `BadUSB` |
 | `/MUSIC` | [neverfa11ing/FlipperMusicRTTTL](https://github.com/neverfa11ing/FlipperMusicRTTTL) |
-| `/ROMS/ARDUBOY`, `/ROMS/GB`, `/ROMS/GBC`, `/ROMS/NES` | Folders for user-provided ROMs, each with a `README.txt` placeholder; add only files you can lawfully use and redistribute. |
+| `/ROMS/AB` | [eried/ArduboyCollection](https://github.com/eried/ArduboyCollection), genre folders with flattened `.hex` files only. |
+| `/ROMS/GB`, `/ROMS/GBC`, `/ROMS/NES` | Folders for user-provided ROMs, each with a `README.txt` placeholder; add only files you can lawfully use and redistribute. |
 | `/IMAGES` | Local `image_converter.py` helper for creating `.dci` still images and `.dca` animations from user-provided images. |
 
 Credit and licensing for bundled external assets remain with their upstream projects.
@@ -165,7 +166,7 @@ Adjust the programmer command, permissions, or path for your setup.
 - The ProjectABE-inspired hybrid compatibility runtime and the older Arduous/simavr-derived runtime are kept as experimental build options. Configure with `-DARDUBOY_HYBRID_EXPERIMENTAL=ON` or `-DARDUBOY_SIMAVR_EXPERIMENTAL=ON` to build one of them instead of the default Ardens path.
 - Arduboy implementation references include [Ardens](https://github.com/tiberiusbrown/ardens), [Arduous](https://github.com/libretro/arduous), [simavr](https://github.com/buserror/simavr), [ProjectABE](https://github.com/felipemanga/ProjectABE), [Arduboy2](https://github.com/MLXXXp/Arduboy2), Arduboy Cloud, ESPboy Arduboy2, RP2040-GB, Pico-GB, the Pico SDK, and `arduino-pico`. The default Ardens-derived path is MIT licensed; the experimental simavr path still carries GPLv3 licensing implications if it is enabled.
 - USB Storage exposes the raw microSD card as a read-write Mass Storage device when the dedicated tool is active. Eject/unmount from the host before exiting the tool or unplugging the badge.
-- The USB HID implementation is keyboard-only and attaches only while BadUSB or HID Test is running. BadUSB mouse/media behavior and AutoClicker output are not available in this build.
+- The USB HID implementation is keyboard-only and attaches only while BadUSB or USB Keyboard is running. BadUSB mouse/media behavior, AutoClicker output, and true consumer-page media keys are not available in this build.
 
 ## Support and contributions
 

@@ -24,6 +24,7 @@
 #include "mbc.h"
 #include "gb.h"
 #include "nes/nes.h"
+#include "arduboy/arduboy.h"
 #include "ui.h"
 
 static void uiPrvUpscalerInit(void);
@@ -295,6 +296,11 @@ static void exitGame(void)
                                         mGameToolExitRequested = true;
                                 nesAbort();
                         }
+                        else if (mActiveGameRuntime == GameRuntimeArduboy) {
+                                if (action == UiGameActionSelectGame)
+                                        mGameToolExitRequested = true;
+                                arduboyAbort();
+                        }
                         else
                                 gbAbort();
                         return;
@@ -303,6 +309,8 @@ static void exitGame(void)
                         mGameToolExitRequested = true;
                         if (mActiveGameRuntime == GameRuntimeNes)
                                 nesAbort();
+                        else if (mActiveGameRuntime == GameRuntimeArduboy)
+                                arduboyAbort();
                         else
                                 gbAbort();
                         return;
@@ -315,6 +323,12 @@ static void exitGame(void)
                 nesRefreshDisplayOptions();
                 return;
         }
+        if (mActiveGameRuntime == GameRuntimeArduboy) {
+                mUpscaling = false;
+                mRotateGame = false;
+                arduboyRefreshDisplayOptions();
+                return;
+        }
         mUpscaling = shouldUpscale();
         mRotateGame = shouldRotateGame();
         if (mUpscaling)
@@ -322,6 +336,11 @@ static void exitGame(void)
 }
 
 void nesPortInGameMenu(void)
+{
+        exitGame();
+}
+
+void arduboyPortInGameMenu(void)
 {
         exitGame();
 }
@@ -821,6 +840,15 @@ static void runSelectedGameTool(void *userData)
                         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
                         mActiveGameRuntime = GameRuntimeNes;
                         nesRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
+                        mActiveGameRuntime = GameRuntimeNone;
+                }
+                else if (selection.runtime == GameRuntimeArduboy) {
+                        dispPrvFrameCtrReset();
+                        mUpscaling = false;
+                        mRotateGame = false;
+                        memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
+                        mActiveGameRuntime = GameRuntimeArduboy;
+                        arduboyRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
                         mActiveGameRuntime = GameRuntimeNone;
                 }
                 else if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {

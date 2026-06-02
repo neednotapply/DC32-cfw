@@ -1,0 +1,69 @@
+#include "absim.hpp"
+
+namespace absim
+{
+
+void atmega32u4_t::sound_st_handler_ddrc(atmega32u4_t& cpu, uint16_t ptr, uint8_t x)
+{
+#if ARDENS_NO_AUDIO
+    cpu.data[ptr] = x;
+#else
+    if(ptr == 0x27)
+    {
+        // DDRC
+        uint32_t e = 0;
+        if(x & (1 << 6))
+            e |= (1 << 0);
+        if(x & (1 << 7))
+            e |= (1 << 1);
+        cpu.sound_enabled = e;
+    }
+    cpu.data[ptr] = x;
+#endif
+}
+    
+ARDENS_FORCEINLINE void atmega32u4_t::update_sound()
+{
+#if ARDENS_NO_AUDIO
+    sound_prev_cycle = cycle_count;
+    return;
+#else
+    uint32_t cycles = uint32_t(cycle_count - sound_prev_cycle);
+    sound_prev_cycle = cycle_count;
+
+    uint32_t c = sound_cycle + cycles;
+    if(c < SOUND_CYCLES)
+    {
+        sound_cycle = c;
+        return;
+    }
+    uint32_t samples = c / SOUND_CYCLES;
+    sound_cycle = c % SOUND_CYCLES;
+
+    auto pins = sound_enabled;
+
+    if(pins == 0)
+    {
+        for(uint32_t i = 0; i < samples; ++i)
+            sound_buffer.push_back(0);
+        return;
+    }
+
+    int16_t x = sound_pwm_val;
+    if(!sound_pwm)
+    {
+        x = 0;
+        uint8_t portc = data[0x28];
+        if(pins & (1 << 0))
+            x += (portc & (1 << 6)) ? SOUND_GAIN / 2 : -SOUND_GAIN / 2;
+        if(pins & (1 << 1))
+            x += (portc & (1 << 7)) ? -SOUND_GAIN / 2 : SOUND_GAIN / 2;
+    }
+    for(uint32_t i = 0; i < samples; ++i)
+    {
+        sound_buffer.push_back(x);
+    }
+#endif
+}
+    
+}

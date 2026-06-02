@@ -37,6 +37,7 @@ enum GameRuntime {
 	GameRuntimeNone,
 	GameRuntimeGb,
 	GameRuntimeNes,
+	GameRuntimeArduboy,
 };
 
 #define UI_KEY_BIT_CENTER	0x100u

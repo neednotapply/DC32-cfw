@@ -30,6 +30,7 @@
 #include "sd.h"
 #include "gb.h"
 #include "nes/nes.h"
+#include "arduboy/arduboy.h"
 
 #define MENU_SELECTION_CHAR				0xBB /* RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK */
 #define UI_GAME_TITLE_BUF_SZ			64
@@ -1376,7 +1377,9 @@ static bool uiPrvStrEndsWithNoCase(const char *str, const char *suffix)
 
 static bool uiPrvRomFileName(const char *fname)
 {
-	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc") || uiPrvStrEndsWithNoCase(fname, ".nes");
+	return uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc") ||
+		uiPrvStrEndsWithNoCase(fname, ".nes") || uiPrvStrEndsWithNoCase(fname, ".hex") ||
+		uiPrvStrEndsWithNoCase(fname, ".arduboy");
 }
 
 #define GAME_META_MAGIC			0x31454d47u /* GME1 */
@@ -1438,6 +1441,8 @@ static const char *uiPrvRuntimeName(enum GameRuntime runtime)
 			return "GB";
 		case GameRuntimeNes:
 			return "NES";
+		case GameRuntimeArduboy:
+			return "Arduboy";
 		case GameRuntimeNone:
 		default:
 			return "none";
@@ -1539,6 +1544,8 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 {
 	if (uiPrvStrEndsWithNoCase(fname, ".nes"))
 		return GameRuntimeNes;
+	if (uiPrvStrEndsWithNoCase(fname, ".hex") || uiPrvStrEndsWithNoCase(fname, ".arduboy"))
+		return GameRuntimeArduboy;
 	if (uiPrvStrEndsWithNoCase(fname, ".gb") || uiPrvStrEndsWithNoCase(fname, ".gbc"))
 		return GameRuntimeGb;
 	return GameRuntimeNone;
@@ -2822,7 +2829,7 @@ bool uiSaveSavestate(void)
 	
 	static bool uiPrvSetGamePath(const char *buf, enum GameRuntime runtime, uint32_t romSize, uint32_t saveRamSize, enum SaveNameKind saveNameKind)		//also marks ROM as possibly valid
 	{
-		static uint8_t pathBuf[GAME_META_OFFSET];
+		uint8_t pathBuf[GAME_META_OFFSET];
 		uint8_t metaBuf[QSPI_WRITE_GRANULARITY];
 		struct GameSelectionFlashMeta *meta = (struct GameSelectionFlashMeta*)metaBuf;
 		uint32_t pathLen = 0, writeSz;
@@ -3268,9 +3275,10 @@ bool uiSaveSavestate(void)
 		enum GameRuntime runtime = uiPrvRuntimeForName(romName);
 		enum SaveNameKind saveNameKind = SaveNameKindClean;
 		struct NesRomInfo nesInfo;
+		struct ArduboyRomInfo arduboyInfo;
 		struct FatfsDir *dir;
 		struct CartHeader hdr;
-		bool ret = false, badSaveSize = false, preserveCachedSave = false;
+		bool ret = false, badSaveSize = false, preserveCachedSave = false, arduboyPackage = false;
 		
 		static const char colorTypes[][10] = {
 			[RomNoColor] = "B&W",
@@ -3311,6 +3319,14 @@ bool uiSaveSavestate(void)
 			colorSupport = RomNoColor;
 			(void)sprintf(internalName, "%s", nesInfo.name);
 		}
+		else if (runtime == GameRuntimeArduboy) {
+			memset(&arduboyInfo, 0, sizeof(arduboyInfo));
+			arduboyPackage = uiPrvStrEndsWithNoCase(romName, ".arduboy");
+			romSzExpected = fileSz;
+			ramSzExpected = ARDUBOY_SAVE_RAM_SIZE;
+			colorSupport = RomNoColor;
+			(void)sprintf(internalName, "ARDUBOY");
+		}
 		else if (fileSz < sizeof(hdr) || !fatfsFileRead(filR, &hdr, sizeof(hdr), &numRead) || numRead != sizeof(hdr)) {
 			
 			uiAlert(cnv, "Cannot read ROM file", DialogTypeOk);
@@ -3350,6 +3366,14 @@ bool uiSaveSavestate(void)
 			goto out_close_file;
 		}
 		preserveCachedSave = !filS && ramSzExpected && uiPrvSelectionMatchesCachedGame(romName, runtime, romSzExpected, ramSzExpected);
+		if (!preserveCachedSave && !filS && ramSzExpected && runtime == GameRuntimeArduboy && arduboyPackage) {
+			struct GameSelection cachedSelection;
+
+			preserveCachedSave = uiGetGameSelection(&cachedSelection) &&
+				cachedSelection.runtime == runtime &&
+				cachedSelection.saveRamSize == ramSzExpected &&
+				!strcmp((const char*)QSPI_FILENAME_START, romName);
+		}
 		if (preserveCachedSave)
 			saveNameKind = uiPrvSelectedSaveNameKind();
 	
@@ -3394,6 +3418,19 @@ bool uiSaveSavestate(void)
 			uiPuts(cnv, row, col + 55, uiPrvNesRegionName(nesInfo.region), -1);
 			row += 1 + uiPrvGlyphHeight(cnv);
 		}
+		else if (runtime == GameRuntimeArduboy) {
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "SYSTEM:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, row, col + 55, "ARDUBOY", -1);
+			row += 1 + uiPrvGlyphHeight(cnv);
+
+			cnv->foreColor = 10;
+			uiPuts(cnv, row, col, "TYPE:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, row, col + 55, arduboyPackage ? "PACKAGE" : "HEX", -1);
+			row += 1 + uiPrvGlyphHeight(cnv);
+		}
 		else {
 			cnv->foreColor = 10;
 			uiPuts(cnv, row, col, "NAME:", -1);
@@ -3420,7 +3457,52 @@ bool uiSaveSavestate(void)
 			uiPrvCartRamOwnerClear("selecting new ROM");
 			(void)uiPrvEraseGamePath();
 			
-			ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM", QSPI_ROM_SIZE_MAX);
+			if (runtime == GameRuntimeArduboy && arduboyPackage) {
+				enum {
+					ArduboyPackageScratchAddr = QSPI_ROM_START + QSPI_ROM_SIZE_MAX / 2,
+					ArduboyPackageScratchSize = QSPI_ROM_SIZE_MAX / 2,
+				};
+				struct ToolWorkspaceSpan inflateDict = {0}, writeBuf = {0};
+				uint32_t extractedHexSize = 0;
+
+				if (fileSz > ArduboyPackageScratchSize) {
+					uiAlert(cnv, "Arduboy package is too large for this firmware", DialogTypeOk);
+					ret = false;
+				}
+				else {
+					ret = uiPrvLoadFile(cnv, filR, ArduboyPackageScratchAddr, "PKG", ArduboyPackageScratchSize);
+					if (ret && (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer, &inflateDict) ||
+						!toolWorkspaceAcquire(ToolWorkspaceVram, ToolWorkspaceOwnerTransfer, &writeBuf))) {
+						uiAlert(cnv, "Tool workspace is busy; cannot extract package", DialogTypeOk);
+						ret = false;
+					}
+					if (ret) {
+						ret = arduboyExtractPackageToFlash((const void*)ArduboyPackageScratchAddr, fileSz, QSPI_ROM_START,
+							ArduboyPackageScratchSize, inflateDict.ptr, inflateDict.size, writeBuf.ptr, writeBuf.size,
+							&extractedHexSize);
+						if (!ret)
+							uiAlert(cnv, "Cannot extract Arduboy package", DialogTypeOk);
+					}
+					if (inflateDict.ptr)
+						toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
+					if (writeBuf.ptr)
+						toolWorkspaceRelease(ToolWorkspaceVram, ToolWorkspaceOwnerTransfer);
+					if (ret) {
+						romSzExpected = extractedHexSize;
+						ret = arduboyAnalyzeRom((const void*)QSPI_ROM_START, romSzExpected, &arduboyInfo);
+						if (!ret)
+							uiAlert(cnv, "Extracted Arduboy HEX is invalid", DialogTypeOk);
+					}
+				}
+			}
+			else {
+				ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM", QSPI_ROM_SIZE_MAX);
+				if (ret && runtime == GameRuntimeArduboy) {
+					ret = arduboyAnalyzeRom((const void*)QSPI_ROM_START, romSzExpected, &arduboyInfo);
+					if (!ret)
+						uiAlert(cnv, "Does not appear to be a valid Arduboy HEX file", DialogTypeOk);
+				}
+			}
 			
 			if (!ret) {
 				//erase rom header if we failed to load the ROM fully
@@ -3968,7 +4050,7 @@ bool uiFlushCurrentSaveToCard(bool force)
 		if (!vol)
 			return false;
 
-		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
+		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes/.hex/.arduboy files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 	out:
@@ -4245,7 +4327,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return false;
 
 	if (meta->magic == GAME_META_MAGIC &&
-		(meta->runtime == GameRuntimeGb || meta->runtime == GameRuntimeNes)) {
+		(meta->runtime == GameRuntimeGb || meta->runtime == GameRuntimeNes || meta->runtime == GameRuntimeArduboy)) {
 		selection.runtime = (enum GameRuntime)meta->runtime;
 		selection.romSize = meta->romSize;
 		selection.saveRamSize = meta->saveRamSize;
@@ -4266,6 +4348,18 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		struct NesRomInfo info;
 
 		if (!nesAnalyzeRom((const void*)QSPI_ROM_START, selection.romSize ? selection.romSize : QSPI_ROM_SIZE_MAX, &info))
+			return false;
+		if (!selection.romSize)
+			selection.romSize = info.romSize;
+		if (!selection.saveRamSize)
+			selection.saveRamSize = info.saveRamSize;
+	}
+	else if (selection.runtime == GameRuntimeArduboy) {
+		struct ArduboyRomInfo info;
+
+		if (!arduboyAnalyzeRom((const void*)QSPI_ROM_START, selection.romSize ? selection.romSize : QSPI_ROM_SIZE_MAX, &info))
+			return false;
+		if (info.isPackage)
 			return false;
 		if (!selection.romSize)
 			selection.romSize = info.romSize;
@@ -6819,6 +6913,19 @@ static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorS
 			*ramSzExpectedP = info.saveRamSize;
 		return true;
 	}
+	if (selection.runtime == GameRuntimeArduboy) {
+		struct ArduboyRomInfo info;
+
+		if (!arduboyAnalyzeRom((const void*)QSPI_ROM_START, selection.romSize, &info) || info.isPackage)
+			return false;
+		if (romNameOutP)
+			(void)sprintf(romNameOutP, "%s", info.name);
+		if (romColorSupportP)
+			*romColorSupportP = RomNoColor;
+		if (ramSzExpectedP)
+			*ramSzExpectedP = info.saveRamSize;
+		return true;
+	}
 	
 	if (!mbcRomAnalyze(hdr, &romSzExpected, &ramSzExpected, &romColorSupport, romNameOutP))
 		return false;
@@ -6871,8 +6978,12 @@ static const char *uiPrvCurrentGameConsoleName(void)
 	struct GameSelection selection;
 	struct Settings settings;
 
-	if (uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes)
-		return "NES";
+	if (uiGetGameSelection(&selection)) {
+		if (selection.runtime == GameRuntimeNes)
+			return "NES";
+		if (selection.runtime == GameRuntimeArduboy)
+			return "ARDUBOY";
+	}
 
 	settingsGet(&settings);
 	return settings.actLikeGBC ? "GBC" : "GB";
@@ -7547,11 +7658,12 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 static enum UiGameAction mLastGameMenuAction = UiGameActionResume;
 static bool mDeferredGameSelect;
 
-static bool uiPrvCurrentGameIsNes(void)
+static bool uiPrvCurrentGameDefersSelect(void)
 {
 	struct GameSelection selection;
 
-	return uiGetGameSelection(&selection) && selection.runtime == GameRuntimeNes;
+	return uiGetGameSelection(&selection) &&
+		(selection.runtime == GameRuntimeNes || selection.runtime == GameRuntimeArduboy);
 }
 
 static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -7721,7 +7833,7 @@ enum UiGameAction uiGameMenu(void)
 	if (optionIds[selOption] == GameMenuOptionSelect) {
 		bool selected;
 
-		if (uiPrvCurrentGameIsNes()) {
+		if (uiPrvCurrentGameDefersSelect()) {
 			mDeferredGameSelect = true;
 			mLastGameMenuAction = UiGameActionSelectGame;
 			return mLastGameMenuAction;

@@ -14,7 +14,6 @@ static uint32_t mBlockCount;
 static const char *mLastError = "none";
 static const char *mLastOp = "Idle";
 static uint32_t mLastLba, mLastBytes;
-static uint8_t mScratch[SD_BLOCK_SIZE];
 
 static bool usbMscPrvRangeOk(uint32_t lba, uint32_t numBlocks)
 {
@@ -238,6 +237,7 @@ static bool usbMscPrvWriteSectors(uint32_t lba, const uint8_t *src, uint32_t num
 static int32_t usbMscPrvRead10(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
 	uint8_t *dst = (uint8_t*)buffer;
+	uint8_t scratch[SD_BLOCK_SIZE] __attribute__((aligned(4)));
 	uint32_t done = 0;
 
 	if (lun)
@@ -265,9 +265,9 @@ static int32_t usbMscPrvRead10(uint8_t lun, uint32_t lba, uint32_t offset, void 
 		if (chunk > bufsize - done)
 			chunk = bufsize - done;
 
-		if (!sdSecRead(lba, mScratch))
+		if (!sdSecRead(lba, scratch))
 			return usbMscPrvIoError("SD read failed");
-		memcpy(dst + done, mScratch + offset, chunk);
+		memcpy(dst + done, scratch + offset, chunk);
 
 		done += chunk;
 		lba++;
@@ -288,6 +288,7 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 
 static int32_t usbMscPrvWrite10(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
+	uint8_t scratch[SD_BLOCK_SIZE] __attribute__((aligned(4)));
 	uint32_t done = 0;
 
 	if (lun)
@@ -317,10 +318,10 @@ static int32_t usbMscPrvWrite10(uint8_t lun, uint32_t lba, uint32_t offset, uint
 		if (chunk > bufsize - done)
 			chunk = bufsize - done;
 
-		if (!sdSecRead(lba, mScratch))
+		if (!sdSecRead(lba, scratch))
 			return usbMscPrvIoError("SD read failed");
-		memcpy(mScratch + offset, buffer + done, chunk);
-		if (!sdSecWrite(lba, mScratch))
+		memcpy(scratch + offset, buffer + done, chunk);
+		if (!sdSecWrite(lba, scratch))
 			return usbMscPrvIoError("SD write failed");
 
 		done += chunk;

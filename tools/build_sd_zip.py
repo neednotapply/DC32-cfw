@@ -32,6 +32,7 @@ MUSIC_BUCKET_FILE_LIMIT = 64
 MUSIC_BUCKET_ORDER = ("#", "0-9", *tuple(chr(ch) for ch in range(ord("A"), ord("Z") + 1)))
 
 ROM_DIRS = {
+    "ARDUBOY": "Arduboy",
     "GB": "Game Boy",
     "GBC": "Game Boy Color",
     "NES": "Nintendo Entertainment System",
@@ -301,6 +302,10 @@ def bucket_large_music_dirs(music_root: Path) -> None:
 
 def create_rom_dirs(stage: Path) -> None:
     rom_messages = {
+        "ARDUBOY": "Place your classic Arduboy games in this folder.\n"
+                   "Files should be .hex or classic .arduboy package format.\n"
+                   "Arduboy FX flash/cart packages are not supported by this firmware yet.\n",
+
         "GB": "Place your Game Boy roms in this folder.\n"
               "Files should be .gb format.\n"
               "Download GB roms here here: https://tinyurl.com/NoIntro-GB \n",

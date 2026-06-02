@@ -34,8 +34,6 @@ struct BadUsbScratch {
 	char preloadBuf[BADUSB_PRELOAD_BUF_SZ];
 };
 
-static struct BadUsbScratch mScratch;
-
 static const struct BadUsbKey mSpecialKeys[] = {
 	{"DOWNARROW", 0x51}, {"DOWN", 0x51}, {"LEFTARROW", 0x50}, {"LEFT", 0x50},
 	{"RIGHTARROW", 0x4f}, {"RIGHT", 0x4f}, {"UPARROW", 0x52}, {"UP", 0x52},
@@ -666,10 +664,10 @@ static void badUsbPrvParseIdLine(char *line, struct UsbHidDeviceInfo *info)
 	}
 }
 
-static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbState *st, struct UsbHidDeviceInfo *info)
+static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbState *st, struct UsbHidDeviceInfo *info, struct BadUsbScratch *scratch)
 {
-	char *firstLine = mScratch.line;
-	char *buf = mScratch.preloadBuf;
+	char *firstLine = scratch->line;
+	char *buf = scratch->preloadBuf;
 	uint32_t bytesRead = 0, lineLen = 0, firstLen = 0, lastPollBytes = 0;
 	bool inFirstLine = true, firstLineParsed = false;
 
@@ -735,9 +733,9 @@ static enum BadUsbResult badUsbPrvPreload(struct FatfsFil *fil, struct BadUsbSta
 	return fatfsFileSeek(fil, 0) ? BadUsbResultDone : BadUsbResultFileError;
 }
 
-static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbState *st)
+static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbState *st, struct BadUsbScratch *scratch)
 {
-	char *line = mScratch.line, *prevLine = mScratch.prevLine;
+	char *line = scratch->line, *prevLine = scratch->prevLine;
 	bool truncated;
 
 	prevLine[0] = 0;
@@ -793,7 +791,8 @@ static enum BadUsbResult badUsbPrvRunScript(struct FatfsFil *fil, struct BadUsbS
 
 bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info)
 {
-	char *line = mScratch.line, *trimmed, *p;
+	struct BadUsbScratch scratch;
+	char *line = scratch.line, *trimmed, *p;
 	uint32_t bytesRead = 0;
 	bool truncated;
 
@@ -828,6 +827,7 @@ bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info)
 enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF, void *userData, struct BadUsbPreload *preload)
 {
 	struct BadUsbState st;
+	struct BadUsbScratch scratch;
 	enum BadUsbResult ret;
 
 	memset(&st, 0, sizeof(st));
@@ -837,7 +837,7 @@ enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF,
 
 	badUsbPrvSetState(&st, BadUsbStateInit, "Preloading");
 	memset(preload, 0, sizeof(*preload));
-	ret = badUsbPrvPreload(fil, &st, &preload->info);
+	ret = badUsbPrvPreload(fil, &st, &preload->info, &scratch);
 	preload->fileSize = st.status.fileSize;
 	preload->lineTotal = st.status.lineTotal;
 	if (ret != BadUsbResultDone) {
@@ -859,6 +859,7 @@ enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF,
 enum BadUsbResult badUsbRunPreparedFile(struct FatfsFil *fil, const struct BadUsbPreload *preload, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData)
 {
 	struct BadUsbState st;
+	struct BadUsbScratch scratch;
 	enum BadUsbResult ret;
 
 	memset(&st, 0, sizeof(st));
@@ -873,7 +874,7 @@ enum BadUsbResult badUsbRunPreparedFile(struct FatfsFil *fil, const struct BadUs
 		st.status.fileSize = fatfsFileGetSize(fil);
 	}
 
-	ret = badUsbPrvRunScript(fil, &st);
+	ret = badUsbPrvRunScript(fil, &st, &scratch);
 	if (ret != BadUsbResultDone)
 		return ret;
 	badUsbPrvSetState(&st, BadUsbStateDone, "Done");

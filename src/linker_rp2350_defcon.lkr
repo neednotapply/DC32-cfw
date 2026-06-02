@@ -7,8 +7,8 @@
 MEMORY
 {
         rom   : ORIGIN = 0x10000000, LENGTH = 0x000C0000
-        ram   : ORIGIN = 0x20010000, LENGTH = 0x62000   /* first 64K are cart ram; final 64K are stack */
-        stack : ORIGIN = 0x20072000, LENGTH = 0x10000
+        ram   : ORIGIN = 0x2002B000, LENGTH = 0x48000   /* first 172K are cart/Arduboy scratch; final 60K are stack */
+        stack : ORIGIN = 0x20073000, LENGTH = 0x0F000
         trash : ORIGIN = 0xffff0000, LENGTH = 64K
 }
 

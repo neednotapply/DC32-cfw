@@ -7,10 +7,71 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(APP DC32-cfw)
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(TINYUSB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyusb")
+set(MINIZ_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/miniz.c")
+set(SIMAVR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/simavr")
+set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
+
+option(ARDUBOY_HYBRID_EXPERIMENTAL "Build the experimental ProjectABE-inspired Arduboy runtime instead of the default Ardens runtime" OFF)
+option(ARDUBOY_SIMAVR_EXPERIMENTAL "Build the experimental simavr-derived Arduboy runtime instead of the default Ardens runtime" OFF)
+
+set(ARDUBOY_RUNTIME_SOURCES)
+set(ARDUBOY_SIMAVR_SOURCES)
+set(ARDUBOY_ARDENS_SOURCES)
+if(ARDUBOY_HYBRID_EXPERIMENTAL)
+    list(APPEND ARDUBOY_RUNTIME_SOURCES
+        ${SRC_DIR}/arduboy/arduboy_port.cpp
+    )
+elseif(ARDUBOY_SIMAVR_EXPERIMENTAL)
+    list(APPEND ARDUBOY_RUNTIME_SOURCES
+        ${SRC_DIR}/arduboy/arduboy_simavr_port.cpp
+    )
+    list(APPEND ARDUBOY_SIMAVR_SOURCES
+        ${SIMAVR_DIR}/sim_fake_gdb.c
+        ${SIMAVR_DIR}/examples/parts/ssd1306_virt.c
+        ${SIMAVR_DIR}/simavr/sim/avr_acomp.c
+        ${SIMAVR_DIR}/simavr/sim/avr_adc.c
+        ${SIMAVR_DIR}/simavr/sim/avr_bitbang.c
+        ${SIMAVR_DIR}/simavr/sim/avr_eeprom.c
+        ${SIMAVR_DIR}/simavr/sim/avr_extint.c
+        ${SIMAVR_DIR}/simavr/sim/avr_flash.c
+        ${SIMAVR_DIR}/simavr/sim/avr_ioport.c
+        ${SIMAVR_DIR}/simavr/sim/avr_lin.c
+        ${SIMAVR_DIR}/simavr/sim/avr_spi.c
+        ${SIMAVR_DIR}/simavr/sim/avr_timer.c
+        ${SIMAVR_DIR}/simavr/sim/avr_twi.c
+        ${SIMAVR_DIR}/simavr/sim/avr_uart.c
+        ${SIMAVR_DIR}/simavr/sim/avr_usb.c
+        ${SIMAVR_DIR}/simavr/sim/avr_watchdog.c
+        ${SIMAVR_DIR}/simavr/sim/sim_avr.c
+        ${SIMAVR_DIR}/simavr/sim/sim_cmds.c
+        ${SIMAVR_DIR}/simavr/sim/sim_core.c
+        ${SIMAVR_DIR}/simavr/sim/sim_cycle_timers.c
+        ${SIMAVR_DIR}/simavr/sim/sim_interrupts.c
+        ${SIMAVR_DIR}/simavr/sim/sim_io.c
+        ${SIMAVR_DIR}/simavr/sim/sim_irq.c
+        ${SIMAVR_DIR}/simavr/sim/sim_utils.c
+        ${SIMAVR_DIR}/simavr/sim/sim_vcd_file.c
+        ${SIMAVR_DIR}/simavr/cores/sim_mega32u4.c
+    )
+else()
+    list(APPEND ARDUBOY_RUNTIME_SOURCES
+        ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
+    )
+    list(APPEND ARDUBOY_ARDENS_SOURCES
+        ${ARDENS_DIR}/absim_embedded.cpp
+        ${ARDENS_DIR}/absim_decode.cpp
+        ${ARDENS_DIR}/absim_execute.cpp
+        ${ARDENS_DIR}/absim_merge_instrs.cpp
+        ${ARDENS_DIR}/absim_reset.cpp
+    )
+endif()
 
 add_executable(${APP}
     ${SRC_DIR}/audioPwm.c
+    ${ARDUBOY_RUNTIME_SOURCES}
+    ${ARDUBOY_SIMAVR_SOURCES}
+    ${ARDUBOY_ARDENS_SOURCES}
     ${SRC_DIR}/badgePower.c
     ${SRC_DIR}/badgeLeds.c
     ${SRC_DIR}/badUsb.c
@@ -59,13 +120,21 @@ add_executable(${APP}
     ${TINYUSB_DIR}/src/device/usbd_control.c
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/dcd_rp2040.c
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/rp2040_usb.c
+    ${MINIZ_SRC}
 )
 
 target_include_directories(${APP} PRIVATE
     ${SRC_DIR}
     ${SRC_DIR}/tinyusb_compat
     ${SRC_DIR}/inc_RP2350
+    ${SRC_DIR}/arduboy
+    ${ARDENS_DIR}
     ${SRC_DIR}/nes
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src
+    ${SIMAVR_DIR}
+    ${SIMAVR_DIR}/simavr/sim
+    ${SIMAVR_DIR}/simavr/cores
+    ${SIMAVR_DIR}/examples/parts
     ${TINYUSB_DIR}/src
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
@@ -77,6 +146,7 @@ target_compile_definitions(${APP} PRIVATE
     FATFS_USE_LFN_SUPPORT=1
     USE_WIN_1252_CODE_PAGE
     QSPI_RAM_SIZE_MAX=65536
+    ARDUBOY_SIM_SCRATCH_SIZE=0x18000
     DISP_LCD_DEFCON
     UNSCALED_IMG_ROTATED
     UPSCALER_ROTATES
@@ -86,6 +156,8 @@ target_compile_definitions(${APP} PRIVATE
     TICKS_PER_SECOND=125000000U
     ZWT_ADDR=0x20081ff8
     PICO_BOARD="${PICO_BOARD}"
+    $<$<BOOL:${ARDUBOY_HYBRID_EXPERIMENTAL}>:ARDUBOY_HYBRID_EXPERIMENTAL=1>
+    $<$<BOOL:${ARDUBOY_SIMAVR_EXPERIMENTAL}>:ARDUBOY_SIMAVR_EXPERIMENTAL=1>
 )
 
 target_compile_options(${APP} PRIVATE
@@ -129,7 +201,36 @@ set_source_files_properties(
     ${SRC_DIR}/nes/InfoNES_pAPU.cpp
     ${SRC_DIR}/nes/K6502.cpp
     ${SRC_DIR}/nes/nes_port.cpp
+    ${SRC_DIR}/arduboy/arduboy_port.cpp
+    ${SRC_DIR}/arduboy/arduboy_simavr_port.cpp
+    ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
     PROPERTIES COMPILE_OPTIONS "-Wno-error"
+)
+
+set_source_files_properties(
+    ${ARDUBOY_ARDENS_SOURCES}
+    PROPERTIES
+        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;NDEBUG=1"
+        COMPILE_OPTIONS "-Wno-error"
+)
+
+set_source_files_properties(
+    ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
+    PROPERTIES
+        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;NDEBUG=1"
+)
+
+set_source_files_properties(
+    ${ARDUBOY_SIMAVR_SOURCES}
+    PROPERTIES
+        COMPILE_DEFINITIONS "ARDUBOY_SIMAVR_NO_NAMES=1;ARDUBOY_SIMAVR_INSTANT_SPI=1;ARDUBOY_SIMAVR_DIRECT_SPI_SSD1306=1;ARDUBOY_SIMAVR_FAST_SPI_READY=1;ARDUBOY_SIMAVR_TRUST_IRQ_RAISE=1;ARDUBOY_SIMAVR_BATCH_INTERRUPTS_OFF=1;ARDUBOY_SIMAVR_NO_AUDIO_TIMERS=1;malloc=arduboySimMalloc;calloc=arduboySimCalloc;realloc=arduboySimRealloc;free=arduboySimFree;strdup=arduboySimStrdup;printf=arduboySimPrintf;fprintf=arduboySimFprintf;abort=arduboySimAbort;exit=arduboySimExit;usleep=arduboySimUsleep;getpid=arduboySimGetPid;random=arduboySimRandom;clock_gettime=arduboySimClockGettime;gettimeofday=arduboySimGettimeofday;fopen=arduboySimFopen;fclose=arduboySimFclose;fflush=arduboySimFflush"
+        COMPILE_OPTIONS "-Wno-error"
+)
+
+set_source_files_properties(
+    ${MINIZ_SRC}
+    PROPERTIES
+        COMPILE_OPTIONS "-Wno-error"
 )
 
 set_source_files_properties(

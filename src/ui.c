@@ -36,6 +36,10 @@
 #define UI_GAME_TITLE_BUF_SZ			64
 #define UI_KEY_REPEAT_INITIAL_TICKS		((uint64_t)TICKS_PER_SECOND * 300u / 1000u)
 #define UI_KEY_REPEAT_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND * 80u / 1000u)
+#define UI_HEADER_USB_PRESENT_MV		4800u
+#define UI_HEADER_TEXT_GAP				3u
+#define UI_HEADER_EDGE_PAD				1u
+#define UI_HEADER_TITLE_LEFT			10u
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -92,7 +96,10 @@ static const char mUiAppTitle[] = "DC32-cfw";
 static const char *mUiHeaderTitle = "Main Menu";
 static bool mUiHeaderInverted;
 static uint32_t mUiHeaderClockMinute = 0xffffffffu;
+static uint32_t mUiHeaderBattMv;
+static bool mUiHeaderBattValid;
 static bool mUiHeaderLowBatt;
+static bool mUiHeaderUsbPowered;
 static uint_fast16_t mUiRepeatKey;
 static uint64_t mUiRepeatNextTicks;
 static bool mUiKeyRepeated;
@@ -724,63 +731,90 @@ static void uiPrvHeaderTimeText(char text[static 9])
 static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 {
 	const char *windowTitle = mUiHeaderTitle;
-	const char lowBattText[] = "LOW BAT";
 	struct BadgePowerStatus powerStatus;
+	char battText[16];
 	char timeText[9];
-	uint32_t titleLen, titleWidth, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft;
+	uint32_t titleLen, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft, battTextWidth = 0, battTextLeft = 0, battTextRight = 0, battMv = 0;
+	bool battValid = false;
+	bool battDrawn = false;
+	bool timeDrawn = false;
 	bool lowBatt = false;
+	bool usbPowered = false;
 	int8_t foreColor = cnv->foreColor, backColor = cnv->backColor;
 	uint8_t font = cnv->font;
 
 	badgePowerPoll();
-	if (badgePowerGetCached(&powerStatus) && powerStatus.lowBatt)
-		lowBatt = true;
+	if (badgePowerGetCached(&powerStatus)) {
+		battValid = true;
+		battMv = powerStatus.battMv;
+		lowBatt = powerStatus.lowBatt;
+		usbPowered = powerStatus.usbMv >= UI_HEADER_USB_PRESENT_MV;
+	}
 
 	clockMinute = uiPrvHeaderCurrentClockMinute();
-	if (!force && clockMinute == mUiHeaderClockMinute && lowBatt == mUiHeaderLowBatt)
+	if (!force && clockMinute == mUiHeaderClockMinute && battValid == mUiHeaderBattValid && (!battValid || battMv == mUiHeaderBattMv) && lowBatt == mUiHeaderLowBatt && usbPowered == mUiHeaderUsbPowered)
 		return;
 	mUiHeaderClockMinute = clockMinute;
+	mUiHeaderBattValid = battValid;
+	mUiHeaderBattMv = battMv;
 	mUiHeaderLowBatt = lowBatt;
+	mUiHeaderUsbPowered = usbPowered;
 
 	uiPrvHeaderTimeText(timeText);
 
 	cnv->font = FontLarge;
+	if (battValid) {
+		(void)sprintf(battText, "%umV", (unsigned)battMv);
+		battTextWidth = uiPrvCharsWidth(cnv, battText, strlen(battText));
+		if (battTextWidth + UI_HEADER_EDGE_PAD < cnv->w) {
+			battTextLeft = (cnv->w - battTextWidth) / 2u;
+			battTextRight = battTextLeft + battTextWidth;
+			battDrawn = true;
+		}
+	}
+
+	timeWidth = uiPrvCharsWidth(cnv, timeText, strlen(timeText));
+	if (timeWidth + UI_HEADER_EDGE_PAD < cnv->w) {
+		rightTextLeft = cnv->w - timeWidth - UI_HEADER_EDGE_PAD;
+		timeDrawn = true;
+		if (battDrawn && rightTextLeft < battTextRight + UI_HEADER_TEXT_GAP)
+			timeDrawn = false;
+	}
+
 	cnv->foreColor = invert ? 0 : 9;
 	uiPrvFillRect(cnv, 0, 0, cnv->w - 1, uiPrvGlyphHeight(cnv));
 
 	cnv->foreColor = invert ? 9 : 0;
 	cnv->backColor = invert ? 0 : 9;
 
-	titleLeft = 0;
-	rightTextLeft = cnv->w;
-	if (lowBatt) {
-		uint32_t lowBattWidth = uiPrvCharsWidth(cnv, lowBattText, strlen(lowBattText));
-
-		if (lowBattWidth + 1 < cnv->w) {
-			#if DISP_BPP > 8
-				uiPrvPutsRgb565(cnv, 0, 1, lowBattText, 0xf800u);
-			#else
-				uiPuts(cnv, 0, 1, lowBattText, -1);
-			#endif
-			titleLeft = lowBattWidth + 5;
-		}
-	}
-	timeWidth = uiPrvCharsWidth(cnv, timeText, strlen(timeText));
-	if (timeWidth + 1 < cnv->w) {
-		rightTextLeft = cnv->w - timeWidth - 1;
+	if (timeDrawn)
 		uiPuts(cnv, 0, rightTextLeft, timeText, -1);
-	}
 
 	titleMaxRight = cnv->w;
-	if (rightTextLeft < cnv->w)
-		titleMaxRight = rightTextLeft > 3 ? rightTextLeft - 3 : rightTextLeft;
+	if (timeDrawn)
+		titleMaxRight = rightTextLeft > UI_HEADER_TEXT_GAP ? rightTextLeft - UI_HEADER_TEXT_GAP : rightTextLeft;
+	if (battDrawn && battTextLeft < titleMaxRight)
+		titleMaxRight = battTextLeft > UI_HEADER_TEXT_GAP ? battTextLeft - UI_HEADER_TEXT_GAP : battTextLeft;
+	titleLeft = UI_HEADER_TITLE_LEFT;
 	if (titleLeft >= titleMaxRight)
 		titleMaxWidth = 0;
 	else
 		titleMaxWidth = titleMaxRight - titleLeft;
 	titleLen = uiPrvCharsFit(cnv, windowTitle, strlen(windowTitle), titleMaxWidth);
-	titleWidth = uiPrvCharsWidth(cnv, windowTitle, titleLen);
-	uiPuts(cnv, 0, titleWidth < titleMaxWidth ? titleLeft + (titleMaxWidth - titleWidth) / 2 : titleLeft, windowTitle, titleLen);
+	uiPuts(cnv, 0, titleLeft, windowTitle, titleLen);
+
+	if (battDrawn) {
+		#if DISP_BPP > 8
+			if (usbPowered)
+				uiPrvPutsRgb565(cnv, 0, battTextLeft, battText, 0x07e0u);
+			else if (lowBatt)
+				uiPrvPutsRgb565(cnv, 0, battTextLeft, battText, 0xf800u);
+			else
+				uiPuts(cnv, 0, battTextLeft, battText, -1);
+		#else
+			uiPuts(cnv, 0, battTextLeft, battText, -1);
+		#endif
+	}
 
 	cnv->font = font;
 	cnv->foreColor = foreColor;
@@ -7984,35 +8018,40 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	return ids[selOption];
 }
 
+static enum UiToolId uiPrvBrowserLaunchedToolReturn(enum UiToolId launchedTool)
+{
+	return uiPrvToolExitRequested() ? launchedTool : UiToolBrowser;
+}
+
 static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref)
 {
 	const struct IrUniversalRemote *knownRemote = uiPrvIrKnownRemoteForName(ref->name);
 
 	if (knownRemote) {
 		(void)uiPrvIrKnownActionLocator(cnv, vol, &ref->locator, knownRemote);
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 	}
 
 	switch (uiPrvBrowserOpenWith(cnv, ref)) {
 	case UiBrowserOpenIrButtonSpam:
 		uiPrvSetHeaderTitle("Universal IR");
 		(void)uiPrvIrButtonSpamLocator(cnv, vol, &ref->locator, ref->name);
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenIrPowerSpam:
 		uiPrvSetHeaderTitle("Power");
 		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, NULL, "Power");
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenIrMuteSpam:
 		uiPrvSetHeaderTitle("Mute");
 		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, "Mute", "Mute");
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenBadUsb:
 		uiPrvSetHeaderTitle("BadUSB");
 		(void)uiPrvRunBadUsbLocator(cnv, vol, &ref->locator, ref->name);
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolBadUsb);
 
 	case UiBrowserOpenMusic: {
 		struct Settings settings;
@@ -8022,7 +8061,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		uiPrvMusicSanitizeSettings(&settings);
 		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings, NULL);
 		settingsSet(&settings);
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolMusic);
 	}
 
 	case UiBrowserOpenGame:
@@ -8034,7 +8073,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 
 	case UiBrowserOpenImage:
 		uiPrvRunImageSequence(cnv, vol, ref->parentPath, &ref->locator, ref->name);
-		return UiToolBrowser;
+		return uiPrvBrowserLaunchedToolReturn(UiToolImage);
 
 	case UiBrowserOpenNone:
 		uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
@@ -8276,7 +8315,7 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		if (uiPrvToolExitRequested())
-			return UiToolBrowser;
+			return UiToolGame;
 
 		uiPrvSetHeaderTitle("Emulation");
 		uiPrvReset(cnv, false);
@@ -8303,27 +8342,27 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 
 		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
 		if (uiPrvToolExitRequested())
-			return UiToolBrowser;
+			return UiToolGame;
 		if (button == KEY_BIT_B)
-			return UiToolBrowser;
+			return UiToolGame;
 		if (optionIds[selOption] == GameToolOptionRun) {
 			if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
-				return UiToolBrowser;
+				return UiToolGame;
 		}
 	#ifndef NO_SD_CARD
 		else if (optionIds[selOption] == GameToolOptionSelect) {
 			if (uiPrvSelectRom(cnv, false)) {
 				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
-					return UiToolBrowser;
+					return UiToolGame;
 			}
 			if (uiPrvToolExitRequested())
-				return UiToolBrowser;
+				return UiToolGame;
 		}
 	#endif
 		else if (optionIds[selOption] == GameToolOptionSettings) {
 			(void)uiPrvEditGameSettings(cnv);
 			if (uiPrvToolExitRequested())
-				return UiToolBrowser;
+				return UiToolGame;
 		}
 	}
 }
@@ -8463,7 +8502,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvExitTool(UiToolBrowser);
 				if (activeTool == UiToolRunGame) {
 					(void)uiPrvRunLoadedGame(cnv, runGameF, userData);
-					activeTool = UiToolBrowser;
+					activeTool = UiToolGame;
 				}
 			#else
 				uiAlert(cnv, "File Browser requires SD card support", DialogTypeOk);
@@ -8528,7 +8567,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			case UiToolRunGame:
 				(void)uiPrvRunLoadedGame(cnv, runGameF, userData);
-				activeTool = UiToolBrowser;
+				activeTool = UiToolGame;
 				break;
 
 			case UiToolSettings:

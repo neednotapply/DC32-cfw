@@ -1,5 +1,6 @@
 #include "pinoutRp2350defcon.h"
 #include "pioIrdaSIR.h"
+#include "timebase.h"
 #include "printf.h"
 #include "2350.h"
 
@@ -17,6 +18,9 @@
 #define SIR_INTE_REG_Nthx(n)				inte ## n
 #define SIR_INTE_REG_Nth(n)					SIR_INTE_REG_Nthx(n)
 #define SIR_INTE_REG						MY_PIO->SIR_INTE_REG_Nth(SIR_PIO_EXT_IRQ_IDX)
+#define SIR_INTF_REG_Nthx(n)				intf ## n
+#define SIR_INTF_REG_Nth(n)					SIR_INTF_REG_Nthx(n)
+#define SIR_INTF_REG						MY_PIO->SIR_INTF_REG_Nth(SIR_PIO_EXT_IRQ_IDX)
 
 
 
@@ -31,6 +35,14 @@
 
 
 #define CIRC_BUF_SZ						64
+#define SIR_TX_DRAIN_TIMEOUT_MS		20
+#define SIR_TX_QUEUE_TIMEOUT_MS		20
+#define SIR_TX_IRQ_MAX_FEEDS		8
+#define SIR_SM_RESTART_TIMEOUT_US	1000
+#define SIR_SM_ENABLE_BIT				((1 << PIO_CTRL_SM_ENABLE_LSB) << SIR_PIO_SM)
+#define SIR_SM_RESTART_BIT			((1 << PIO_CTRL_SM_RESTART_LSB) << SIR_PIO_SM)
+#define SIR_IRQ_MASK					((PIO_IRQ0_INTE_SM0_TXNFULL_BITS | PIO_IRQ0_INTE_SM0_RXNEMPTY_BITS) << SIR_PIO_SM)
+#define SIR_FDEBUG_MASK				((1 << (PIO_FDEBUG_TXSTALL_LSB + SIR_PIO_SM)) | (1 << (PIO_FDEBUG_TXOVER_LSB + SIR_PIO_SM)) | (1 << (PIO_FDEBUG_RXUNDER_LSB + SIR_PIO_SM)) | (1 << (PIO_FDEBUG_RXSTALL_LSB + SIR_PIO_SM)))
 
 
 static uint_fast8_t (*mParityFunc)(uint_fast8_t val);
@@ -41,12 +53,26 @@ static IrdaSIRuartRxF mIrRxF;
 static volatile bool mCurTx, mCurRx;
 static void *mIrRxD;
 
+static uint64_t pioIrdaSirPrvTicksFromMsec(uint32_t msec)
+{
+	uint64_t ticks = ((uint64_t)msec * TICKS_PER_SECOND + 999) / 1000;
+
+	return ticks ? ticks : 1;
+}
+
+static uint64_t pioIrdaSirPrvTicksFromUsec(uint32_t usec)
+{
+	uint64_t ticks = ((uint64_t)usec * TICKS_PER_SECOND + 999999) / 1000000;
+
+	return ticks ? ticks : 1;
+}
+
 
 static bool pioIrdaSirPrvCircBufIsFull(void)
 {
 	uint8_t mCircBufWnext = (mCircBufW + 1 == CIRC_BUF_SZ ? 0 : mCircBufW + 1);
 	
-	return mCircBufWnext != mCircBufR;
+	return mCircBufWnext == mCircBufR;
 }
 
 static bool pioIrdaSirPrvCircBufAdd(uint_fast16_t val)
@@ -78,16 +104,23 @@ static int32_t pioIrdaSirPrvCircBufGet(void)
 
 static void pioIrdaSirPrvUnsetup(void)
 {
+	uint64_t restartEnd;
+
 	NVIC_DisableIRQ(SIR_PIO_IRQN);
+	SIR_INTE_REG &=~ SIR_IRQ_MASK;
+	SIR_INTF_REG &=~ SIR_IRQ_MASK;
 	
 	//stop SM
-	MY_PIO->ctrl &=~ ((1 << PIO_CTRL_SM_ENABLE_LSB) << SIR_PIO_SM);
+	MY_PIO->ctrl &=~ SIR_SM_ENABLE_BIT;
 	
 	//reset SM
-	MY_PIO->ctrl |= ((1 << PIO_CTRL_SM_RESTART_LSB) << SIR_PIO_SM);
+	MY_PIO->ctrl |= SIR_SM_RESTART_BIT;
 	
-	//wait
-	while (MY_PIO->ctrl & ((1 << PIO_CTRL_SM_RESTART_LSB) << SIR_PIO_SM))
+	//wait briefly; cleanup must not hang if the SM wedges while shutting down
+	restartEnd = getTime() + pioIrdaSirPrvTicksFromUsec(SIR_SM_RESTART_TIMEOUT_US);
+	while ((MY_PIO->ctrl & SIR_SM_RESTART_BIT) && getTime() < restartEnd);
+	if (MY_PIO->ctrl & SIR_SM_RESTART_BIT)
+		pr("IRDA PIO restart timeout\n");
 
 	//nop
 	MY_PIO->sm[SIR_PIO_SM].instr = I_MOV(0, 0, MOV_DST_X, MOV_OP_COPY, MOV_SRC_X);
@@ -96,6 +129,7 @@ static void pioIrdaSirPrvUnsetup(void)
 	MY_PIO->sm[SIR_PIO_SM].shiftctrl = PIO_SM0_SHIFTCTRL_FJOIN_RX_BITS;
 	MY_PIO->sm[SIR_PIO_SM].shiftctrl = PIO_SM0_SHIFTCTRL_FJOIN_TX_BITS;
 	MY_PIO->sm[SIR_PIO_SM].shiftctrl = 0;
+	MY_PIO->fdebug = SIR_FDEBUG_MASK;
 	
 	//clear buffer
 	mCircBufW = 0;
@@ -105,7 +139,6 @@ static void pioIrdaSirPrvUnsetup(void)
 	mCurTx = false;
 	mCurRx = false;
 	
-	SIR_INTE_REG &=~ ((PIO_IRQ0_INTE_SM0_TXNFULL_BITS | PIO_IRQ0_INTE_SM0_RXNEMPTY_BITS) << SIR_PIO_SM);
 	NVIC_ClearPendingIRQ(SIR_PIO_IRQN);
 }
 
@@ -241,10 +274,11 @@ static uint_fast16_t pioIrdaSirPrvProcessInput(uint32_t rawVal)		//data is missi
 void __attribute__((used)) SIR_PIO_IRQH(void)
 {
 	if (mCurTx) {	//in tx mode
+		uint_fast8_t feeds = 0;
 	
 		pr("tx irq\n");
 
-		while (!(MY_PIO->fstat & ((1 << PIO_FSTAT_TXFULL_LSB) << SIR_PIO_SM))) {		//space in fifo?
+		while (!(MY_PIO->fstat & ((1 << PIO_FSTAT_TXFULL_LSB) << SIR_PIO_SM)) && feeds < SIR_TX_IRQ_MAX_FEEDS) {		//space in fifo?
 			
 			int32_t val = pioIrdaSirPrvCircBufGet();
 			
@@ -258,7 +292,12 @@ void __attribute__((used)) SIR_PIO_IRQH(void)
 			else {			//have data
 				
 				MY_PIO->txf[SIR_PIO_SM] = val;
+				feeds++;
 			}
+		}
+		if (feeds == SIR_TX_IRQ_MAX_FEEDS && !(MY_PIO->fstat & ((1 << PIO_FSTAT_TXFULL_LSB) << SIR_PIO_SM))) {
+			pr("IRDA TX IRQ feed limit\n");
+			SIR_INTE_REG &=~ SIR_IRQ_MASK;
 		}
 	}
 	else if (mCurRx) {	//in rx mode
@@ -325,12 +364,15 @@ static uint_fast16_t pioIrdaSirPrvXformData(uint8_t byte)
 uint32_t irdaSIRuartTx(const uint8_t *data, uint32_t len, bool block)
 {
 	uint32_t lenOrig = len;
+	uint64_t queueEnd;
 		
 	if (!data)			//we do not support sending breaks using IrDA
 		return 0;
 	
 	if (!mCurTx)
 		return 0;
+
+	queueEnd = getTime() + pioIrdaSirPrvTicksFromMsec(SIR_TX_QUEUE_TIMEOUT_MS);
 	
 	while (len) {
 		
@@ -340,11 +382,16 @@ uint32_t irdaSIRuartTx(const uint8_t *data, uint32_t len, bool block)
 			
 			len--;
 			data++;
+			queueEnd = getTime() + pioIrdaSirPrvTicksFromMsec(SIR_TX_QUEUE_TIMEOUT_MS);
 			continue;
 		}
 				
 		if (!block)
 			break;
+		if (getTime() >= queueEnd) {
+			pr("IRDA TX queue timeout\n");
+			break;
+		}
 	}
 	
 	return lenOrig - len;
@@ -398,8 +445,11 @@ static void pioIrdaSirPrvXcvrSetEnabled(bool en)
 bool irdaSIRuartConfig(union UartCfg *cfg, IrdaSIRuartRxF rxf, void *userData)		///xxx
 {
 	if (mCurTx) {	//wait for TX to be done
-	
-		while(pioIrdaSirPrvIsTxOngoing());
+		uint64_t drainEnd = getTime() + pioIrdaSirPrvTicksFromMsec(SIR_TX_DRAIN_TIMEOUT_MS);
+
+		while (pioIrdaSirPrvIsTxOngoing() && getTime() < drainEnd);
+		if (pioIrdaSirPrvIsTxOngoing())
+			pr("IRDA TX drain timeout\n");
 	}
 	
 	pioIrdaSirPrvUnsetup();

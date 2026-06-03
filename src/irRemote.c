@@ -5,7 +5,7 @@
 #include "2350.h"
 #include "irRemote.h"
 
-void badgeIrdaInit(bool txMode);
+static bool mIrRemoteActive;
 
 static void irRemotePrvOut(bool on)
 {
@@ -19,6 +19,8 @@ void irRemoteBegin(void)
 {
 	union UartCfg offCfg = {.raw32 = 0};
 
+	if (mIrRemoteActive)
+		return;
 	(void)irdaSIRuartConfig(&offCfg, NULL, NULL);
 
 	iobank0_hw->io[PIN_IRDA_OUT].ctrl = (iobank0_hw->io[PIN_IRDA_OUT].ctrl &~ IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) | (IO_BANK0_GPIO0_CTRL_FUNCSEL_VALUE_SIO_0 << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
@@ -27,12 +29,20 @@ void irRemoteBegin(void)
 	irRemotePrvOut(false);
 	sio_hw->gpio_oe_set = (1 << PIN_IRDA_OUT) | (1 << PIN_IRDA_SD);
 	sio_hw->gpio_clr = 1 << PIN_IRDA_SD;
+	mIrRemoteActive = true;
 }
 
 void irRemoteEnd(void)
 {
+	union UartCfg offCfg = {.raw32 = 0};
+
+	if (!mIrRemoteActive)
+		return;
 	irRemotePrvOut(false);
-	badgeIrdaInit(false);
+	sio_hw->gpio_set = 1 << PIN_IRDA_SD;
+	delayUsec(1000);
+	(void)irdaSIRuartConfig(&offCfg, NULL, NULL);
+	mIrRemoteActive = false;
 }
 
 void irRemoteSpaceUsec(uint32_t usec)

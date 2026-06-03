@@ -54,7 +54,11 @@ typedef bool (*BadUsbStatusF)(void *userData, const struct BadUsbStatus *status)
 typedef bool (*BadUsbWaitButtonF)(void *userData, const struct BadUsbStatus *status);
 
 bool badUsbReadDeviceInfo(struct FatfsFil *fil, struct UsbHidDeviceInfo *info);
+uint32_t badUsbScratchSize(void);
 enum BadUsbResult badUsbPreloadFile(struct FatfsFil *fil, BadUsbStatusF statusF, void *userData, struct BadUsbPreload *preload);
 enum BadUsbResult badUsbRunPreparedFile(struct FatfsFil *fil, const struct BadUsbPreload *preload, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData);
+bool badUsbReadDeviceInfoWithScratch(struct FatfsFil *fil, struct UsbHidDeviceInfo *info, void *scratchBuf, uint32_t scratchBufSz);
+enum BadUsbResult badUsbPreloadFileWithScratch(struct FatfsFil *fil, BadUsbStatusF statusF, void *userData, struct BadUsbPreload *preload, void *scratchBuf, uint32_t scratchBufSz);
+enum BadUsbResult badUsbRunPreparedFileWithScratch(struct FatfsFil *fil, const struct BadUsbPreload *preload, BadUsbStatusF statusF, BadUsbWaitButtonF waitButtonF, void *userData, void *scratchBuf, uint32_t scratchBufSz);
 
 #endif

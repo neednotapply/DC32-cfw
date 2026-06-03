@@ -2739,13 +2739,25 @@ bool uiSaveSavestate(void)
 	#define IR_MAX_REPEAT			50
 	#define IR_MAX_RAW_DURATION		1000000
 	#define IR_MAX_RAW_DURATIONS	4096
+	#define IR_MAX_RAW_REPEAT_USEC	10000000
+	#define IR_PARSED_RECORD_TIMEOUT_USEC 1000000
+	#define IR_RAW_CANCEL_CHUNK_USEC	1000
 	struct IrBlastStats {
 		uint32_t sent;
 		uint32_t skipped;
 		uint32_t malformed;
 		uint32_t lineNo;
+		uint32_t bytesRead;
+		uint32_t fileSize;
+		uint32_t recordIndex;
+		uint32_t stalledCode;
+		uint32_t stalledRecord;
+		uint32_t stalledLine;
+		char stalledName[IR_NAME_BUF_SZ];
+		char stalledDetail[IR_PROTOCOL_BUF_SZ];
 		bool cancelled;
 		bool lineTooLong;
+		bool timedOut;
 	};
 
 	enum FlipperIrType {
@@ -2761,12 +2773,24 @@ bool uiSaveSavestate(void)
 		uint32_t frequency;
 		uint32_t address;
 		uint32_t command;
+		uint32_t lineNo;
+		uint32_t recordIndex;
 		bool hasName;
 		bool hasFrequency;
 		bool hasProtocol;
 		bool hasAddress;
 		bool hasCommand;
 		bool sentRaw;
+	};
+
+	struct IrSendCtx {
+		struct IrBlastStats *stats;
+		uint64_t deadline;
+		uint32_t codeIdx;
+		uint32_t recordIndex;
+		uint32_t lineNo;
+		const char *name;
+		const char *detail;
 	};
 
 	struct IrUniversalRemote {
@@ -4584,7 +4608,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return !*str;
 	}
 
-	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, bool *truncatedP)
+	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, uint32_t *bytesReadP, uint32_t fileSize, bool *truncatedP)
 	{
 		uint32_t pos = 0;
 
@@ -4603,37 +4627,66 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 				buf[pos] = 0;
 				return pos != 0 || *truncatedP;
 			}
+			if (bytesReadP)
+				(*bytesReadP)++;
 
 			if (ch == '\n') {
 				buf[pos] = 0;
 				return true;
 			}
 
-			if (ch == '\r')
+			if (ch == '\r') {
+				if (bytesReadP && fileSize && *bytesReadP >= fileSize) {
+					buf[pos] = 0;
+					return pos != 0 || *truncatedP;
+				}
 				continue;
+			}
 
 			if (pos + 1 < bufSz)
 				buf[pos++] = ch;
 			else
 				*truncatedP = true;
+			if (bytesReadP && fileSize && *bytesReadP >= fileSize) {
+				buf[pos] = 0;
+				return pos != 0 || *truncatedP;
+			}
 		}
 	}
 
-	static void uiPrvIrDrawProgress(struct Canvas *cnv, const char *title, const char *name, uint32_t codeIdx, uint32_t repeatIdx, uint32_t numRepeats)
+	static uint64_t uiPrvIrTicksFromUsec(uint32_t usec)
 	{
-		uint32_t row;
+		uint64_t ticks = ((uint64_t)usec * TICKS_PER_SECOND + 999999) / 1000000;
+
+		return ticks ? ticks : 1;
+	}
+
+	static void uiPrvIrDrawProgress(struct Canvas *cnv, const char *title, const char *name, const char *detail, uint32_t codeIdx, uint32_t recordIdx, uint32_t lineNo, uint32_t repeatIdx, uint32_t numRepeats)
+	{
+		uint32_t row, glyphH;
 
 		uiPrvSetHeaderTitle(title);
 		uiPrvReset(cnv, false);
 		cnv->font = FontMedium;
 		row = uiPrvContentTop(cnv);
+		glyphH = uiPrvGlyphHeight(cnv);
 		cnv->foreColor = 11;
-		uiPrintf(cnv, row, 10, "Code %u", codeIdx);
-		row += uiPrvGlyphHeight(cnv) + 1;
+		if (recordIdx)
+			uiPrintf(cnv, row, 10, "Code %u Rec %u", codeIdx, recordIdx);
+		else
+			uiPrintf(cnv, row, 10, "Code %u", codeIdx);
+		row += glyphH + 1;
 		cnv->foreColor = 15;
 		uiPrvDrawWrappedString(cnv, name, row, 10);
-		uiPrintf(cnv, cnv->h - 2 * (uiPrvGlyphHeight(cnv) + 1), 10, "Repeat %u/%u", repeatIdx, numRepeats);
-		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
+		row = cnv->h - 3 * (glyphH + 1);
+		if (lineNo) {
+			if (detail && *detail)
+				uiPrintf(cnv, row, 10, "Line %u %s", lineNo, detail);
+			else
+				uiPrintf(cnv, row, 10, "Line %u", lineNo);
+		}
+		uiPrintf(cnv, cnv->h - 2 * (glyphH + 1), 10, "Repeat %u/%u", repeatIdx, numRepeats);
+		uiPuts(cnv, cnv->h - glyphH - 1, 10, "Hold B to cancel", -1);
 	}
 
 	static bool uiPrvIrCancelRequested(void)
@@ -4644,37 +4697,79 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return !!(uiGetKeysRaw() & KEY_BIT_B);
 	}
 
-	static bool uiPrvIrSpaceCancellable(uint32_t usec, bool *cancelledP)
+	static void uiPrvIrSendCtxInit(struct IrSendCtx *ctx, struct IrBlastStats *stats, uint32_t codeIdx, uint32_t recordIndex, uint32_t lineNo, const char *name, const char *detail, uint32_t timeoutUsec)
+	{
+		memset(ctx, 0, sizeof(*ctx));
+		ctx->stats = stats;
+		ctx->deadline = getTime() + uiPrvIrTicksFromUsec(timeoutUsec);
+		ctx->codeIdx = codeIdx;
+		ctx->recordIndex = recordIndex;
+		ctx->lineNo = lineNo;
+		ctx->name = name ? name : "IR code";
+		ctx->detail = detail ? detail : "";
+	}
+
+	static void uiPrvIrSendCtxStalled(struct IrSendCtx *ctx)
+	{
+		struct IrBlastStats *stats = ctx->stats;
+
+		if (!stats || stats->timedOut)
+			return;
+
+		stats->timedOut = true;
+		stats->stalledCode = ctx->codeIdx;
+		stats->stalledRecord = ctx->recordIndex;
+		stats->stalledLine = ctx->lineNo ? ctx->lineNo : stats->lineNo;
+		uiPrvCopyStr(stats->stalledName, sizeof(stats->stalledName), ctx->name);
+		uiPrvCopyStr(stats->stalledDetail, sizeof(stats->stalledDetail), ctx->detail);
+	}
+
+	static bool uiPrvIrSendCtxKeepGoing(struct IrSendCtx *ctx)
+	{
+		if (uiPrvIrCancelRequested()) {
+			if (ctx->stats)
+				ctx->stats->cancelled = true;
+			return false;
+		}
+		if (getTime() >= ctx->deadline) {
+			uiPrvIrSendCtxStalled(ctx);
+			return false;
+		}
+		return true;
+	}
+
+	static bool uiPrvIrSpaceCancellable(uint32_t usec, struct IrSendCtx *ctx)
 	{
 		while (usec) {
-			uint32_t now = usec > 5000 ? 5000 : usec;
+			uint32_t now = usec > IR_RAW_CANCEL_CHUNK_USEC ? IR_RAW_CANCEL_CHUNK_USEC : usec;
 
-			if (uiPrvIrCancelRequested()) {
-				*cancelledP = true;
+			if (!uiPrvIrSendCtxKeepGoing(ctx))
 				return false;
-			}
 			irRemoteSpaceUsec(now);
 			usec -= now;
 		}
-		return true;
+		return uiPrvIrSendCtxKeepGoing(ctx);
 	}
 
-	static bool uiPrvIrMarkCancellable(uint32_t carrier, uint32_t usec, bool *cancelledP)
+	static bool uiPrvIrMarkCancellable(uint32_t carrier, uint32_t usec, struct IrSendCtx *ctx)
 	{
-		if (uiPrvIrCancelRequested()) {
-			*cancelledP = true;
-			return false;
+		while (usec) {
+			uint32_t now = usec > IR_RAW_CANCEL_CHUNK_USEC ? IR_RAW_CANCEL_CHUNK_USEC : usec;
+
+			if (!uiPrvIrSendCtxKeepGoing(ctx))
+				return false;
+			irRemoteMarkUsec(carrier, now);
+			usec -= now;
 		}
-		irRemoteMarkUsec(carrier, usec);
-		return true;
+		return uiPrvIrSendCtxKeepGoing(ctx);
 	}
 
-	static bool uiPrvIrSendBitPulseDistance(uint32_t carrier, bool bit, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, bool *cancelledP)
+	static bool uiPrvIrSendBitPulseDistance(uint32_t carrier, bool bit, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, struct IrSendCtx *ctx)
 	{
-		return uiPrvIrMarkCancellable(carrier, mark, cancelledP) && uiPrvIrSpaceCancellable(bit ? oneSpace : zeroSpace, cancelledP);
+		return uiPrvIrMarkCancellable(carrier, mark, ctx) && uiPrvIrSpaceCancellable(bit ? oneSpace : zeroSpace, ctx);
 	}
 
-	static bool uiPrvIrSendBitsPulseDistance(uint32_t carrier, uint32_t data, uint_fast8_t nBits, bool msbFirst, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, bool *cancelledP)
+	static bool uiPrvIrSendBitsPulseDistance(uint32_t carrier, uint32_t data, uint_fast8_t nBits, bool msbFirst, uint32_t mark, uint32_t zeroSpace, uint32_t oneSpace, struct IrSendCtx *ctx)
 	{
 		uint_fast8_t i;
 
@@ -4686,83 +4781,83 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			else
 				bit = !!(data & (1ul << i));
 
-			if (!uiPrvIrSendBitPulseDistance(carrier, bit, mark, zeroSpace, oneSpace, cancelledP))
+			if (!uiPrvIrSendBitPulseDistance(carrier, bit, mark, zeroSpace, oneSpace, ctx))
 				return false;
 		}
 		return true;
 	}
 
-	static bool uiPrvIrSendBitMarkEncoded(uint32_t carrier, bool bit, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, bool *cancelledP)
+	static bool uiPrvIrSendBitMarkEncoded(uint32_t carrier, bool bit, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, struct IrSendCtx *ctx)
 	{
 		(void)bitMark;
-		return uiPrvIrMarkCancellable(carrier, bit ? oneMark : zeroMark, cancelledP) && uiPrvIrSpaceCancellable(space, cancelledP);
+		return uiPrvIrMarkCancellable(carrier, bit ? oneMark : zeroMark, ctx) && uiPrvIrSpaceCancellable(space, ctx);
 	}
 
-	static bool uiPrvIrSendBitsMarkEncoded(uint32_t carrier, uint32_t data, uint_fast8_t nBits, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, bool *cancelledP)
+	static bool uiPrvIrSendBitsMarkEncoded(uint32_t carrier, uint32_t data, uint_fast8_t nBits, uint32_t bitMark, uint32_t zeroMark, uint32_t oneMark, uint32_t space, struct IrSendCtx *ctx)
 	{
 		uint_fast8_t i;
 
 		for (i = 0; i < nBits; i++)
-			if (!uiPrvIrSendBitMarkEncoded(carrier, !!(data & (1ul << i)), bitMark, zeroMark, oneMark, space, cancelledP))
+			if (!uiPrvIrSendBitMarkEncoded(carrier, !!(data & (1ul << i)), bitMark, zeroMark, oneMark, space, ctx))
 				return false;
 		return true;
 	}
 
-	static bool uiPrvIrManchesterHalf(uint32_t carrier, bool mark, uint32_t usec, bool *cancelledP)
+	static bool uiPrvIrManchesterHalf(uint32_t carrier, bool mark, uint32_t usec, struct IrSendCtx *ctx)
 	{
 		if (mark)
-			return uiPrvIrMarkCancellable(carrier, usec, cancelledP);
-		return uiPrvIrSpaceCancellable(usec, cancelledP);
+			return uiPrvIrMarkCancellable(carrier, usec, ctx);
+		return uiPrvIrSpaceCancellable(usec, ctx);
 	}
 
-	static bool uiPrvIrSendManchesterBit(uint32_t carrier, bool bit, uint32_t halfUsec, bool *cancelledP)
+	static bool uiPrvIrSendManchesterBit(uint32_t carrier, bool bit, uint32_t halfUsec, struct IrSendCtx *ctx)
 	{
-		return uiPrvIrManchesterHalf(carrier, !bit, halfUsec, cancelledP) && uiPrvIrManchesterHalf(carrier, bit, halfUsec, cancelledP);
+		return uiPrvIrManchesterHalf(carrier, !bit, halfUsec, ctx) && uiPrvIrManchesterHalf(carrier, bit, halfUsec, ctx);
 	}
 
-	static bool uiPrvIrSendNecLike(uint32_t carrier, uint32_t address, uint32_t command, uint_fast8_t addrBits, uint_fast8_t cmdBits, bool useComplements, bool *cancelledP)
+	static bool uiPrvIrSendNecLike(uint32_t carrier, uint32_t address, uint32_t command, uint_fast8_t addrBits, uint_fast8_t cmdBits, bool useComplements, struct IrSendCtx *ctx)
 	{
-		if (!uiPrvIrMarkCancellable(carrier, 9000, cancelledP) || !uiPrvIrSpaceCancellable(4500, cancelledP))
+		if (!uiPrvIrMarkCancellable(carrier, 9000, ctx) || !uiPrvIrSpaceCancellable(4500, ctx))
 			return false;
-		if (!uiPrvIrSendBitsPulseDistance(carrier, address, addrBits, false, 560, 560, 1690, cancelledP))
+		if (!uiPrvIrSendBitsPulseDistance(carrier, address, addrBits, false, 560, 560, 1690, ctx))
 			return false;
 		if (useComplements)
-			if (!uiPrvIrSendBitsPulseDistance(carrier, ~address, addrBits, false, 560, 560, 1690, cancelledP))
+			if (!uiPrvIrSendBitsPulseDistance(carrier, ~address, addrBits, false, 560, 560, 1690, ctx))
 				return false;
-		if (!uiPrvIrSendBitsPulseDistance(carrier, command, cmdBits, false, 560, 560, 1690, cancelledP))
+		if (!uiPrvIrSendBitsPulseDistance(carrier, command, cmdBits, false, 560, 560, 1690, ctx))
 			return false;
 		if (useComplements)
-			if (!uiPrvIrSendBitsPulseDistance(carrier, ~command, cmdBits, false, 560, 560, 1690, cancelledP))
+			if (!uiPrvIrSendBitsPulseDistance(carrier, ~command, cmdBits, false, 560, 560, 1690, ctx))
 				return false;
-		return uiPrvIrMarkCancellable(carrier, 560, cancelledP);
+		return uiPrvIrMarkCancellable(carrier, 560, ctx);
 	}
 
-	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command, bool *cancelledP)
+	static bool uiPrvIrSendParsed(const char *protocol, uint32_t address, uint32_t command, struct IrSendCtx *ctx)
 	{
 		uint32_t carrier = IR_DEFAULT_CARRIER;
 
 		if (!strcmp(protocol, "NEC")) {
-			if (!uiPrvIrSendNecLike(carrier, address, command, 8, 8, true, cancelledP))
+			if (!uiPrvIrSendNecLike(carrier, address, command, 8, 8, true, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "NECext")) {
-			if (!uiPrvIrSendNecLike(carrier, address, command, 16, 16, false, cancelledP))
+			if (!uiPrvIrSendNecLike(carrier, address, command, 16, 16, false, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "NEC42")) {
-			if (!uiPrvIrSendNecLike(carrier, address, command, 13, 8, true, cancelledP))
+			if (!uiPrvIrSendNecLike(carrier, address, command, 13, 8, true, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "NEC42ext")) {
-			if (!uiPrvIrSendNecLike(carrier, address, command, 26, 16, false, cancelledP))
+			if (!uiPrvIrSendNecLike(carrier, address, command, 26, 16, false, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "Samsung32")) {
-			if (!uiPrvIrMarkCancellable(carrier, 4500, cancelledP) || !uiPrvIrSpaceCancellable(4500, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 560, 560, 1690, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690, cancelledP) ||
-				!uiPrvIrMarkCancellable(carrier, 560, cancelledP))
+			if (!uiPrvIrMarkCancellable(carrier, 4500, ctx) || !uiPrvIrSpaceCancellable(4500, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, address, 16, false, 560, 560, 1690, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 560, 560, 1690, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 560, 560, 1690, ctx) ||
+				!uiPrvIrMarkCancellable(carrier, 560, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "SIRC") || !strcmp(protocol, "SIRC15") || !strcmp(protocol, "SIRC20")) {
@@ -4770,20 +4865,20 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 			carrier = 40000;
 			for (rep = 0; rep < 3; rep++) {
-				if (!uiPrvIrMarkCancellable(carrier, 2400, cancelledP) || !uiPrvIrSpaceCancellable(600, cancelledP) ||
-					!uiPrvIrSendBitsMarkEncoded(carrier, command, 7, 600, 600, 1200, 600, cancelledP) ||
-					!uiPrvIrSendBitsMarkEncoded(carrier, address, addrBits, 600, 600, 1200, 600, cancelledP) ||
-					!uiPrvIrSpaceCancellable(25000, cancelledP))
+				if (!uiPrvIrMarkCancellable(carrier, 2400, ctx) || !uiPrvIrSpaceCancellable(600, ctx) ||
+					!uiPrvIrSendBitsMarkEncoded(carrier, command, 7, 600, 600, 1200, 600, ctx) ||
+					!uiPrvIrSendBitsMarkEncoded(carrier, address, addrBits, 600, 600, 1200, 600, ctx) ||
+					!uiPrvIrSpaceCancellable(25000, ctx))
 					return false;
 			}
 		}
 		else if (!strcmp(protocol, "RCA")) {
-			if (!uiPrvIrMarkCancellable(carrier, 4000, cancelledP) || !uiPrvIrSpaceCancellable(4000, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 500, 1000, 2000, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, ~address, 4, false, 500, 1000, 2000, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000, cancelledP) ||
-				!uiPrvIrMarkCancellable(carrier, 500, cancelledP))
+			if (!uiPrvIrMarkCancellable(carrier, 4000, ctx) || !uiPrvIrSpaceCancellable(4000, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, address, 4, false, 500, 1000, 2000, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, command, 8, false, 500, 1000, 2000, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~address, 4, false, 500, 1000, 2000, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, ~command, 8, false, 500, 1000, 2000, ctx) ||
+				!uiPrvIrMarkCancellable(carrier, 500, ctx))
 				return false;
 		}
 		else if (!strcmp(protocol, "RC5") || !strcmp(protocol, "RC5X")) {
@@ -4791,33 +4886,33 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uint_fast8_t i;
 
 			carrier = 36000;
-			if (!uiPrvIrSendManchesterBit(carrier, true, 889, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, !(cmd & 0x40), 889, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, false, 889, cancelledP))
+			if (!uiPrvIrSendManchesterBit(carrier, true, 889, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, !(cmd & 0x40), 889, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 889, ctx))
 				return false;
 			for (i = 0; i < 5; i++)
-				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (4 - i))), 889, cancelledP))
+				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (4 - i))), 889, ctx))
 					return false;
 			for (i = 0; i < 6; i++)
-				if (!uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889, cancelledP))
+				if (!uiPrvIrSendManchesterBit(carrier, !!(cmd & (1 << (5 - i))), 889, ctx))
 					return false;
 		}
 		else if (!strcmp(protocol, "RC6")) {
 			uint_fast8_t i;
 
 			carrier = 36000;
-			if (!uiPrvIrMarkCancellable(carrier, 2666, cancelledP) || !uiPrvIrSpaceCancellable(889, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, true, 444, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, false, 444, cancelledP) ||
-				!uiPrvIrSendManchesterBit(carrier, false, 889, cancelledP))
+			if (!uiPrvIrMarkCancellable(carrier, 2666, ctx) || !uiPrvIrSpaceCancellable(889, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, true, 444, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 444, ctx) ||
+				!uiPrvIrSendManchesterBit(carrier, false, 889, ctx))
 				return false;
 			for (i = 0; i < 8; i++)
-				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (7 - i))), 444, cancelledP))
+				if (!uiPrvIrSendManchesterBit(carrier, !!(address & (1 << (7 - i))), 444, ctx))
 					return false;
 			for (i = 0; i < 8; i++)
-				if (!uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444, cancelledP))
+				if (!uiPrvIrSendManchesterBit(carrier, !!(command & (1 << (7 - i))), 444, ctx))
 					return false;
 		}
 		else if (!strcmp(protocol, "Kaseikyo")) {
@@ -4825,27 +4920,26 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uint32_t payload = ((address >> 16) & 0x03ff) | ((command & 0x03ff) << 10);
 			uint8_t parity = (vendor ^ (vendor >> 8)) & 0x0f;
 
-			if (!uiPrvIrMarkCancellable(carrier, 3360, cancelledP) || !uiPrvIrSpaceCancellable(1650, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, vendor, 16, false, 432, 432, 1296, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, parity, 4, false, 432, 432, 1296, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, payload, 20, false, 432, 432, 1296, cancelledP) ||
-				!uiPrvIrSendBitsPulseDistance(carrier, (payload ^ (payload >> 8) ^ (payload >> 16)) & 0xff, 8, false, 432, 432, 1296, cancelledP) ||
-				!uiPrvIrMarkCancellable(carrier, 432, cancelledP))
+			if (!uiPrvIrMarkCancellable(carrier, 3360, ctx) || !uiPrvIrSpaceCancellable(1650, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, vendor, 16, false, 432, 432, 1296, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, parity, 4, false, 432, 432, 1296, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, payload, 20, false, 432, 432, 1296, ctx) ||
+				!uiPrvIrSendBitsPulseDistance(carrier, (payload ^ (payload >> 8) ^ (payload >> 16)) & 0xff, 8, false, 432, 432, 1296, ctx) ||
+				!uiPrvIrMarkCancellable(carrier, 432, ctx))
 				return false;
 		}
 		else {
 			return false;
 		}
 
-		return uiPrvIrSpaceCancellable(45000, cancelledP);
+		return uiPrvIrSpaceCancellable(45000, ctx);
 	}
 
-	static bool uiPrvIrSendCodeLine(struct Canvas *cnv, const char *title, const char *codeStr, const char *name, uint32_t carrier, uint32_t repeat, uint32_t codeIdx, bool *malformedP, bool *cancelledP)
+	static bool uiPrvIrSendCodeLine(struct Canvas *cnv, const char *title, const char *codeStr, const char *name, uint32_t carrier, uint32_t repeat, uint32_t codeIdx, uint32_t recordIndex, uint32_t lineNo, struct IrBlastStats *stats, bool *malformedP)
 	{
 		uint32_t rep;
 
 		*malformedP = false;
-		*cancelledP = false;
 
 		if (!repeat)
 			repeat = 1;
@@ -4861,11 +4955,14 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		}
 
 		for (rep = 0; rep < repeat; rep++) {
+			struct IrSendCtx ctx;
 			const char *str = codeStr;
 			bool mark = true;
 			uint32_t numDurations = 0;
+			uint32_t totalUsec = 0;
 
-			uiPrvIrDrawProgress(cnv, title, name, codeIdx, rep + 1, repeat);
+			uiPrvIrSendCtxInit(&ctx, stats, codeIdx, recordIndex, lineNo, name, "raw", IR_MAX_RAW_REPEAT_USEC);
+			uiPrvIrDrawProgress(cnv, title, name, "raw", codeIdx, recordIndex, lineNo, rep + 1, repeat);
 
 			while (1) {
 				uint32_t duration;
@@ -4878,22 +4975,33 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 					*malformedP = true;
 					return false;
 				}
+				if (duration > IR_MAX_RAW_REPEAT_USEC - totalUsec) {
+					*malformedP = true;
+					return false;
+				}
+				totalUsec += duration;
 
 				if (mark) {
-					if (!uiPrvIrMarkCancellable(carrier, duration, cancelledP))
+					if (!uiPrvIrMarkCancellable(carrier, duration, &ctx))
 						return false;
 				}
-				else if (!uiPrvIrSpaceCancellable(duration, cancelledP))
+				else if (!uiPrvIrSpaceCancellable(duration, &ctx))
 					return false;
 
 				numDurations++;
 				mark = !mark;
 
-				while (*str == ',' || *str == ' ' || *str == '\t')
+				while (*str == ' ' || *str == '\t')
 					str++;
 
 				if (!*str)
 					break;
+				if (*str == ',') {
+					str++;
+					continue;
+				}
+				if (*str >= '0' && *str <= '9')
+					continue;
 
 				*malformedP = true;
 				return false;
@@ -4904,11 +5012,27 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 				return false;
 			}
 
-			if (!uiPrvIrSpaceCancellable(45000, cancelledP))
+			if (!uiPrvIrSpaceCancellable(45000, &ctx))
 				return false;
 		}
 
 		return true;
+	}
+
+	static void uiPrvIrAlertStalled(struct Canvas *cnv, const char *title, const struct IrBlastStats *stats)
+	{
+		char msg[160];
+		const char *name = stats->stalledName[0] ? stats->stalledName : "IR code";
+		const char *detail = stats->stalledDetail[0] ? stats->stalledDetail : "record";
+
+		(void)sprintf(msg, "%s stalled\nCode %u Rec %u\nLine %u %s\n%s",
+			title,
+			(unsigned)stats->stalledCode,
+			(unsigned)stats->stalledRecord,
+			(unsigned)stats->stalledLine,
+			detail,
+			name);
+		uiAlert(cnv, msg, DialogTypeOk);
 	}
 
 
@@ -4948,7 +5072,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static void uiPrvFlipperRecordFinish(struct Canvas *cnv, struct FlipperIrRecord *rec, struct IrBlastStats *stats, const char *wantedName, const char *title)
 	{
-		if (stats->cancelled)
+		struct IrSendCtx ctx;
+
+		if (stats->cancelled || stats->timedOut)
 			return;
 
 		if (!rec->hasName)
@@ -4968,10 +5094,11 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			return;
 		}
 
-		uiPrvIrDrawProgress(cnv, title, rec->name, stats->sent + 1, 1, 1);
-		if (uiPrvIrSendParsed(rec->protocol, rec->address, rec->command, &stats->cancelled))
+		uiPrvIrSendCtxInit(&ctx, stats, stats->sent + 1, rec->recordIndex, rec->lineNo, rec->name, rec->protocol, IR_PARSED_RECORD_TIMEOUT_USEC);
+		uiPrvIrDrawProgress(cnv, title, rec->name, rec->protocol, stats->sent + 1, rec->recordIndex, rec->lineNo, 1, 1);
+		if (uiPrvIrSendParsed(rec->protocol, rec->address, rec->command, &ctx))
 			stats->sent++;
-		else
+		else if (!stats->cancelled && !stats->timedOut)
 			stats->skipped++;
 	}
 
@@ -4979,7 +5106,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	{
 		bool truncated;
 
-		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &truncated)) {
+		if (!stats->fileSize)
+			stats->fileSize = fatfsFileGetSize(fil);
+		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &stats->bytesRead, stats->fileSize, &truncated)) {
 			if (truncated)
 				stats->lineTooLong = true;
 			return false;
@@ -5012,9 +5141,34 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return false;
 	}
 
+	static bool uiPrvIrAcquireLineWorkspace(struct Canvas *cnv, const char *message, struct ToolWorkspaceSpan *lineMem)
+	{
+		bool acquired = toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, lineMem);
+
+		if (!acquired || lineMem->size < IR_LINE_BUF_SZ) {
+			if (acquired)
+				toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
+			uiAlert(cnv, message, DialogTypeOk);
+			return false;
+		}
+		return true;
+	}
+
 	static bool uiPrvIrFileIsFlipper(const char *trimmed)
 	{
 		return !strcmp(trimmed, "Filetype: IR signals file") || !strcmp(trimmed, "Filetype: IR library file");
+	}
+
+	static bool uiPrvIrRewindRead(struct FatfsFil *fil, struct IrBlastStats *stats)
+	{
+		if (!fatfsFileSeek(fil, 0))
+			return false;
+		if (stats) {
+			stats->lineNo = 0;
+			stats->bytesRead = 0;
+			stats->fileSize = fatfsFileGetSize(fil);
+		}
+		return true;
 	}
 
 	static bool uiPrvIrDetectFormat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats, bool *isFlipperP)
@@ -5027,12 +5181,12 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 			if (!strcmp(trimmed, IR_FILE_MAGIC)) {
 				*isFlipperP = false;
-				return fatfsFileSeek(fil, 0);
+				return uiPrvIrRewindRead(fil, stats);
 			}
 
 			if (uiPrvIrFileIsFlipper(trimmed)) {
 				*isFlipperP = true;
-				return fatfsFileSeek(fil, 0);
+				return uiPrvIrRewindRead(fil, stats);
 			}
 
 			stats->malformed++;
@@ -5092,16 +5246,15 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 					stats->malformed++;
 			}
 			else if (uiPrvStartsWith(trimmed, "code=")) {
-				bool malformed = false, cancelled = false;
+				bool malformed = false;
 
+				stats->recordIndex++;
 				codeIdx++;
-				if (uiPrvIrSendCodeLine(cnv, "Power", uiPrvTrim(trimmed + 5), name, carrier, repeat, codeIdx, &malformed, &cancelled))
+				if (uiPrvIrSendCodeLine(cnv, "Power", uiPrvTrim(trimmed + 5), name, carrier, repeat, codeIdx, stats->recordIndex, stats->lineNo, stats, &malformed))
 					stats->sent++;
 				if (malformed)
 					stats->malformed++;
-				if (cancelled)
-					stats->cancelled = true;
-				if (malformed || cancelled)
+				if (malformed || stats->cancelled || stats->timedOut)
 					return false;
 
 				uiPrvCopyStr(name, sizeof(name), "IR code");
@@ -5124,7 +5277,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		uiPrvFlipperRecordInit(&rec);
 
-		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled && (!maxSent || stats->sent < maxSent)) {
+		while (uiPrvIrReadLineStat(fil, line, stats) && !stats->cancelled && !stats->timedOut && (!maxSent || stats->sent < maxSent)) {
 			char *trimmed = uiPrvTrim(line);
 
 			if (!*trimmed)
@@ -5162,7 +5315,12 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 				if (recDirty) {
 					uiPrvFlipperRecordFinish(cnv, &rec, stats, wantedName, title);
 					uiPrvFlipperRecordInit(&rec);
+					if (stats->cancelled || stats->timedOut)
+						break;
 				}
+				stats->recordIndex++;
+				rec.recordIndex = stats->recordIndex;
+				rec.lineNo = stats->lineNo;
 				uiPrvCopyStr(rec.name, sizeof(rec.name), uiPrvTrim(trimmed + 5));
 				rec.hasName = true;
 				recDirty = true;
@@ -5214,16 +5372,14 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			else if (uiPrvStartsWith(trimmed, "data:")) {
 				recDirty = true;
 				if (rec.hasName && uiPrvIrNameMatches(rec.name, wantedName) && rec.type == FlipperIrTypeRaw) {
-					bool malformed = false, cancelled = false;
+					bool malformed = false;
 
-					if (uiPrvIrSendCodeLine(cnv, title, uiPrvTrim(trimmed + 5), rec.name, rec.frequency, 1, stats->sent + 1, &malformed, &cancelled)) {
+					if (uiPrvIrSendCodeLine(cnv, title, uiPrvTrim(trimmed + 5), rec.name, rec.frequency, 1, stats->sent + 1, rec.recordIndex, stats->lineNo, stats, &malformed)) {
 						rec.sentRaw = true;
 						stats->sent++;
 					}
 					if (malformed)
 						stats->malformed++;
-					if (cancelled)
-						stats->cancelled = true;
 				}
 			}
 			else {
@@ -5232,7 +5388,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			}
 		}
 
-		if (recDirty && !stats->lineTooLong && !stats->cancelled && (!maxSent || stats->sent < maxSent))
+		if (recDirty && !stats->lineTooLong && !stats->cancelled && !stats->timedOut && (!maxSent || stats->sent < maxSent))
 			uiPrvFlipperRecordFinish(cnv, &rec, stats, wantedName, title);
 
 		if (!haveHeader || !haveVersion)
@@ -5252,10 +5408,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
-			uiAlert(cnv, "Tool workspace is too small for Universal IR", DialogTypeOk);
+		if (!uiPrvIrAcquireLineWorkspace(cnv, "Tool workspace is too small for Universal IR", &lineMem))
 			return false;
-		}
 		line = (char*)lineMem.ptr;
 
 		vol = uiPrvMountCard(cnv, false);
@@ -5285,6 +5439,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.timedOut) {
+			uiPrvIrAlertStalled(cnv, "Universal IR spam", &stats);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
@@ -5321,10 +5478,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
-			uiAlert(cnv, "Tool workspace is too small for Universal IR", DialogTypeOk);
+		if (!uiPrvIrAcquireLineWorkspace(cnv, "Tool workspace is too small for Universal IR", &lineMem))
 			return false;
-		}
 		line = (char*)lineMem.ptr;
 
 		vol = uiPrvMountCard(cnv, false);
@@ -5355,6 +5510,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in /IR/tv.ir is too long", DialogTypeOk);
+		}
+		else if (stats.timedOut) {
+			uiPrvIrAlertStalled(cnv, "Mute", &stats);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
@@ -5390,10 +5548,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
-			uiAlert(cnv, "Tool workspace is too small for Universal IR", DialogTypeOk);
+		if (!uiPrvIrAcquireLineWorkspace(cnv, "Tool workspace is too small for Universal IR", &lineMem))
 			return false;
-		}
 		line = (char*)lineMem.ptr;
 
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
@@ -5422,6 +5578,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	out_report:
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.timedOut) {
+			uiPrvIrAlertStalled(cnv, title, &stats);
 		}
 		else if (stats.malformed && !stats.sent) {
 			char msg[80];
@@ -5627,14 +5786,11 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool ret = false, isFlipper = false, irStarted = false;
 
 		memset(&stats, 0, sizeof(stats));
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ) {
-			uiAlert(cnv, "Tool workspace is too small for Universal IR button spam", DialogTypeOk);
-			toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
+		if (!uiPrvIrAcquireLineWorkspace(cnv, "Tool workspace is too small for Universal IR button spam", &lineMem))
 			return false;
-		}
 		line = (char*)lineMem.ptr;
 
-		if (!fatfsFileSeek(fil, 0))
+		if (!uiPrvIrRewindRead(fil, &stats))
 			goto out_report;
 		if (!uiPrvIrDetectFormat(fil, line, &stats, &isFlipper) || !isFlipper)
 			goto out_report;
@@ -5649,6 +5805,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			irRemoteEnd();
 		if (stats.lineTooLong) {
 			uiAlert(cnv, "A line in the IR file is too long", DialogTypeOk);
+		}
+		else if (stats.timedOut) {
+			uiPrvIrAlertStalled(cnv, "Universal IR button spam", &stats);
 		}
 		else if (stats.cancelled) {
 			if (!uiPrvToolExitRequested())
@@ -5725,8 +5884,9 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		bool ret = false, overflow = false, lineTooLong = false;
 		uint32_t numButtons;
 
-		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr, &lineMem) || lineMem.size < IR_LINE_BUF_SZ ||
-			!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr, &listMem)) {
+		if (!uiPrvIrAcquireLineWorkspace(cnv, "Tool workspace is too small for Universal IR button spam", &lineMem))
+			return false;
+		if (!toolWorkspaceAcquire(ToolWorkspaceCartRamLower, ToolWorkspaceOwnerIr, &listMem)) {
 			uiAlert(cnv, "Tool workspace is too small for Universal IR button spam", DialogTypeOk);
 			toolWorkspaceRelease(ToolWorkspaceCartRamUpper, ToolWorkspaceOwnerIr);
 			return false;
@@ -6448,6 +6608,7 @@ reload_dir:
 	};
 
 	#define BADUSB_UI_ENUM_WAIT_MS	5000
+	#define BADUSB_UI_KEY_RELEASE_WAIT_MS 300
 
 	static const char *uiPrvBadUsbStateName(enum BadUsbWorkerState state)
 	{
@@ -6570,6 +6731,14 @@ reload_dir:
 			if (key & KEY_BIT_B)
 				return false;
 		}
+	}
+
+	static void uiPrvBadUsbWaitKeysReleasedBounded(struct Canvas *cnv)
+	{
+		uint64_t end = getTime() + (uint64_t)BADUSB_UI_KEY_RELEASE_WAIT_MS * (TICKS_PER_SECOND / 1000);
+
+		while (uiGetUiKeys() && getTime() < end)
+			uiPrvRefreshHeaderClock(cnv);
 	}
 
 	static bool uiPrvBadUsbStatus(void *userData, const struct BadUsbStatus *status)
@@ -6701,9 +6870,10 @@ reload_dir:
 		struct BadUsbUiData data;
 		struct BadUsbPreload preload;
 		struct UsbHidDeviceInfo hidInfo;
-		enum BadUsbResult ret;
+		struct ToolWorkspaceSpan scratchMem = {0};
+		enum BadUsbResult ret = BadUsbResultFileError;
 		char msg[96];
-		bool ok = false, reportsEnabled = false, usbStarted = false;
+		bool ok = false, reportsEnabled = false, usbStarted = false, scratchAcquired = false, reportResult = false;
 
 		uiPrvSetHeaderTitle("BadUSB");
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
@@ -6720,12 +6890,21 @@ reload_dir:
 		data.cnv = cnv;
 		data.name = name;
 		data.forceDraw = true;
-		uiPrvWaitKeysReleased();
+		uiPrvBadUsbWaitKeysReleasedBounded(cnv);
 
-		if (!badUsbReadDeviceInfo(fil, &hidInfo)) {
-			ret = BadUsbResultFileError;
-			goto out_report;
+		scratchAcquired = toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerBadUsb, &scratchMem);
+		if (!scratchAcquired || scratchMem.size < badUsbScratchSize()) {
+			if (scratchAcquired) {
+				toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerBadUsb);
+				scratchAcquired = false;
+			}
+			uiAlert(cnv, "Tool workspace is too small for BadUSB", DialogTypeOk);
+			goto out_close;
 		}
+
+		reportResult = true;
+		if (!badUsbReadDeviceInfoWithScratch(fil, &hidInfo, scratchMem.ptr, scratchMem.size))
+			goto out_close;
 		uiPrvBadUsbPreloadForDisplay(&preload, fil, &hidInfo);
 
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateWillRun, "Starting USB");
@@ -6739,7 +6918,7 @@ reload_dir:
 			usbStatus.message = usbHidLastError();
 			uiPrvBadUsbDrawStatus(&data, &usbStatus, BadUsbStateUsbError, usbHidLastError());
 			ret = BadUsbResultUsbError;
-			goto out_report;
+			goto out_close;
 		}
 		usbStarted = true;
 		if (!uiPrvBadUsbWaitReady(&data, &preload)) {
@@ -6748,20 +6927,32 @@ reload_dir:
 		}
 		usbHidSetReportsEnabled(true);
 		reportsEnabled = true;
-		uiPrvWaitKeysReleased();
+		uiPrvBadUsbWaitKeysReleasedBounded(cnv);
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateRunning, "Running");
-		ret = badUsbRunPreparedFile(fil, NULL, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data);
+		ret = badUsbRunPreparedFileWithScratch(fil, NULL, uiPrvBadUsbStatus, uiPrvBadUsbWaitButton, &data, scratchMem.ptr, scratchMem.size);
 
 	out_usb:
 		if (reportsEnabled) {
-			usbHidReleaseAll();
-			usbHidSetReportsEnabled(false);
+			/* BadUSB EOF/error cleanup must prefer immediate detach over a final release report. */
+			reportsEnabled = false;
 		}
-		if (usbStarted)
-			usbHidEnd();
-		uiPrvWaitKeysReleased();
+		if (usbStarted) {
+			usbHidDropNow();
+			usbStarted = false;
+		}
 
-	out_report:
+	out_close:
+		if (scratchAcquired) {
+			toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerBadUsb);
+			scratchAcquired = false;
+		}
+		if (fil) {
+			fatfsFileClose(fil);
+			fil = NULL;
+		}
+		if (!reportResult)
+			return ok;
+
 		if (ret == BadUsbResultDone) {
 			uiAlert(cnv, "BadUSB script complete", DialogTypeOk);
 			ok = true;
@@ -6776,10 +6967,6 @@ reload_dir:
 			uiAlert(cnv, "BadUSB script read failed", DialogTypeOk);
 		else
 			uiAlert(cnv, "BadUSB script has an unsupported or malformed command", DialogTypeOk);
-
-	out_close:
-		if (fil)
-			fatfsFileClose(fil);
 		return ok;
 	}
 

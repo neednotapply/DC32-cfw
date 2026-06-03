@@ -25,5 +25,6 @@ bool usbDeviceMounted(void);
 bool usbDeviceStarted(enum UsbDeviceMode mode);
 enum UsbDeviceMode usbDeviceMode(void);
 void usbDeviceEnd(void);
+void usbDeviceDropNow(void);
 
 #endif

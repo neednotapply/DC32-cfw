@@ -5,6 +5,8 @@
 #include "usbHid.h"
 
 #define USB_HID_KEYBOARD_REPORT_SIZE	8
+#define USB_HID_REPORT_TIMEOUT_MS		500
+#define USB_HID_CLEANUP_TIMEOUT_MS		50
 
 static struct UsbHidDeviceInfo mInfo;
 static bool mReportsEnabled;
@@ -88,7 +90,8 @@ bool usbHidReportsEnabled(void)
 
 static bool usbHidPrvSendReport(uint8_t modifiers, const uint8_t keys[6], bool force)
 {
-	uint64_t end = getTime() + TICKS_PER_SECOND / 2;
+	uint32_t timeoutMs = force ? USB_HID_CLEANUP_TIMEOUT_MS : USB_HID_REPORT_TIMEOUT_MS;
+	uint64_t end = getTime() + ((uint64_t)timeoutMs * TICKS_PER_SECOND) / 1000;
 
 	if (!force && !mReportsEnabled)
 		return false;
@@ -128,10 +131,16 @@ void usbHidEnd(void)
 {
 	if (!usbDeviceStarted(UsbDeviceModeHid))
 		return;
-	if (tud_mounted())
+	if (mReportsEnabled && tud_mounted())
 		usbHidPrvReleaseAll(true);
 	mReportsEnabled = false;
 	usbDeviceEnd();
+}
+
+void usbHidDropNow(void)
+{
+	mReportsEnabled = false;
+	usbDeviceDropNow();
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen)

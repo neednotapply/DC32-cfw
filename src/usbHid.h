@@ -35,5 +35,6 @@ bool usbHidReportsEnabled(void);
 bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6]);
 void usbHidReleaseAll(void);
 void usbHidEnd(void);
+void usbHidDropNow(void);
 
 #endif

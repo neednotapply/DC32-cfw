@@ -216,7 +216,19 @@ void usbDeviceEnd(void)
 	if (!mInited)
 		return;
 	tud_disconnect();
-	usbDeviceTask();
+	dcd_disconnect(0);
+	dcd_int_disable(0);
+	(void)tud_deinit(0);
+	mInited = false;
+	mMode = UsbDeviceModeNone;
+}
+
+void usbDeviceDropNow(void)
+{
+	if (!mInited)
+		return;
+	dcd_disconnect(0);
+	dcd_int_disable(0);
 	(void)tud_deinit(0);
 	mInited = false;
 	mMode = UsbDeviceModeNone;

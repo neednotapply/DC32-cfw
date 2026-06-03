@@ -20,7 +20,26 @@ struct FatfsFil {
 };
 
 static uint64_t mNow;
-static uint32_t mUsbBegins, mReports, mSawStart, mSawDone;
+static uint32_t mUsbBegins, mUsbEnds, mUsbDrops, mReports, mReportEnables, mReportDisables, mReleaseAlls, mSawStart, mSawDone, mSawError, mEofReads;
+static bool mUsbStarted, mReportsEnabled;
+
+static void resetHarness(void)
+{
+	mNow = 0;
+	mUsbBegins = 0;
+	mUsbEnds = 0;
+	mUsbDrops = 0;
+	mReports = 0;
+	mReportEnables = 0;
+	mReportDisables = 0;
+	mReleaseAlls = 0;
+	mSawStart = 0;
+	mSawDone = 0;
+	mSawError = 0;
+	mEofReads = 0;
+	mUsbStarted = false;
+	mReportsEnabled = false;
+}
 
 uint64_t getTime(void)
 {
@@ -50,6 +69,8 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 {
 	(void)info;
 	mUsbBegins++;
+	mUsbStarted = true;
+	mReportsEnabled = false;
 	return true;
 }
 
@@ -59,38 +80,55 @@ void usbHidTask(void)
 
 bool usbHidReady(void)
 {
-	return mUsbBegins != 0;
+	return mUsbStarted;
 }
 
 bool usbHidStarted(void)
 {
-	return mUsbBegins != 0;
+	return mUsbStarted;
 }
 
 void usbHidSetReportsEnabled(bool enabled)
 {
-	(void)enabled;
+	if (enabled && !mReportsEnabled)
+		mReportEnables++;
+	if (!enabled && mReportsEnabled)
+		mReportDisables++;
+	mReportsEnabled = enabled;
 }
 
 bool usbHidReportsEnabled(void)
 {
-	return true;
+	return mReportsEnabled;
 }
 
 bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6])
 {
 	(void)modifiers;
 	(void)keys;
+	if (!mReportsEnabled)
+		return false;
 	mReports++;
 	return true;
 }
 
 void usbHidReleaseAll(void)
 {
+	mReleaseAlls++;
 }
 
 void usbHidEnd(void)
 {
+	mUsbEnds++;
+	mUsbStarted = false;
+	mReportsEnabled = false;
+}
+
+void usbHidDropNow(void)
+{
+	mUsbDrops++;
+	mUsbStarted = false;
+	mReportsEnabled = false;
 }
 
 bool fatfsFileRead(struct FatfsFil* fil, void *buf, uint32_t num, uint32_t *numReadP)
@@ -98,6 +136,8 @@ bool fatfsFileRead(struct FatfsFil* fil, void *buf, uint32_t num, uint32_t *numR
 	uint32_t remain = fil->size - fil->pos;
 	uint32_t n = remain < num ? remain : num;
 
+	if (num && fil->pos >= fil->size)
+		mEofReads++;
 	if (buf && n)
 		memcpy(buf, fil->data + fil->pos, n);
 	fil->pos += n;
@@ -126,6 +166,7 @@ static bool badusbStatus(void *userData, const struct BadUsbStatus *status)
 	if (status->state == BadUsbStateDone)
 		mSawDone++;
 	if (status->state == BadUsbStateScriptError) {
+		mSawError++;
 		fprintf(stderr, "script error line %u: %s\n", (unsigned)status->errorLine, status->error);
 		return false;
 	}
@@ -179,11 +220,7 @@ static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 	struct BadUsbPreload preload;
 	enum BadUsbResult ret;
 
-	mNow = 0;
-	mUsbBegins = 0;
-	mReports = 0;
-	mSawStart = 0;
-	mSawDone = 0;
+	resetHarness();
 	ret = badUsbPreloadFile(&fil, badusbStatus, NULL, &preload);
 	if (ret != BadUsbResultDone) {
 		fprintf(stderr, "FAIL: %s preload returned %d\n", name, ret);
@@ -200,18 +237,102 @@ static bool runScriptBuffer(const char *name, const char *data, uint32_t size)
 	usbHidSetReportsEnabled(true);
 	mSawStart++;
 	ret = badUsbRunPreparedFile(&fil, &preload, badusbStatus, badusbWaitButton, NULL);
-	usbHidReleaseAll();
 	usbHidSetReportsEnabled(false);
 	usbHidEnd();
 	if (ret != BadUsbResultDone) {
 		fprintf(stderr, "FAIL: %s returned %d\n", name, ret);
 		return false;
 	}
-	if (!mUsbBegins || !mSawStart || !mSawDone) {
-		fprintf(stderr, "FAIL: %s did not reach USB start/done states\n", name);
+	if (!mUsbBegins || !mSawStart || mSawDone) {
+		fprintf(stderr, "FAIL: %s did not use EOF return state cleanly\n", name);
 		return false;
 	}
-	printf("PASS: %s usbBegins=%u reports=%u\n", name, (unsigned)mUsbBegins, (unsigned)mReports);
+	if (mReportEnables != 1 || mReportDisables != 1 || mReleaseAlls || mUsbEnds != 1 || mReportsEnabled || mUsbStarted) {
+		fprintf(stderr, "FAIL: %s did not clean up HID once (en=%u dis=%u release=%u ends=%u)\n", name, (unsigned)mReportEnables, (unsigned)mReportDisables, (unsigned)mReleaseAlls, (unsigned)mUsbEnds);
+		return false;
+	}
+	printf("PASS: %s usbBegins=%u usbEnds=%u reports=%u\n", name, (unsigned)mUsbBegins, (unsigned)mUsbEnds, (unsigned)mReports);
+	return true;
+}
+
+static bool runUsbFirstBuffer(const char *name, const char *data, uint32_t size)
+{
+	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
+	struct UsbHidDeviceInfo info;
+	struct BadUsbScratch scratch;
+	enum BadUsbResult ret;
+
+	resetHarness();
+	if (!badUsbReadDeviceInfoWithScratch(&fil, &info, &scratch, sizeof(scratch))) {
+		fprintf(stderr, "FAIL: %s failed to read HID info before USB-first run\n", name);
+		return false;
+	}
+	if (info.vid != 0x1209 || info.pid != 0xdc32 || strcmp(info.manufacturer, "Unit Maker") || strcmp(info.product, "Unit Product")) {
+		fprintf(stderr, "FAIL: %s did not parse ID line before USB-first run\n", name);
+		return false;
+	}
+	if (mUsbBegins || mReports) {
+		fprintf(stderr, "FAIL: %s touched USB during HID info scan\n", name);
+		return false;
+	}
+	if (!usbHidBegin(&info)) {
+		fprintf(stderr, "FAIL: %s USB begin failed\n", name);
+		return false;
+	}
+	usbHidSetReportsEnabled(true);
+	mSawStart++;
+	ret = badUsbRunPreparedFileWithScratch(&fil, NULL, badusbStatus, badusbWaitButton, NULL, &scratch, sizeof(scratch));
+	usbHidDropNow();
+	if (ret != BadUsbResultDone || mSawError || mSawDone) {
+		fprintf(stderr, "FAIL: %s did not finish USB-first EOF cleanly (ret=%d)\n", name, ret);
+		return false;
+	}
+	if (!mUsbBegins || !mSawStart || mReportEnables != 1 || mReportDisables || mReleaseAlls || mUsbEnds || mUsbDrops != 1 || mReportsEnabled || mUsbStarted) {
+		fprintf(stderr, "FAIL: %s did not hard-drop HID once after USB-first EOF (begins=%u en=%u dis=%u release=%u ends=%u drops=%u)\n",
+			name, (unsigned)mUsbBegins, (unsigned)mReportEnables, (unsigned)mReportDisables, (unsigned)mReleaseAlls, (unsigned)mUsbEnds, (unsigned)mUsbDrops);
+		return false;
+	}
+	if (mEofReads) {
+		fprintf(stderr, "FAIL: %s performed %u extra EOF reads before hard-drop\n", name, (unsigned)mEofReads);
+		return false;
+	}
+	printf("PASS: %s USB-first EOF hard-drop reports=%u\n", name, (unsigned)mReports);
+	return true;
+}
+
+static bool failDuringUsbFirstRunBuffer(const char *name, const char *data, uint32_t size, enum BadUsbResult expected)
+{
+	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
+	struct UsbHidDeviceInfo info;
+	struct BadUsbScratch scratch;
+	enum BadUsbResult ret;
+
+	resetHarness();
+	if (!badUsbReadDeviceInfoWithScratch(&fil, &info, &scratch, sizeof(scratch))) {
+		fprintf(stderr, "FAIL: %s failed to read HID info before USB-first run\n", name);
+		return false;
+	}
+	if (mUsbBegins || mReports) {
+		fprintf(stderr, "FAIL: %s touched USB during HID info scan\n", name);
+		return false;
+	}
+	if (!usbHidBegin(&info)) {
+		fprintf(stderr, "FAIL: %s USB begin failed\n", name);
+		return false;
+	}
+	usbHidSetReportsEnabled(true);
+	mSawStart++;
+	ret = badUsbRunPreparedFileWithScratch(&fil, NULL, badusbStatus, badusbWaitButton, NULL, &scratch, sizeof(scratch));
+	usbHidDropNow();
+	if (ret != expected || !mSawError || mSawDone) {
+		fprintf(stderr, "FAIL: %s did not fail during USB-first run cleanly (ret=%d)\n", name, ret);
+		return false;
+	}
+	if (!mUsbBegins || mReportDisables || mReleaseAlls || mUsbEnds || mUsbDrops != 1 || mReportsEnabled || mUsbStarted) {
+		fprintf(stderr, "FAIL: %s did not hard-drop HID once after error (begins=%u disables=%u release=%u ends=%u drops=%u)\n", name, (unsigned)mUsbBegins, (unsigned)mReportDisables, (unsigned)mReleaseAlls, (unsigned)mUsbEnds, (unsigned)mUsbDrops);
+		return false;
+	}
+	printf("PASS: %s failed during USB-first run with HID hard-drop\n", name);
 	return true;
 }
 
@@ -247,9 +368,37 @@ int main(void)
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
 		"MEDIA PLAY\n";
+	static char tooLongLineScript[BADUSB_LINE_BUF_SZ + 32];
+	static const char tooLongPrefix[] = "REM ok\n";
+	static const char malformedCommandScript[] =
+		"GUI r\n"
+		"NOT_A_REAL_KEY\n";
+	static const char usbFirstValidScript[] =
+		"ID 1209:DC32 Unit Maker:Unit Product\n"
+		"REM valid USB-first EOF path\n"
+		"STRING hi\n"
+		"ENTER\n";
+	static const char usbFirstValidNoFinalNewlineScript[] =
+		"ID 1209:DC32 Unit Maker:Unit Product\n"
+		"REM valid USB-first EOF path without final newline\n"
+		"STRING hi\n"
+		"ENTER";
+	static char firstLineTooLongScript[BADUSB_LINE_BUF_SZ + 16];
 	bool ok = true;
 
+	memcpy(tooLongLineScript, tooLongPrefix, sizeof(tooLongPrefix) - 1);
+	memset(tooLongLineScript + sizeof(tooLongPrefix) - 1, 'A', sizeof(tooLongLineScript) - sizeof(tooLongPrefix) - 1);
+	tooLongLineScript[sizeof(tooLongLineScript) - 2] = '\n';
+	tooLongLineScript[sizeof(tooLongLineScript) - 1] = 0;
+	memset(firstLineTooLongScript, 'B', sizeof(firstLineTooLongScript) - 1);
+	firstLineTooLongScript[sizeof(firstLineTooLongScript) - 2] = '\n';
+	firstLineTooLongScript[sizeof(firstLineTooLongScript) - 1] = 0;
 	ok = runScriptBuffer("embedded long-line script", longLineScript, sizeof(longLineScript) - 1) && ok;
+	ok = runUsbFirstBuffer("valid USB-first script", usbFirstValidScript, sizeof(usbFirstValidScript) - 1) && ok;
+	ok = runUsbFirstBuffer("valid USB-first script without final newline", usbFirstValidNoFinalNewlineScript, sizeof(usbFirstValidNoFinalNewlineScript) - 1) && ok;
+	ok = failDuringUsbFirstRunBuffer("overlong line script", tooLongLineScript, sizeof(tooLongLineScript) - 1, BadUsbResultDecodeError) && ok;
+	ok = failDuringUsbFirstRunBuffer("overlong first line script", firstLineTooLongScript, sizeof(firstLineTooLongScript) - 1, BadUsbResultDecodeError) && ok;
+	ok = failDuringUsbFirstRunBuffer("malformed command script", malformedCommandScript, sizeof(malformedCommandScript) - 1, BadUsbResultDecodeError) && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/Hacker_Typer.txt") && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/RickRoll_YT_Win.txt") && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/GoodUSB.txt") && ok;

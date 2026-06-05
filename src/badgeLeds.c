@@ -13,7 +13,6 @@
 #define LED_MAX_SPEED					10
 #define LED_REACTIVE_DEFAULT_SPEED		4
 #define LED_REACTIVE_BUTTON_FADE_MS		300
-#define LED_REACTIVE_TOUCH_PULSE_MS		600
 #define LED_REACTIVE_TOUCH_POLL_TICKS	(TICKS_PER_SECOND / 25)
 #define LED_SILK_TO_INDEX(n)			((n) - 1)
 
@@ -34,9 +33,9 @@ static const struct BadgeLedButtonZone mButtonZones[] = {
 
 static struct Settings mLedSettings;
 static bool mHaveLedSettings;
-static uint64_t mNextLedFrameTime, mLastGameLedWriteTime, mNextTouchPollTime, mTouchPulseStart;
+static uint64_t mNextLedFrameTime, mLastGameLedWriteTime, mNextTouchPollTime, mTouchLastPressed;
 static uint64_t mButtonLastPressed[sizeof(mButtonZones) / sizeof(*mButtonZones)];
-static bool mTouchWasDown;
+static bool mTouchSeen;
 static bool mButtonSeen[sizeof(mButtonZones) / sizeof(*mButtonZones)];
 static uint8_t mLedFrame;
 
@@ -77,8 +76,7 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 		[LedModeRandom] = "RANDOM",
 		[LedModeFlashlight] = "REAR ON",
 		[LedModeFrontOn] = "FRONT ON",
-		[LedModeReactiveTouch] = "REACT TCH",
-		[LedModeReactiveButtons] = "REACT BTN",
+		[LedModeReactive] = "REACTIVE",
 	};
 
 	mode = badgeLedsPrvSanitizeMode(mode);
@@ -206,8 +204,8 @@ static uint64_t badgeLedsPrvScaledDurationTicks(uint32_t msec)
 static void badgeLedsPrvResetReactive(void)
 {
 	mNextTouchPollTime = 0;
-	mTouchPulseStart = 0;
-	mTouchWasDown = false;
+	mTouchLastPressed = 0;
+	mTouchSeen = false;
 	memset(mButtonLastPressed, 0, sizeof(mButtonLastPressed));
 	memset(mButtonSeen, 0, sizeof(mButtonSeen));
 }
@@ -223,9 +221,10 @@ static void badgeLedsPrvPollReactiveTouch(uint64_t now)
 	if (!uiReadTouchRaw(&touch))
 		return;
 
-	if (touch.penDown && !mTouchWasDown)
-		mTouchPulseStart = now;
-	mTouchWasDown = touch.penDown;
+	if (touch.penDown) {
+		mTouchLastPressed = now;
+		mTouchSeen = true;
+	}
 }
 
 static void badgeLedsPrvPollReactiveButtons(uint64_t now)
@@ -347,84 +346,37 @@ static void badgeLedsPrvRenderFrontOn(void)
 	badgeLedsPrvRenderSet(activeLeds, sizeof(activeLeds) / sizeof(*activeLeds));
 }
 
-static uint_fast8_t badgeLedsPrvTouchRing(uint_fast8_t ledIdx)
+static void badgeLedsPrvMixReactiveScale(uint8_t ledScales[NUM_WS2812s], uint_fast8_t ledIdx, uint_fast8_t scale)
 {
-	static const uint8_t rings[NUM_WS2812s] = {
-		[0] = 0,
-		[1] = 1,
-		[2] = 0,
-		[3] = 1,
-		[4] = 0,
-		[5] = 0,
-		[6] = 0,
-		[7] = 1,
-		[8] = 1,
-	};
-
-	return rings[ledIdx];
+	if (ledIdx < NUM_WS2812s && scale > ledScales[ledIdx])
+		ledScales[ledIdx] = scale;
 }
 
-static uint_fast8_t badgeLedsPrvPulseScale(uint64_t age, uint64_t width)
+static void badgeLedsPrvAddReactiveTouch(uint64_t now, uint8_t ledScales[NUM_WS2812s])
 {
-	uint64_t hold = width / 5;
-
-	if (age >= width)
-		return 0;
-	if (age <= hold)
-		return 255;
-	return 255 - (age - hold) * 255 / (width - hold);
-}
-
-static void badgeLedsPrvRenderReactiveTouch(void)
-{
-	uint64_t now = getTime();
-	uint64_t duration = badgeLedsPrvScaledDurationTicks(LED_REACTIVE_TOUCH_PULSE_MS);
-	uint64_t elapsed, ringDelay, width;
+	uint64_t fadeTicks = badgeLedsPrvScaledDurationTicks(LED_REACTIVE_BUTTON_FADE_MS);
+	uint64_t elapsed;
+	uint_fast8_t scale;
 	uint_fast8_t i;
 
-	ws2812SetAllRgb(0, 0, 0);
-	if (!mTouchPulseStart) {
-		ws2812refresh();
+	if (!mTouchSeen)
+		return;
+
+	elapsed = now - mTouchLastPressed;
+	if (elapsed >= fadeTicks) {
+		mTouchSeen = false;
 		return;
 	}
 
-	elapsed = now - mTouchPulseStart;
-	if (elapsed >= duration) {
-		mTouchPulseStart = 0;
-		ws2812refresh();
-		return;
-	}
+	scale = 255 - elapsed * 255 / fadeTicks;
 
-	ringDelay = duration / 3;
-	width = duration - ringDelay;
-	if (!width)
-		width = 1;
-
-	for (i = 0; i < NUM_WS2812s; i++) {
-		uint64_t delay = badgeLedsPrvTouchRing(i) * ringDelay;
-		uint64_t age;
-		uint_fast8_t scale;
-		uint8_t red, green, blue;
-
-		if (elapsed < delay)
-			continue;
-
-		age = elapsed - delay;
-		scale = badgeLedsPrvPulseScale(age, width);
-		if (!scale)
-			continue;
-
-		badgeLedsPrvColor(i, (uint8_t)(mLedFrame * 5 + i * 28), &red, &green, &blue, true);
-		badgeLedsPrvSetRgb(i, badgeLedsPrvScale(red, scale), badgeLedsPrvScale(green, scale), badgeLedsPrvScale(blue, scale));
-	}
-	ws2812refresh();
+	for (i = 0; i < NUM_WS2812s; i++)
+		badgeLedsPrvMixReactiveScale(ledScales, i, scale);
 }
 
-static void badgeLedsPrvRenderReactiveButtons(void)
+static void badgeLedsPrvAddReactiveButtons(uint64_t now, uint8_t ledScales[NUM_WS2812s])
 {
-	uint64_t now = getTime();
 	uint64_t fadeTicks = badgeLedsPrvScaledDurationTicks(LED_REACTIVE_BUTTON_FADE_MS);
-	uint8_t ledScales[NUM_WS2812s] = {0};
 	uint_fast8_t i;
 
 	for (i = 0; i < sizeof(mButtonZones) / sizeof(*mButtonZones); i++) {
@@ -441,9 +393,18 @@ static void badgeLedsPrvRenderReactiveButtons(void)
 		}
 
 		scale = 255 - elapsed * 255 / fadeTicks;
-		if (scale > ledScales[mButtonZones[i].ledIdx])
-			ledScales[mButtonZones[i].ledIdx] = scale;
+		badgeLedsPrvMixReactiveScale(ledScales, mButtonZones[i].ledIdx, scale);
 	}
+}
+
+static void badgeLedsPrvRenderReactive(void)
+{
+	uint64_t now = getTime();
+	uint8_t ledScales[NUM_WS2812s] = {0};
+	uint_fast8_t i;
+
+	badgeLedsPrvAddReactiveTouch(now, ledScales);
+	badgeLedsPrvAddReactiveButtons(now, ledScales);
 
 	ws2812SetAllRgb(0, 0, 0);
 	for (i = 0; i < NUM_WS2812s; i++) {
@@ -489,12 +450,8 @@ static void badgeLedsPrvRenderCurrent(void)
 			badgeLedsPrvRenderFrontOn();
 			break;
 
-		case LedModeReactiveTouch:
-			badgeLedsPrvRenderReactiveTouch();
-			break;
-
-		case LedModeReactiveButtons:
-			badgeLedsPrvRenderReactiveButtons();
+		case LedModeReactive:
+			badgeLedsPrvRenderReactive();
 			break;
 
 		case LedModeOff:
@@ -542,10 +499,10 @@ void badgeLedsTick(void)
 	if (mLastGameLedWriteTime && now - mLastGameLedWriteTime < LED_GAME_WRITE_PAUSE_TICKS)
 		return;
 
-	if (mode == LedModeReactiveTouch)
+	if (mode == LedModeReactive) {
 		badgeLedsPrvPollReactiveTouch(now);
-	else if (mode == LedModeReactiveButtons)
 		badgeLedsPrvPollReactiveButtons(now);
+	}
 
 	if (now < mNextLedFrameTime)
 		return;

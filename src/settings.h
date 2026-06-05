@@ -15,8 +15,7 @@ enum LedMode {
 	LedModeRandom,
 	LedModeFlashlight,
 	LedModeFrontOn,
-	LedModeReactiveTouch,
-	LedModeReactiveButtons,
+	LedModeReactive,
 	LedModeNumModes,
 };
 

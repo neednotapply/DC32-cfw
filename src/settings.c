@@ -7,12 +7,13 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			13
+#define SETTINGS_CUR_VER			14
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
 #define SETTINGS_LED_MIN_BRIGHTNESS	15
 #define SETTINGS_MUSIC_VOLUME_MAX	15
+#define SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13	9
 
 
 union SettingsPage {
@@ -64,7 +65,9 @@ static void settingsPrvNormalize(struct Settings *settings)
 {
 	if (settings->speed >= SETTINGS_NUM_SPEEDS)
 		settings->speed = 1;
-	if (settings->ledMode >= LedModeNumModes)
+	if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
+		settings->ledMode = LedModeReactive;
+	else if (settings->ledMode >= LedModeNumModes)
 		settings->ledMode = LedModeOff;
 	if (settings->ledColor >= LedColorNumColors)
 		settings->ledColor = LedColorCustom;
@@ -162,6 +165,11 @@ void settingsGet(struct Settings *settings)
 			}
 			else
 				settings->ledColor = LedColorCustom;
+			//fallthrough
+
+		case 13:			//merge reactive touch and button LED patterns
+			if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
+				settings->ledMode = LedModeReactive;
 			//fallthrough
 
 		//other cases here, in increasing order

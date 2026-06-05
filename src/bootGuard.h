@@ -33,6 +33,7 @@ enum BootGuardMode {
 };
 
 void bootGuardInit(void);
+void bootGuardMarkImageBooted(void);
 void bootGuardEnter(enum BootGuardMode mode);
 void bootGuardExit(enum BootGuardMode mode);
 enum BootGuardMode bootGuardRecoveredMode(void);

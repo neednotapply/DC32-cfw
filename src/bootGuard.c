@@ -1,7 +1,12 @@
 #include "bootGuard.h"
 #include "2350.h"
+#include "qspi.h"
+#include <stdbool.h>
+#include <string.h>
 
 #define BOOT_GUARD_MAGIC	0x44433247ul
+#define BOOT_GUARD_IMAGE_BOOTED_MAGIC	0x44434249ul
+#define BOOT_GUARD_IMAGE_BOOT_PAGE_WORDS	(QSPI_WRITE_GRANULARITY / sizeof(uint32_t))
 #define BOOT_GUARD_SCRATCH_MAGIC	0
 #define BOOT_GUARD_SCRATCH_MODE		1
 #define BOOT_GUARD_SCRATCH_REASON_OR_LR	2
@@ -22,6 +27,31 @@
 
 static enum BootGuardMode mRecoveredMode;
 
+static const uint32_t mBootGuardImageBootPage[BOOT_GUARD_IMAGE_BOOT_PAGE_WORDS]
+	__attribute__((used, aligned(QSPI_WRITE_GRANULARITY), section(".rodata.boot_guard_image_boot"))) = {
+	0xfffffffful,
+	BOOT_GUARD_MAGIC,
+	BOOT_GUARD_IMAGE_BOOTED_MAGIC,
+};
+
+_Static_assert(sizeof(mBootGuardImageBootPage) == QSPI_WRITE_GRANULARITY, "boot guard image boot page size");
+
+static bool bootGuardPrvIsForcedWatchdogReset(uint32_t reason)
+{
+	/*
+	 * The UF2 bootloader hands off to the freshly flashed app with a forced
+	 * watchdog reset. Timer watchdog resets still mean the app stopped feeding
+	 * the watchdog, so keep reporting those.
+	 */
+	return (reason & WATCHDOG_REASON_FORCE_BITS) != 0 &&
+		(reason & WATCHDOG_REASON_TIMER_BITS) == 0;
+}
+
+static bool bootGuardPrvIsFreshImageBoot(void)
+{
+	return mBootGuardImageBootPage[0] != BOOT_GUARD_IMAGE_BOOTED_MAGIC;
+}
+
 static enum BootGuardMode bootGuardPrvScratchMode(void)
 {
 	uint32_t mode = watchdog_hw->scratch[BOOT_GUARD_SCRATCH_MODE];
@@ -38,12 +68,33 @@ void bootGuardInit(void)
 	uint32_t reason = watchdog_hw->reason;
 
 	mRecoveredMode = bootGuardPrvScratchMode();
-	if (!reason)
+	if (bootGuardPrvIsFreshImageBoot() && mRecoveredMode != BootGuardModeHardFault) {
+		bootGuardClear();
+		return;
+	}
+	if (mRecoveredMode) {
+		if (mRecoveredMode != BootGuardModeHardFault && bootGuardPrvIsForcedWatchdogReset(reason))
+			bootGuardClear();
+		return;
+	}
+	if (!reason || bootGuardPrvIsForcedWatchdogReset(reason))
 		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] = 0;
-	else if (!mRecoveredMode && watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] != (BOOT_GUARD_MAGIC ^ reason)) {
+	else if (watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] != (BOOT_GUARD_MAGIC ^ reason)) {
 		mRecoveredMode = BootGuardModeTool;
 		watchdog_hw->scratch[BOOT_GUARD_SCRATCH_REASON_OR_LR] = BOOT_GUARD_MAGIC ^ reason;
 	}
+}
+
+void bootGuardMarkImageBooted(void)
+{
+	uint32_t page[BOOT_GUARD_IMAGE_BOOT_PAGE_WORDS];
+
+	if (!bootGuardPrvIsFreshImageBoot())
+		return;
+
+	memcpy(page, mBootGuardImageBootPage, sizeof(page));
+	page[0] = BOOT_GUARD_IMAGE_BOOTED_MAGIC;
+	(void)flashWrite((uint32_t)(uintptr_t)mBootGuardImageBootPage, 0, page, sizeof(page));
 }
 
 void bootGuardEnter(enum BootGuardMode mode)

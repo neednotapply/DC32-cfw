@@ -2159,6 +2159,7 @@ void __attribute__((noreturn, used)) micromain(void)
 
         pr("flash...\n");
         flashBootInit();
+        bootGuardMarkImageBooted();
 
         pr("gpios...\n");
         gpiosConfig(true);

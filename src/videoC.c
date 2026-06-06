@@ -11,8 +11,11 @@
 
 #define VRAM_BASE					0x8000
 #define VRAM_BANK_SIZE				0x2000
+#define GB_DRAW_LINE_BUF_PIXELS		(160 + 7 + 7 + 2)
 	
 static uint8_t mFrameDithering;
+static PIXFMT mGbDrawLineBuf[GB_DRAW_LINE_BUF_PIXELS];
+static uint8_t mGbDrawBgToOamPrioBuf[GB_DRAW_LINE_BUF_PIXELS];
 
 static uint16_t gbSwapBits(uint16_t v)
 {
@@ -68,8 +71,8 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 	if (!frameSkipCtr){
 	
 		const uint8_t *vramBank0 = mVRAM, *vramBank1 = vramBank0 + VRAM_BANK_SIZE;
-		PIXFMT scrBuf[160 + 7 + 7 + 2], *scr = scrBuf + 8;	//+ up to 7 on both sides for BG drawing + 1 to allow an extra tile to be drawn on the end, extra + 1 to align the draw area to a word
-		uint8_t bgToOamPrioBuf[160 + 7 + 7 + 2], *bgToOamPrio = bgToOamPrioBuf + 8;
+		PIXFMT *scr = mGbDrawLineBuf + 8;	//+ up to 7 on both sides for BG drawing + 1 to allow an extra tile to be drawn on the end, extra + 1 to align the draw area to a word
+		uint8_t *bgToOamPrio = mGbDrawBgToOamPrioBuf + 8;
 		uint_fast8_t i;
 		
 		if (presentsAsCgb || (hram[0x40] & 1)) {	//display background and maybe the window
@@ -302,4 +305,3 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 		gbDrawLine(lineNum, scr);
 	}
 }
-

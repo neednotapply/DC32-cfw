@@ -46,31 +46,40 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
 
-      - name: Resolve SD.zip source manifest
-        id: sd-sources
+      - name: Resolve SD-assets.zip source manifest
+        id: sd-assets-sources
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           mkdir -p "$ARTIFACT_DIR"
           python3 tools/build_sd_zip.py \
             --sources-only \
-            --sources-output "$ARTIFACT_DIR/SD.sources.json"
-          echo "cache_key=$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+            --sources-output "$ARTIFACT_DIR/SD-assets.sources.json"
+          echo "cache_key=$(sha256sum "$ARTIFACT_DIR/SD-assets.sources.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore cached SD.zip
-        id: sd-cache
+      - name: Restore cached SD-assets.zip
+        id: sd-assets-cache
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/DC32-cfw/SD.zip
-          key: sd-zip-${{ steps.sd-sources.outputs.cache_key }}
+          path: ${{ runner.temp }}/DC32-cfw/SD-assets.zip
+          key: sd-assets-zip-${{ steps.sd-assets-sources.outputs.cache_key }}
 
-      - name: Build SD.zip
-        if: steps.sd-cache.outputs.cache-hit != 'true'
+      - name: Build SD-assets.zip
+        if: steps.sd-assets-cache.outputs.cache-hit != 'true'
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           python3 tools/build_sd_zip.py \
-            --output "$ARTIFACT_DIR/SD.zip" \
+            --assets-output "$ARTIFACT_DIR/SD-assets.zip" \
             --work-dir "$RUNNER_TEMP/sd-zip" \
-            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+            --sources-output "$ARTIFACT_DIR/SD-assets.sources.json"
+
+      - name: Build SD-apps.zip
+        run: |
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          python3 tools/build_sd_zip.py \
+            --apps-output "$ARTIFACT_DIR/SD-apps.zip" \
+            --apps-dir build/apps \
+            --work-dir "$RUNNER_TEMP/sd-apps-zip" \
+            --apps-sources-output "$ARTIFACT_DIR/SD-apps.sources.json"
 
       - name: Upload DC32-cfw UF2 artifact
         uses: actions/upload-artifact@v4
@@ -78,12 +87,17 @@ jobs:
           name: DC32-cfw-uf2
           path: ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
 
-      - name: Upload DC32-cfw SD artifact
-        if: steps.sd-cache.outputs.cache-hit != 'true' || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+      - name: Upload DC32-cfw SD assets artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DC32-cfw-sd
-          path: ${{ runner.temp }}/DC32-cfw/SD.zip
+          name: DC32-cfw-sd-assets
+          path: ${{ runner.temp }}/DC32-cfw/SD-assets.zip
+
+      - name: Upload DC32-cfw SD apps artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DC32-cfw-sd-apps
+          path: ${{ runner.temp }}/DC32-cfw/SD-apps.zip
 
       - name: Attach DC32-cfw files to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
@@ -91,13 +105,15 @@ jobs:
         with:
           files: |
             ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
-            ${{ runner.temp }}/DC32-cfw/SD.zip
+            ${{ runner.temp }}/DC32-cfw/SD-assets.zip
+            ${{ runner.temp }}/DC32-cfw/SD-apps.zip
           overwrite_files: true
 
-      - name: Remove SD source manifest from release
+      - name: Remove SD source manifests from release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
         run: |
-          gh release delete-asset "$RELEASE_TAG" SD.sources.json --yes >/dev/null 2>&1 || true
+          gh release delete-asset "$RELEASE_TAG" SD-assets.sources.json --yes >/dev/null 2>&1 || true
+          gh release delete-asset "$RELEASE_TAG" SD-apps.sources.json --yes >/dev/null 2>&1 || true

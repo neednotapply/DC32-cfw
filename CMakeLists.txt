@@ -11,6 +11,26 @@ set(MINIZ_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/
 set(SIMAVR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/simavr")
 set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
+set(DCAPP_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp.lkr")
+set(DCAPP_CACHE_START 0x10080000)
+set(DCAPP_RAM_START 0x2005F000)
+set(DCAPP_RAM_SIZE 0x00014000)
+
+set(GB_RUNTIME_SOURCES
+    ${SRC_DIR}/gb.c
+    ${SRC_DIR}/gbC.c
+    ${SRC_DIR}/mappersC.c
+    ${SRC_DIR}/mbc.c
+    ${SRC_DIR}/videoC.c
+)
+
+set(NES_RUNTIME_SOURCES
+    ${SRC_DIR}/nes/InfoNES.cpp
+    ${SRC_DIR}/nes/InfoNES_Mapper.cpp
+    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
+    ${SRC_DIR}/nes/K6502.cpp
+    ${SRC_DIR}/nes/nes_port.cpp
+)
 
 option(ARDUBOY_HYBRID_EXPERIMENTAL "Build the experimental ProjectABE-inspired Arduboy runtime instead of the default Ardens runtime" OFF)
 option(ARDUBOY_SIMAVR_EXPERIMENTAL "Build the experimental simavr-derived Arduboy runtime instead of the default Ardens runtime" OFF)
@@ -69,41 +89,29 @@ endif()
 
 add_executable(${APP}
     ${SRC_DIR}/audioPwm.c
-    ${ARDUBOY_RUNTIME_SOURCES}
-    ${ARDUBOY_SIMAVR_SOURCES}
-    ${ARDUBOY_ARDENS_SOURCES}
+    ${SRC_DIR}/arduboy/arduboy_format.cpp
     ${SRC_DIR}/badgePower.c
     ${SRC_DIR}/badgeLeds.c
-    ${SRC_DIR}/badUsb.c
     ${SRC_DIR}/bootGuard.c
     ${SRC_DIR}/crt_rp2350.S
+    ${SRC_DIR}/dcApp.c
     ${SRC_DIR}/dispDefcon.c
     ${SRC_DIR}/fatfs.c
     ${SRC_DIR}/fonts.c
-    ${SRC_DIR}/gb.c
-    ${SRC_DIR}/gbC.c
-    ${SRC_DIR}/irRemote.c
-    ${SRC_DIR}/imageViewer.c
+    ${SRC_DIR}/gb_mbc_analyze.c
     ${SRC_DIR}/main_rp2350_defcon.c
-    ${SRC_DIR}/mappersC.c
-    ${SRC_DIR}/mbc.c
-    ${SRC_DIR}/nes/InfoNES.cpp
-    ${SRC_DIR}/nes/InfoNES_Mapper.cpp
-    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
-    ${SRC_DIR}/nes/K6502.cpp
-    ${SRC_DIR}/nes/nes_port.cpp
+    ${SRC_DIR}/nes/nes_analyze.c
     ${SRC_DIR}/pioI2C.c
     ${SRC_DIR}/pioIrdaSIR.c
     ${SRC_DIR}/pioWS2812.c
     ${SRC_DIR}/printf.c
     ${SRC_DIR}/qspi2350.c
-    ${SRC_DIR}/raster.c
-    ${SRC_DIR}/rtttlPlayer.c
     ${SRC_DIR}/sd.c
     ${SRC_DIR}/sdHwRP2350.c
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/sleepDefcon.c
     ${SRC_DIR}/stringCompat.c
+    ${SRC_DIR}/syscalls.c
     ${SRC_DIR}/timebase.c
     ${SRC_DIR}/toolWorkspace.c
     ${SRC_DIR}/ui.c
@@ -111,7 +119,6 @@ add_executable(${APP}
     ${SRC_DIR}/usbHid.c
     ${SRC_DIR}/usbMsc.c
     ${SRC_DIR}/utf.c
-    ${SRC_DIR}/videoC.c
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
@@ -204,6 +211,7 @@ set_source_files_properties(
     ${SRC_DIR}/arduboy/arduboy_port.cpp
     ${SRC_DIR}/arduboy/arduboy_simavr_port.cpp
     ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
+    ${SRC_DIR}/arduboy/arduboy_format.cpp
     PROPERTIES COMPILE_OPTIONS "-Wno-error"
 )
 
@@ -260,6 +268,21 @@ target_link_options(${APP} PRIVATE
     -Wextra
     -specs=nosys.specs
     -Wl,--gc-sections
+    -Wl,--undefined=accessFail
+    -Wl,--undefined=arduboyPortInGameMenu
+    -Wl,--undefined=audioPwmSetVolume
+    -Wl,--undefined=dispSetFramerate
+    -Wl,--undefined=dispPrvWaitForScanoutStart
+    -Wl,--undefined=gbDrawLine
+    -Wl,--undefined=gbExtAccelRead
+    -Wl,--undefined=gbExtGetKeys
+    -Wl,--undefined=gbExtRtcGet
+    -Wl,--undefined=gbExtRtcReset
+    -Wl,--undefined=gbExtRtcSet
+    -Wl,--undefined=gbExtraIoRegRead
+    -Wl,--undefined=gbExtraIoRegWrite
+    -Wl,--undefined=nesPortInGameMenu
+    -Wl,--undefined=usbHidDropNow
     -Wl,-T${LINKER_SCRIPT}
     -mthumb
     -mcpu=cortex-m33
@@ -279,7 +302,119 @@ add_custom_command(TARGET ${APP} POST_BUILD
     COMMAND ${CMAKE_COMMAND}
         -D SIZE_TOOL=${CMAKE_SIZE}
         -D ELF_FILE=$<TARGET_FILE:${APP}>
-        -D RAM_BUDGET=307200
+        -D RAM_BUDGET=212992
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_size.cmake
     VERBATIM
+)
+
+set(DCAPP_HOST_SYMBOLS "${CMAKE_CURRENT_BINARY_DIR}/dcapp_host_symbols.ld")
+add_custom_command(
+    OUTPUT ${DCAPP_HOST_SYMBOLS}
+    DEPENDS ${APP}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_host_symbols.py
+        --nm ${CMAKE_NM}
+        --elf $<TARGET_FILE:${APP}>
+        --output ${DCAPP_HOST_SYMBOLS}
+    VERBATIM
+)
+add_custom_target(dcapp_host_symbols DEPENDS ${DCAPP_HOST_SYMBOLS})
+
+get_target_property(DC32_FIRMWARE_INCLUDE_DIRS ${APP} INCLUDE_DIRECTORIES)
+get_target_property(DC32_FIRMWARE_COMPILE_DEFINITIONS ${APP} COMPILE_DEFINITIONS)
+get_target_property(DC32_FIRMWARE_COMPILE_OPTIONS ${APP} COMPILE_OPTIONS)
+
+function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
+    set(RAW_FILE "${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.raw")
+    set(DCAPP_FILE "${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.DC32")
+
+    add_executable(${TARGET_NAME} ${ARGN} ${SRC_DIR}/syscalls.c)
+    add_dependencies(${TARGET_NAME} dcapp_host_symbols)
+    target_include_directories(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_INCLUDE_DIRS})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        ${DC32_FIRMWARE_COMPILE_DEFINITIONS}
+        DCAPP_BUILD=1
+        DCAPP_TOOL_BUILD=1
+    )
+    target_compile_options(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_COMPILE_OPTIONS})
+    target_link_options(${TARGET_NAME} PRIVATE
+        -Wall
+        -Wextra
+        -specs=nosys.specs
+        -nostartfiles
+        -Wl,--gc-sections
+        -Wl,--undefined=dcAppAbort
+        -Wl,--undefined=dcAppRefreshDisplayOptions
+        -Wl,-T${DCAPP_LINKER_SCRIPT}
+        -Wl,-T${DCAPP_HOST_SYMBOLS}
+        -mthumb
+        -mcpu=cortex-m33
+        -mfloat-abi=soft
+    )
+    set_property(TARGET ${TARGET_NAME} APPEND PROPERTY LINK_DEPENDS ${DCAPP_HOST_SYMBOLS})
+    target_link_libraries(${TARGET_NAME} PRIVATE m)
+
+    add_custom_command(
+        OUTPUT ${DCAPP_FILE}
+        DEPENDS ${TARGET_NAME}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.dcapp
+        COMMAND ${CMAKE_OBJCOPY} -O binary
+            -j .dcapp_header -j .text -j .data
+            $<TARGET_FILE:${TARGET_NAME}> ${RAW_FILE}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_dcapp.py
+            --nm ${CMAKE_NM}
+            --elf $<TARGET_FILE:${TARGET_NAME}>
+            --raw ${RAW_FILE}
+            --output ${DCAPP_FILE}
+            --runtime-id ${RUNTIME_ID}
+            --load-addr ${DCAPP_CACHE_START}
+            --app-ram-start ${DCAPP_RAM_START}
+            --app-ram-size ${DCAPP_RAM_SIZE}
+        COMMAND ${CMAKE_SIZE} -A $<TARGET_FILE:${TARGET_NAME}>
+        VERBATIM
+    )
+    add_custom_target(${TARGET_NAME}_dcapp ALL DEPENDS ${DCAPP_FILE})
+    set_property(GLOBAL APPEND PROPERTY DCAPP_OUTPUTS ${DCAPP_FILE})
+endfunction()
+
+add_dcapp(dcapp_gb gb 1
+    ${SRC_DIR}/apps/gb_app.c
+    ${GB_RUNTIME_SOURCES}
+)
+
+add_dcapp(dcapp_nes nes 2
+    ${SRC_DIR}/apps/nes_app.c
+    ${NES_RUNTIME_SOURCES}
+)
+
+add_dcapp(dcapp_arduboy arduboy 3
+    ${SRC_DIR}/apps/arduboy_app.c
+    ${ARDUBOY_RUNTIME_SOURCES}
+    ${ARDUBOY_SIMAVR_SOURCES}
+    ${ARDUBOY_ARDENS_SOURCES}
+)
+
+add_dcapp(dcapp_ir ir 100
+    ${SRC_DIR}/apps/ir_app.c
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/irRemote.c
+)
+
+add_dcapp(dcapp_image image 101
+    ${SRC_DIR}/apps/image_app.c
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/imageViewer.c
+    ${SRC_DIR}/raster.c
+)
+
+add_dcapp(dcapp_music music 102
+    ${SRC_DIR}/apps/music_app.c
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/rtttlPlayer.c
+)
+
+add_dcapp(dcapp_badusb badusb 103
+    ${SRC_DIR}/apps/badusb_app.c
+    ${SRC_DIR}/ui.c
+    ${SRC_DIR}/badUsb.c
 )

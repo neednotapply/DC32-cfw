@@ -1,0 +1,124 @@
+#ifndef DC_APP_H
+#define DC_APP_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include "fatfs.h"
+#include "ui.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define DCAPP_MAGIC             0x50414344u
+#define DCAPP_ABI_VERSION       2u
+#define DCAPP_HEADER_SIZE       256u
+
+enum DcAppId {
+	DcAppIdGameGb = GameRuntimeGb,
+	DcAppIdGameNes = GameRuntimeNes,
+	DcAppIdGameArduboy = GameRuntimeArduboy,
+	DcAppIdToolIr = 100,
+	DcAppIdToolImage = 101,
+	DcAppIdToolMusic = 102,
+	DcAppIdToolBadUsb = 103,
+};
+
+enum DcAppToolAction {
+	DcAppToolActionMain,
+	DcAppToolActionIrButton,
+	DcAppToolActionIrPower,
+	DcAppToolActionIrMute,
+	DcAppToolActionImageFile,
+	DcAppToolActionMusicFile,
+	DcAppToolActionBadUsbFile,
+};
+
+struct DcAppImageHeader {
+	uint32_t magic;
+	uint16_t headerSize;
+	uint16_t abiVersion;
+	uint32_t runtime;
+	uint32_t flags;
+	uint32_t loadAddr;
+	uint32_t imageSize;
+	uint32_t dataLoadOffset;
+	uint32_t dataAddr;
+	uint32_t dataSize;
+	uint32_t bssAddr;
+	uint32_t bssSize;
+	uint32_t entryOffset;
+	uint32_t abortOffset;
+	uint32_t refreshOffset;
+	uint32_t appRamStart;
+	uint32_t appRamSize;
+	uint8_t buildId[32];
+	uint32_t crc32;
+	uint32_t reserved[39];
+};
+
+struct DcAppRunArgs {
+	enum GameRuntime runtime;
+	const void *rom;
+	uint32_t romSize;
+	void *saveRam;
+	uint32_t saveRamSize;
+	bool presentAsCgb;
+	bool upscale;
+	bool rotate;
+	uint32_t toolAction;
+	struct Canvas *canvas;
+	struct FatfsVol *vol;
+	const struct FatFileLocator *locator;
+	const char *name;
+	const char *parentPath;
+};
+
+struct DcAppHostApi {
+	uint32_t abiVersion;
+	void (*log)(const char *fmt, ...);
+	uint64_t (*getTime)(void);
+	void (*delayMsec)(uint32_t msec);
+	void *(*displayFb)(void);
+	uint_fast8_t (*keysRaw)(void);
+	uint_fast16_t (*uiKeysRaw)(void);
+	enum UiGameAction (*gameMenu)(void);
+	bool (*saveState)(void);
+	bool (*flushSave)(bool force);
+	bool (*flashWrite)(uint32_t addr, uint32_t eraseSize, const void *src, uint32_t writeSize);
+	void (*abortActive)(void);
+};
+
+typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);
+typedef void (*DcAppVoidF)(void);
+struct ToolWorkspaceSpan;
+
+enum DcAppResult {
+	DcAppResultOk,
+	DcAppResultMissing,
+	DcAppResultReadError,
+	DcAppResultInvalid,
+	DcAppResultIncompatible,
+	DcAppResultTooLarge,
+	DcAppResultFlashError,
+	DcAppResultNoLoadedApp,
+};
+
+extern const struct DcAppImageHeader dcAppImageHeader;
+
+enum DcAppResult dcAppLoadGameRuntime(enum GameRuntime runtime);
+enum DcAppResult dcAppRunLoadedRuntime(enum GameRuntime runtime, const struct DcAppRunArgs *args);
+enum DcAppResult dcAppRunGameRuntime(enum GameRuntime runtime, const struct DcAppRunArgs *args);
+enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *args);
+void dcAppAbortActive(void);
+void dcAppRefreshActive(void);
+bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP);
+const char *dcAppLastError(void);
+void dcAppClearError(void);
+const char *dcAppResultName(enum DcAppResult result);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

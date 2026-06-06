@@ -6,8 +6,8 @@
 
 MEMORY
 {
-        rom   : ORIGIN = 0x10000000, LENGTH = 0x000C0000
-        ram   : ORIGIN = 0x2002B000, LENGTH = 0x48000   /* first 172K are cart/Arduboy scratch; final 60K are stack */
+        rom   : ORIGIN = 0x10000000, LENGTH = 0x00080000
+        ram   : ORIGIN = 0x2002B000, LENGTH = 0x34000   /* first 172K are cart/Arduboy scratch; 80K above this is the app RAM window */
         stack : ORIGIN = 0x20073000, LENGTH = 0x0F000
         trash : ORIGIN = 0xffff0000, LENGTH = 64K
 }

@@ -46,6 +46,7 @@ static enum NesRegion mRegion;
 static uint8_t *mSaveRam;
 static uint32_t mSaveRamSize;
 static uint8_t *mPool;
+static uint32_t mPoolSize;
 static uint32_t mPoolPos;
 static uint16_t *mLine;
 static uint16_t mDrawLeft;
@@ -54,8 +55,12 @@ static uint16_t mDrawWidth;
 static uint16_t mDrawHeight;
 static bool mDrawFlipped;
 static uint8_t mFrame[NES_DISP_WIDTH * NES_SAFE_HEIGHT];
-static uint16_t mPresentSrcX[DISP_HEIGHT];
-static uint16_t mPresentSrcRow[DISP_WIDTH];
+#ifdef DCAPP_BUILD
+static uint8_t mPpuRam[0x4000u];
+static uint8_t *mChrBuf;
+#endif
+static uint16_t *mPresentSrcX;
+static uint16_t *mPresentSrcRow;
 static uint16_t mPresentRowFirst;
 static uint16_t mPresentRowEnd;
 static uint16_t mPresentColFirst;
@@ -110,7 +115,7 @@ static void *nesPortAllocAligned(uint32_t size, uint32_t align)
 	uint32_t pos = (uint32_t)(((base + mPoolPos + align - 1) &~ (uintptr_t)(align - 1)) - base);
 	void *ret;
 
-	if (!mPool || pos > QSPI_RAM_SIZE_MAX || size > QSPI_RAM_SIZE_MAX - pos)
+	if (!mPool || pos > mPoolSize || size > mPoolSize - pos)
 		return NULL;
 	ret = mPool + pos;
 	mPoolPos = pos + size;
@@ -128,11 +133,13 @@ extern "C" void nesPortFree(void *ptr)
 	(void)ptr;
 }
 
+#ifndef DCAPP_BUILD
 extern "C" void *_sbrk(ptrdiff_t incr)
 {
 	(void)incr;
 	return (void*)-1;
 }
+#endif
 
 extern "C" void *nesPortSaveRam(void)
 {
@@ -141,12 +148,23 @@ extern "C" void *nesPortSaveRam(void)
 
 extern "C" void *nesPortPpuRam(void)
 {
+#ifdef DCAPP_BUILD
+	memset(mPpuRam, 0, sizeof(mPpuRam));
+	return mPpuRam;
+#else
 	return mbcPrvGetVramBuf();
+#endif
 }
 
 extern "C" void *nesPortChrBuf(void)
 {
+#ifdef DCAPP_BUILD
+	if (!mChrBuf)
+		mChrBuf = (uint8_t*)nesPortAllocAligned(0x8000u, 4);
+	return mChrBuf;
+#else
 	return mbcPrvGetWramBuf();
+#endif
 }
 
 uint32_t nesGetLoadedRomSize(void)
@@ -452,14 +470,20 @@ void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSi
 	mSaveRam = (uint8_t*)saveRam;
 	mSaveRamSize = saveRamSize;
 	mPool = (uint8_t*)CART_RAM_ADDR_IN_RAM;
+	mPoolSize = QSPI_RAM_SIZE_MAX;
 	mPoolPos = NES_SAVE_RAM_SIZE;
+#ifdef DCAPP_BUILD
+	mChrBuf = NULL;
+#endif
 	if (mSaveRam != mPool && mSaveRam && mSaveRamSize)
 		memcpy(mPool, mSaveRam, mSaveRamSize > NES_SAVE_RAM_SIZE ? NES_SAVE_RAM_SIZE : mSaveRamSize);
 	mSaveRam = mPool;
 	mSaveRamSize = NES_SAVE_RAM_SIZE;
 
 	mLine = (uint16_t*)nesPortAllocAligned(NES_LINE_WORDS * sizeof(uint16_t), 4);
-	if (!mLine)
+	mPresentSrcX = (uint16_t*)nesPortAllocAligned(DISP_HEIGHT * sizeof(uint16_t), 4);
+	mPresentSrcRow = (uint16_t*)nesPortAllocAligned(DISP_WIDTH * sizeof(uint16_t), 4);
+	if (!mLine || !mPresentSrcX || !mPresentSrcRow)
 		return;
 
 	APU_Mute = 1;

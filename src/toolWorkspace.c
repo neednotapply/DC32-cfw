@@ -1,7 +1,7 @@
 #include <string.h>
+#include "dcApp.h"
 #include "toolWorkspace.h"
 #include "memMap.h"
-#include "mbc.h"
 
 static bool mToolWorkspaceActive;
 static enum ToolWorkspaceOwner mToolWorkspaceOwners[ToolWorkspaceSpanNum];
@@ -13,6 +13,21 @@ static bool toolWorkspacePrvSpansOverlap(struct ToolWorkspaceSpan a, struct Tool
 	uintptr_t aEnd = aStart + a.size, bEnd = bStart + b.size;
 
 	return aStart < bEnd && bStart < aEnd;
+}
+
+static struct ToolWorkspaceSpan toolWorkspacePrvActiveAppSpan(uint32_t offset, uint32_t maxSize)
+{
+	struct ToolWorkspaceSpan active, span = {0};
+
+	if (!dcAppGetActiveScratch(&active))
+		return span;
+	if (offset >= active.size)
+		return span;
+	span.ptr = (uint8_t*)active.ptr + offset;
+	span.size = active.size - offset;
+	if (span.size > maxSize)
+		span.size = maxSize;
+	return span;
 }
 
 void toolWorkspaceBegin(void)
@@ -53,13 +68,21 @@ struct ToolWorkspaceSpan toolWorkspaceGet(enum ToolWorkspaceSpanId spanId)
 			break;
 
 		case ToolWorkspaceWram:
-			span.ptr = mbcPrvGetWramBuf();
-			span.size = mbcPrvGetWramBufSize();
+			if (dcAppGetActiveScratch(NULL))
+				span = toolWorkspacePrvActiveAppSpan(0, DCAPP_WORKSPACE_WRAM_SIZE);
+			else {
+				span.ptr = (void*)DCAPP_WORKSPACE_WRAM_START;
+				span.size = DCAPP_WORKSPACE_WRAM_SIZE;
+			}
 			break;
 
 		case ToolWorkspaceVram:
-			span.ptr = mbcPrvGetVramBuf();
-			span.size = mbcPrvGetVramBufSize();
+			if (dcAppGetActiveScratch(NULL))
+				span = toolWorkspacePrvActiveAppSpan(DCAPP_WORKSPACE_WRAM_SIZE, DCAPP_WORKSPACE_VRAM_SIZE);
+			else {
+				span.ptr = (void*)DCAPP_WORKSPACE_VRAM_START;
+				span.size = DCAPP_WORKSPACE_VRAM_SIZE;
+			}
 			break;
 
 		case ToolWorkspaceSpanNum:

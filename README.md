@@ -50,6 +50,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
+| `/APPS` | SD-loaded app binaries built by this repo, including emulators plus IR, BadUSB, Music, and Image Viewer. |
 | `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
@@ -57,11 +58,11 @@ The firmware can browse the full card, but the menu tools look in these conventi
 
 In-game save confirmations update the emulator's battery-backed RAM first. When the emulator menu opens or gameplay exits, the firmware copies that RAM to the QSPI save cache. SD-card export happens from safe UI paths such as selecting another game or leaving the emulator, so gameplay is not interrupted by FAT writes. Older save files named exactly like the ROM, such as `Pokemon.gbc` or `Game.nes`, are still imported as a fallback and will be re-exported with the `.sav` name.
 
-Release builds include `SD.zip`, an optional starter SD-card asset bundle. Extract `SD.zip` directly to the SD card root so `IR/`, `BADUSB/`, `MUSIC/`, `ROMS/`, and `IMAGES/` land alongside any existing folders. The bundle is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md` inside the zip.
+Release builds include two optional SD-card bundles. Extract `SD-apps.zip` to the SD card root so `/APPS/*.DC32` is available to the resident firmware shell, then extract `SD-assets.zip` for starter content folders such as `IR/`, `BADUSB/`, `MUSIC/`, `ROMS/`, and `IMAGES/`. `SD-assets.zip` is assembled at workflow time from upstream GitHub repositories and records the exact source URLs, branches, commits, and copied paths in `SOURCES.md`. `SD-apps.zip` records the built app hashes in its own `SOURCES.md`.
 
-## SD.zip asset credits
+## SD asset credits
 
-`SD.zip` fetches external assets from these upstream projects at workflow time:
+`SD-assets.zip` fetches external assets from these upstream projects at workflow time:
 
 | SD path | Source |
 | ------- | ------ |
@@ -81,7 +82,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `CMakeLists.txt` | Primary firmware build used by CI; builds ELF, BIN, and UF2 outputs. |
 | `.github/workflows/build.yml` | GitHub Actions firmware build and release artifact packaging. |
 | `src/main_rp2350_defcon.c` | Firmware entry point, clocks, GPIO, display, IRDA, RTC, LEDs, and tool shell startup. |
-| `src/ui.c` | On-device UI, tool shell, file browser, game selection, settings, IR, music, BadUSB, and boot recovery screens. |
+| `src/ui.c` | On-device UI, tool shell, file browser, game selection, settings, SD app launchers, and boot recovery screens. |
 | `src/gb.c`, `src/gbCore.h`, `src/gbC.c` | Game Boy execution loop, CPU helpers, and core emulator integration. |
 | `src/mappersC.c`, `src/mbc.c` | Game Boy cartridge mapper implementations and metadata parsing. |
 | `src/nes/` | InfoNES-derived NES runtime and mapper code used by the current CMake build. |
@@ -90,13 +91,14 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `third_party/simavr/` | Vendored simavr core and SSD1306 virtual display pieces kept for the experimental simavr Arduboy runtime. |
 | `src/dispDefcon.c` | LCD driver, framebuffer, PIO program loading, DMA management, brightness, and framerate handling. |
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
-| `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard-only HID, and BadUSB interpreter. |
-| `src/irRemote.c`, `src/pioIrdaSIR.c` | IR transmitter support and badge IRDA setup. |
-| `src/rtttlPlayer.c`, `src/audioPwm.c` | RTTTL parsing/playback and PWM audio output. |
+| `src/dcApp.c`, `src/apps/` | Resident SD app loader plus app entry wrappers for emulators, IR, BadUSB, Music, and Image Viewer. |
+| `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard-only HID, and the SD-loaded BadUSB interpreter. |
+| `src/irRemote.c`, `src/pioIrdaSIR.c` | SD-loaded IR transmitter support and badge IRDA setup. |
+| `src/rtttlPlayer.c`, `src/audioPwm.c` | SD-loaded RTTTL parsing/playback and resident PWM audio output. |
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
 | `src/settings.c`, `src/bootGuard.c`, `src/toolWorkspace.c` | Persistent settings, tool crash/reset recovery, and shared workspace allocation. |
 | `tools/bin_to_uf2.py` | Converts the raw binary image to the RP2350 UF2 update file. |
-| `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages the release `SD.zip` bundle. |
+| `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages `SD-assets.zip` and `SD-apps.zip`. |
 | `tools/fatfs_regression_test.c` | Host-side FAT filesystem regression helper. |
 | `src/Makefile` | Legacy/developer make flow; the root CMake build is the current supported build path. |
 
@@ -134,6 +136,7 @@ The build emits:
 - `build/DC32-cfw` - ELF image
 - `build/DC32-cfw.bin` - raw XIP firmware image
 - `build/DC32-cfw.uf2` - RP2350 USB bootloader image
+- `build/apps/*.DC32` - SD-loaded app binaries for `/APPS`
 
 The post-build step also runs `arm-none-eabi-size` and checks the firmware against the configured RAM budget.
 
@@ -143,7 +146,7 @@ The post-build step also runs `arm-none-eabi-size` and checks the firmware again
 
 Use `build/DC32-cfw.uf2` for normal updates. Put the badge into RP2350 USB bootloader mode, then copy `DC32-cfw.uf2` onto the mounted UF2 drive. The drive disconnects after the copy completes and the badge boots the new firmware.
 
-GitHub Actions uploads `DC32-cfw.uf2` as a small `DC32-cfw-uf2` artifact. The larger SD-card bundle is uploaded separately as `DC32-cfw-sd` only when the SD source manifest changes, and release builds attach `DC32-cfw.uf2` plus `SD.zip`.
+GitHub Actions uploads `DC32-cfw.uf2` as a small `DC32-cfw-uf2` artifact. It also uploads `SD-assets.zip` as `DC32-cfw-sd-assets` and `SD-apps.zip` as `DC32-cfw-sd-apps`; release builds attach all three files.
 
 ### Direct BIN programmer
 

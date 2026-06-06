@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Regression checks for the SD.zip builder."""
+"""Regression checks for the SD assets/apps zip builder."""
 
 from __future__ import annotations
 
 import importlib.util
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -45,16 +46,21 @@ def main() -> int:
     expect("Arduboy commit is recorded", sources["arduboy"]["commit"] == "arduboy-sha")
     expect("Arduboy SD path is recorded", sources["arduboy"]["sd_path"] == "ROMS/AB")
     expect("Arduboy genre paths are recorded", sources["arduboy"]["paths"] == list(builder.ARDUBOY_GENRE_DIRS))
+    expect("App metadata is not mixed into assets", "apps" not in sources)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         repo = tmp_path / "repo"
         stage = tmp_path / "stage"
+        apps = tmp_path / "apps"
         ir_src = repo / builder.IR_ASSET_PATH
         ir_src.mkdir(parents=True)
+        apps.mkdir()
         (ir_src / "tv.ir").write_text("Filetype: IR signals file\n", encoding="ascii")
         (ir_src / "fans.ir").write_text("Filetype: IR signals file\n", encoding="ascii")
         (ir_src / "notes.txt").write_text("not an IR asset\n", encoding="ascii")
+        for name in builder.APP_BINARIES:
+            (apps / name).write_bytes(f"{name}\n".encode("ascii"))
         for genre in builder.ARDUBOY_GENRE_DIRS:
             (repo / genre).mkdir(parents=True)
 
@@ -82,7 +88,23 @@ def main() -> int:
         expect("Only hex files are copied under /ROMS/AB", all(path.lower().endswith(".hex") for path in files))
         expect("No Arduboy placeholder README is copied", "README.txt" not in files)
 
-    print("SD.zip builder tests passed")
+        app_hashes = builder.copy_app_binaries(apps, stage)
+        app_files = sorted(path.name for path in (stage / "APPS").iterdir() if path.is_file())
+        expect("All DCAPP binaries are copied to /APPS", app_files == sorted(builder.APP_BINARIES))
+        expect("App hashes are recorded", sorted(app_hashes) == sorted(builder.APP_BINARIES))
+        manifest = builder.app_source_manifest(app_hashes)
+        expect("App hashes appear in app manifest", manifest["sources"]["apps"]["files"] == app_hashes)
+        builder.write_app_sources(stage, app_hashes)
+        apps_zip = tmp_path / "SD-apps.zip"
+        builder.build_zip(stage, apps_zip)
+        with zipfile.ZipFile(apps_zip) as zf:
+            names = set(zf.namelist())
+            sources_md = zf.read("SOURCES.md").decode("utf-8")
+        expect("SD-apps.zip contains SOURCES.md", "SOURCES.md" in names)
+        expect("SD-apps.zip contains /APPS binaries", all(f"APPS/{name}" in names for name in builder.APP_BINARIES))
+        expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in builder.APP_BINARIES))
+
+    print("SD assets/apps builder tests passed")
     return 0
 
 

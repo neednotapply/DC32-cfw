@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the SD-card asset zip for DC32-cfw releases."""
+"""Build the SD-card assets/apps zips for DC32-cfw releases."""
 
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ ROM_PLACEHOLDER_DIRS = {
     "GBC": "Game Boy Color",
     "NES": "Nintendo Entertainment System",
 }
+APP_BINARIES = ("gb.DC32", "nes.DC32", "arduboy.DC32", "ir.DC32", "image.DC32", "music.DC32", "badusb.DC32")
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
 SKIP_SUFFIXES = {".pyc", ".tmp"}
@@ -131,10 +132,33 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: s
     }
 
 
+def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
+    return {
+        "schema": 1,
+        "builder_sha256": builder_hash(),
+        "sources": {
+            "apps": {
+                "sd_path": "APPS/",
+                "files": app_hashes,
+                "notes": "Built from this repository and distributed as shell-returning .DC32 binaries.",
+            },
+        },
+    }
+
+
 def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(source_manifest(ir_sha, badusb_sha, music_sha, arduboy_sha), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def write_app_source_manifest(path: Path, app_hashes: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(app_source_manifest(app_hashes), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -421,6 +445,31 @@ def create_image_dir(stage: Path) -> None:
     )
 
 
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def collect_app_hashes(apps_dir: Path) -> dict[str, str]:
+    missing = [name for name in APP_BINARIES if not (apps_dir / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing app binaries in {apps_dir}: {', '.join(missing)}")
+    return {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
+
+
+def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
+    hashes = collect_app_hashes(apps_dir)
+    dst = stage / "APPS"
+
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in APP_BINARIES:
+        shutil.copyfile(apps_dir / name, dst / name)
+    return hashes
+
+
 def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
     dest = dest.resolve()
     for member in zf.infolist():
@@ -431,7 +480,7 @@ def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
 
 
 def write_sources(stage: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
-    text = f"""# SD.zip Sources
+    text = f"""# SD-assets.zip Sources
 
 This release asset was assembled from upstream repositories at build time.
 The external assets are distributed with credit and licensing retained by
@@ -487,6 +536,22 @@ their upstream projects.
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 
 
+def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
+    app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in APP_BINARIES)
+    text = f"""# SD-apps.zip Sources
+
+These app binaries were built from this repository and are loaded by the
+resident firmware shell from /APPS.
+
+## APPS
+
+- SD path: APPS/
+- Files:
+{app_lines}
+"""
+    (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
+
+
 def build_zip(stage: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
@@ -502,57 +567,81 @@ def build_zip(stage: Path, output: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build SD.zip from upstream asset repositories.")
-    parser.add_argument("--output", type=Path, help="Path to write SD.zip")
+    parser = argparse.ArgumentParser(description="Build SD-assets.zip and/or SD-apps.zip.")
+    parser.add_argument("--output", type=Path, help="Compatibility alias for --assets-output")
+    parser.add_argument("--assets-output", type=Path, help="Path to write SD-assets.zip")
+    parser.add_argument("--apps-output", type=Path, help="Path to write SD-apps.zip")
     parser.add_argument("--work-dir", type=Path, help="Temporary work directory")
-    parser.add_argument("--sources-output", type=Path, help="Path to write an SD source manifest JSON file")
+    parser.add_argument("--apps-dir", type=Path, help="Directory containing built .DC32 app binaries")
+    parser.add_argument("--sources-output", type=Path, help="Path to write an SD-assets source manifest JSON file")
+    parser.add_argument("--apps-sources-output", type=Path, help="Path to write an SD apps source manifest JSON file")
     parser.add_argument("--sources-only", action="store_true", help="Only resolve sources and write --sources-output")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    default_apps_dir = Path(__file__).resolve().parents[1] / "build" / "apps"
+    apps_dir = (args.apps_dir or default_apps_dir).resolve()
+    assets_output = (args.assets_output or args.output).resolve() if (args.assets_output or args.output) else None
+    apps_output = args.apps_output.resolve() if args.apps_output else None
+
     if args.sources_only:
         if not args.sources_output:
             raise ValueError("--sources-only requires --sources-output")
         ir_sha, badusb_sha, music_sha, arduboy_sha = resolve_source_commits()
         write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
+        if args.apps_sources_output:
+            write_app_source_manifest(args.apps_sources_output.resolve(), collect_app_hashes(apps_dir))
         print(f"Wrote {args.sources_output.resolve()}")
         return 0
 
-    if not args.output or not args.work_dir:
-        raise ValueError("--output and --work-dir are required unless --sources-only is used")
+    if not assets_output and not apps_output:
+        raise ValueError("--assets-output/--output or --apps-output is required unless --sources-only is used")
+    if not args.work_dir:
+        raise ValueError("--work-dir is required unless --sources-only is used")
 
     work_dir = args.work_dir.resolve()
-    output = args.output.resolve()
-    repos = work_dir / "repos"
-    stage = work_dir / "stage"
 
-    ensure_clean_dir(repos)
-    ensure_clean_dir(stage)
+    if assets_output:
+        repos = work_dir / "repos"
+        stage = work_dir / "assets-stage"
 
-    ir_repo = repos / "Momentum-Firmware"
-    badusb_repo = repos / "UberGuidoZ-Flipper"
-    music_repo = repos / "FlipperMusicRTTTL"
-    arduboy_repo = repos / "ArduboyCollection"
+        ensure_clean_dir(repos)
+        ensure_clean_dir(stage)
 
-    ir_sha = clone_repo(IR_REPO, IR_BRANCH, ir_repo, [IR_ASSET_PATH.as_posix()])
-    badusb_sha = clone_repo(BADUSB_REPO, BADUSB_BRANCH, badusb_repo, [BADUSB_PATH.as_posix()])
-    music_sha = clone_repo(MUSIC_REPO, MUSIC_BRANCH, music_repo)
-    arduboy_sha = clone_repo(ARDUBOY_REPO, ARDUBOY_BRANCH, arduboy_repo, list(ARDUBOY_GENRE_DIRS))
+        ir_repo = repos / "Momentum-Firmware"
+        badusb_repo = repos / "UberGuidoZ-Flipper"
+        music_repo = repos / "FlipperMusicRTTTL"
+        arduboy_repo = repos / "ArduboyCollection"
 
-    copy_ir_assets(ir_repo, stage)
-    copy_badusb_assets(badusb_repo, stage)
-    copy_music_assets(music_repo, stage)
-    copy_arduboy_assets(arduboy_repo, stage)
-    create_rom_dirs(stage)
-    create_image_dir(stage)
-    write_sources(stage, ir_sha, badusb_sha, music_sha, arduboy_sha)
-    if args.sources_output:
-        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
-    build_zip(stage, output)
+        ir_sha = clone_repo(IR_REPO, IR_BRANCH, ir_repo, [IR_ASSET_PATH.as_posix()])
+        badusb_sha = clone_repo(BADUSB_REPO, BADUSB_BRANCH, badusb_repo, [BADUSB_PATH.as_posix()])
+        music_sha = clone_repo(MUSIC_REPO, MUSIC_BRANCH, music_repo)
+        arduboy_sha = clone_repo(ARDUBOY_REPO, ARDUBOY_BRANCH, arduboy_repo, list(ARDUBOY_GENRE_DIRS))
 
-    print(f"Wrote {output}")
+        copy_ir_assets(ir_repo, stage)
+        copy_badusb_assets(badusb_repo, stage)
+        copy_music_assets(music_repo, stage)
+        copy_arduboy_assets(arduboy_repo, stage)
+        create_rom_dirs(stage)
+        create_image_dir(stage)
+        write_sources(stage, ir_sha, badusb_sha, music_sha, arduboy_sha)
+        if args.sources_output:
+            write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
+        build_zip(stage, assets_output)
+        print(f"Wrote {assets_output}")
+
+    if apps_output:
+        app_stage = work_dir / "apps-stage"
+        ensure_clean_dir(app_stage)
+        app_hashes = copy_app_binaries(apps_dir, app_stage)
+        write_app_sources(app_stage, app_hashes)
+        if args.apps_sources_output:
+            write_app_source_manifest(args.apps_sources_output.resolve(), app_hashes)
+        build_zip(app_stage, apps_output)
+        print(f"Wrote {apps_output}")
+
     return 0
 
 

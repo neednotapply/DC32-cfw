@@ -136,9 +136,9 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           cp build/DC32-cfw.uf2 "$ARTIFACT_DIR/DC32-cfw.uf2"
 
-      - name: Check whether SD.zip sources changed
+      - name: Check whether SD-assets.zip sources changed
         if: steps.changes.outputs.has_changes == 'true'
-        id: sd-sources
+        id: sd-assets-sources
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -150,44 +150,62 @@ jobs:
 
           python3 tools/build_sd_zip.py \
             --sources-only \
-            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+            --sources-output "$ARTIFACT_DIR/SD-assets.sources.json"
 
-          sd_sources_hash="$(sha256sum "$ARTIFACT_DIR/SD.sources.json" | cut -d ' ' -f 1)"
-          echo "cache_key=$sd_sources_hash" >> "$GITHUB_OUTPUT"
+          sd_assets_sources_hash="$(sha256sum "$ARTIFACT_DIR/SD-assets.sources.json" | cut -d ' ' -f 1)"
+          echo "cache_key=$sd_assets_sources_hash" >> "$GITHUB_OUTPUT"
 
           {
             echo
-            echo "## SD-card bundle"
+            echo "## SD-card bundles"
             echo
-            echo "- SD sources: $sd_sources_hash"
+            echo "- SD assets sources: $sd_assets_sources_hash"
           } >> "$RUNNER_TEMP/nightly-release-notes.md"
 
           if previous_body="$(gh release view nightly --json body --jq .body 2>/dev/null)" &&
-             grep -Fq "SD sources: $sd_sources_hash" <<< "$previous_body"; then
-            echo "SD.zip sources are unchanged from the current Nightly release."
+             grep -Fq "SD assets sources: $sd_assets_sources_hash" <<< "$previous_body"; then
+            echo "SD-assets.zip sources are unchanged from the current Nightly release."
             echo "should_upload=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "SD.zip sources changed or no previous source hash was found."
+          echo "SD-assets.zip sources changed or no previous source hash was found."
           echo "should_upload=true" >> "$GITHUB_OUTPUT"
 
-      - name: Restore cached SD.zip
-        if: steps.sd-sources.outputs.should_upload == 'true'
-        id: sd-cache
+      - name: Restore cached SD-assets.zip
+        if: steps.sd-assets-sources.outputs.should_upload == 'true'
+        id: sd-assets-cache
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/DC32-cfw/SD.zip
-          key: sd-zip-${{ steps.sd-sources.outputs.cache_key }}
+          path: ${{ runner.temp }}/DC32-cfw/SD-assets.zip
+          key: sd-assets-zip-${{ steps.sd-assets-sources.outputs.cache_key }}
 
-      - name: Build SD.zip
-        if: steps.sd-sources.outputs.should_upload == 'true' && steps.sd-cache.outputs.cache-hit != 'true'
+      - name: Build SD-assets.zip
+        if: steps.sd-assets-sources.outputs.should_upload == 'true' && steps.sd-assets-cache.outputs.cache-hit != 'true'
         run: |
           ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
           python3 tools/build_sd_zip.py \
-            --output "$ARTIFACT_DIR/SD.zip" \
+            --assets-output "$ARTIFACT_DIR/SD-assets.zip" \
             --work-dir "$RUNNER_TEMP/sd-zip" \
-            --sources-output "$ARTIFACT_DIR/SD.sources.json"
+            --sources-output "$ARTIFACT_DIR/SD-assets.sources.json"
+
+      - name: Build SD-apps.zip
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARTIFACT_DIR="$RUNNER_TEMP/DC32-cfw"
+          python3 tools/build_sd_zip.py \
+            --apps-output "$ARTIFACT_DIR/SD-apps.zip" \
+            --apps-dir build/apps \
+            --work-dir "$RUNNER_TEMP/sd-apps-zip" \
+            --apps-sources-output "$ARTIFACT_DIR/SD-apps.sources.json"
+
+          sd_apps_sources_hash="$(sha256sum "$ARTIFACT_DIR/SD-apps.sources.json" | cut -d ' ' -f 1)"
+          {
+            echo "- SD apps sources: $sd_apps_sources_hash"
+          } >> "$RUNNER_TEMP/nightly-release-notes.md"
 
       - name: Move nightly tag
         if: steps.changes.outputs.has_changes == 'true'
@@ -231,14 +249,16 @@ jobs:
 
           gh release upload nightly \
             "$RUNNER_TEMP/DC32-cfw/DC32-cfw.uf2" \
+            "$RUNNER_TEMP/DC32-cfw/SD-apps.zip" \
             --clobber
-          gh release delete-asset nightly SD.sources.json --yes >/dev/null 2>&1 || true
+          gh release delete-asset nightly SD-assets.sources.json --yes >/dev/null 2>&1 || true
+          gh release delete-asset nightly SD-apps.sources.json --yes >/dev/null 2>&1 || true
 
-      - name: Upload Nightly SD.zip assets
-        if: steps.changes.outputs.has_changes == 'true' && steps.sd-sources.outputs.should_upload == 'true'
+      - name: Upload Nightly SD-assets.zip
+        if: steps.changes.outputs.has_changes == 'true' && steps.sd-assets-sources.outputs.should_upload == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload nightly \
-            "$RUNNER_TEMP/DC32-cfw/SD.zip" \
+            "$RUNNER_TEMP/DC32-cfw/SD-assets.zip" \
             --clobber

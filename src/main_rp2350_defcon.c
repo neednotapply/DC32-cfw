@@ -21,6 +21,7 @@
 #include "usbHid.h"
 #include "2350.h"
 #include "qspi.h"
+#include "dcApp.h"
 #include "mbc.h"
 #include "gb.h"
 #include "nes/nes.h"
@@ -29,6 +30,7 @@
 
 static void uiPrvUpscalerInit(void);
 static void uiPrvUpscalerDeinit(void);
+static bool shouldActAsCgb(void);
 static bool shouldUpscale(void);
 static bool shouldRotateGame(void);
 static bool mUpscaling;
@@ -316,28 +318,14 @@ static void exitGame(void)
 
                 case UiGameActionRestart:
                 case UiGameActionSelectGame:
-                        if (mActiveGameRuntime == GameRuntimeNes) {
-                                if (action == UiGameActionSelectGame)
-                                        mGameToolExitRequested = true;
-                                nesAbort();
-                        }
-                        else if (mActiveGameRuntime == GameRuntimeArduboy) {
-                                if (action == UiGameActionSelectGame)
-                                        mGameToolExitRequested = true;
-                                arduboyAbort();
-                        }
-                        else
-                                gbAbort();
+                        if (action == UiGameActionSelectGame)
+                                mGameToolExitRequested = true;
+                        dcAppAbortActive();
                         return;
 
                 case UiGameActionSwitchTool:
                         mGameToolExitRequested = true;
-                        if (mActiveGameRuntime == GameRuntimeNes)
-                                nesAbort();
-                        else if (mActiveGameRuntime == GameRuntimeArduboy)
-                                arduboyAbort();
-                        else
-                                gbAbort();
+                        dcAppAbortActive();
                         return;
         }
 
@@ -345,13 +333,13 @@ static void exitGame(void)
         if (mActiveGameRuntime == GameRuntimeNes) {
                 mUpscaling = false;
                 mRotateGame = false;
-                nesRefreshDisplayOptions();
+                dcAppRefreshActive();
                 return;
         }
         if (mActiveGameRuntime == GameRuntimeArduboy) {
                 mUpscaling = false;
                 mRotateGame = false;
-                arduboyRefreshDisplayOptions();
+                dcAppRefreshActive();
                 return;
         }
         mUpscaling = shouldUpscale();
@@ -847,7 +835,6 @@ static void applySavedLeds(void)
 static void runSelectedGameTool(void *userData)
 {
         struct GameSelection selection;
-        uint32_t romSzExpected, ramSzExpected;
 
         (void)userData;
         mGameToolExitRequested = false;
@@ -858,45 +845,57 @@ static void runSelectedGameTool(void *userData)
                         pr("Failed to identify selected game\n");
                         mGameToolExitRequested = true;
                 }
-                else if (selection.runtime == GameRuntimeNes) {
-                        dispPrvFrameCtrReset();
-                        mUpscaling = false;
-                        mRotateGame = false;
-                        memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
-                        mActiveGameRuntime = GameRuntimeNes;
-                        nesRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
-                        mActiveGameRuntime = GameRuntimeNone;
-                }
-                else if (selection.runtime == GameRuntimeArduboy) {
-                        dispPrvFrameCtrReset();
-                        mUpscaling = false;
-                        mRotateGame = false;
-                        memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
-                        mActiveGameRuntime = GameRuntimeArduboy;
-                        arduboyRun((const void*)QSPI_ROM_START, selection.romSize, CART_RAM_ADDR_IN_RAM, selection.saveRamSize);
-                        mActiveGameRuntime = GameRuntimeNone;
-                }
-                else if (!mbcInit((void*)QSPI_ROM_START, &romSzExpected, CART_RAM_ADDR_IN_RAM, &ramSzExpected)) {
-                        pr("Failed to init the MBC\n");
-                        mGameToolExitRequested = true;
-                }
-                else if (ramSzExpected > QSPI_RAM_SIZE_MAX) {
-                        pr("too much ram needed\n");
+                else if (selection.runtime != GameRuntimeGb &&
+                                selection.runtime != GameRuntimeNes &&
+                                selection.runtime != GameRuntimeArduboy) {
+                        pr("No runtime for selected game\n");
                         mGameToolExitRequested = true;
                 }
                 else {
+                        struct DcAppRunArgs args = {
+                                .runtime = selection.runtime,
+                                .rom = (const void*)QSPI_ROM_START,
+                                .romSize = selection.romSize,
+                                .saveRam = CART_RAM_ADDR_IN_RAM,
+                                .saveRamSize = selection.saveRamSize,
+                                .presentAsCgb = shouldActAsCgb(),
+                                .upscale = false,
+                                .rotate = false,
+                        };
+                        enum DcAppResult appResult;
                         
+                        appResult = dcAppLoadGameRuntime(selection.runtime);
+                        if (appResult != DcAppResultOk) {
+                                pr("Failed to load app: %s\n", dcAppResultName(appResult));
+                                mGameToolExitRequested = true;
+                                continue;
+                        }
                         dispPrvFrameCtrReset();
-                        mUpscaling = shouldUpscale();
-                        mRotateGame = shouldRotateGame();
-                        if (mUpscaling) 
-                                uiPrvUpscalerInit();
+                        if (selection.runtime == GameRuntimeGb) {
+                                mUpscaling = shouldUpscale();
+                                mRotateGame = shouldRotateGame();
+                                args.upscale = mUpscaling;
+                                args.rotate = mRotateGame;
+                                if (mUpscaling)
+                                        uiPrvUpscalerInit();
+                        }
+                        else {
+                                mUpscaling = false;
+                                mRotateGame = false;
+                        }
                         memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);        
-                        gbSetFrameDithering(1);
-                        mActiveGameRuntime = GameRuntimeGb;
-                        gbRun(shouldActAsCgb());
+                        mActiveGameRuntime = selection.runtime;
+                        appResult = dcAppRunLoadedRuntime(selection.runtime, &args);
                         mActiveGameRuntime = GameRuntimeNone;
-                        //if we are aborted by gbAbort, we'll return here and restart or leave the game tool
+                        if (appResult != DcAppResultOk) {
+                                if (mUpscaling) {
+                                        uiPrvUpscalerDeinit();
+                                        mUpscaling = false;
+                                }
+                                pr("App failed: %s\n", dcAppResultName(appResult));
+                                mGameToolExitRequested = true;
+                        }
+                        //if the app is aborted by the in-game menu, it returns here and restarts or exits the game tool
                 }
         }
 }

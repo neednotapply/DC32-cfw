@@ -7,6 +7,7 @@
 #include "badgePower.h"
 #include "badgeRtc.h"
 #include "bootGuard.h"
+#include "dcApp.h"
 #include "memMap.h"
 #include "printf.h"
 #include "sleep.h"
@@ -166,6 +167,8 @@ static uint_fast8_t uiPrvMenuRow(struct Canvas *cnv, uint_fast8_t idx)
 {
 	return uiPrvContentTop(cnv) + idx * uiPrvMenuItemHeight(cnv);
 }
+
+static bool uiPrvImageFileName(const char *name);
 
 static void uiPrvSetHeaderTitle(const char *title)
 {
@@ -1780,7 +1783,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		(void)vol;
 		(void)rootPath;
 		(void)dirLoc;
-		return imageViewerFileName(name);
+		return uiPrvImageFileName(name);
 	}
 
 	static bool uiPrvPickEntryRead(struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *dirLoc, struct FatfsDir *dir, UiFileNameFilterF filterF, struct UiPickEntry *entry)
@@ -1794,7 +1797,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 				entry->isDir = true;
 				return true;
 			}
-			if (!filterF || (filterF == imageViewerFileName ? uiPrvImageFileVisibleInDir(vol, rootPath, dirLoc, entry->name) : filterF(entry->name))) {
+			if (!filterF || (filterF == uiPrvImageFileName ? uiPrvImageFileVisibleInDir(vol, rootPath, dirLoc, entry->name) : filterF(entry->name))) {
 				entry->isDir = false;
 				return true;
 			}
@@ -7668,7 +7671,6 @@ static void uiPrvExitTool(enum UiToolId tool)
 	usbMscEnd();
 #endif
 	audioPwmStop();
-	irRemoteEnd();
 	bootGuardExit(uiPrvBootGuardModeForTool(tool));
 }
 
@@ -7759,6 +7761,11 @@ static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
 	default:
 		break;
 	}
+}
+
+static bool uiPrvImageFileName(const char *name)
+{
+	return uiPrvStrEndsWithNoCase(name, ".dci") || uiPrvStrEndsWithNoCase(name, ".dca");
 }
 
 static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const char *curName, bool forward, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
@@ -7994,7 +8001,7 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 		ids[numOptions] = UiBrowserOpenGame;
 		labels[numOptions++] = "Emulation";
 	}
-	if (imageViewerFileName(ref->name)) {
+	if (uiPrvImageFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenImage;
 		labels[numOptions++] = "Image Viewer";
 	}
@@ -8023,46 +8030,57 @@ static enum UiToolId uiPrvBrowserLaunchedToolReturn(enum UiToolId launchedTool)
 	return uiPrvToolExitRequested() ? launchedTool : UiToolBrowser;
 }
 
+static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppToolAction action,
+	struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, const char *parentPath)
+{
+	struct DcAppRunArgs args = {
+		.toolAction = action,
+		.canvas = cnv,
+		.vol = vol,
+		.locator = locator,
+		.name = name,
+		.parentPath = parentPath,
+	};
+	enum DcAppResult result = dcAppRunTool(appId, &args);
+
+	if (result != DcAppResultOk) {
+		if (dcAppLastError()[0])
+			uiAlert(cnv, dcAppLastError(), DialogTypeOk);
+		else
+			uiAlert(cnv, dcAppResultName(result), DialogTypeOk);
+		dcAppClearError();
+		return false;
+	}
+	return true;
+}
+
 static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol *vol, const struct UiFileRef *ref)
 {
-	const struct IrUniversalRemote *knownRemote = uiPrvIrKnownRemoteForName(ref->name);
-
-	if (knownRemote) {
-		(void)uiPrvIrKnownActionLocator(cnv, vol, &ref->locator, knownRemote);
-		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
-	}
-
 	switch (uiPrvBrowserOpenWith(cnv, ref)) {
 	case UiBrowserOpenIrButtonSpam:
 		uiPrvSetHeaderTitle("Universal IR");
-		(void)uiPrvIrButtonSpamLocator(cnv, vol, &ref->locator, ref->name);
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrButton, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenIrPowerSpam:
 		uiPrvSetHeaderTitle("Power");
-		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, NULL, "Power");
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrPower, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenIrMuteSpam:
 		uiPrvSetHeaderTitle("Mute");
-		(void)uiPrvIrBlastLocator(cnv, vol, &ref->locator, "Mute", "Mute");
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrMute, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
 	case UiBrowserOpenBadUsb:
 		uiPrvSetHeaderTitle("BadUSB");
-		(void)uiPrvRunBadUsbLocator(cnv, vol, &ref->locator, ref->name);
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolBadUsb, DcAppToolActionBadUsbFile, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolBadUsb);
 
-	case UiBrowserOpenMusic: {
-		struct Settings settings;
-
+	case UiBrowserOpenMusic:
 		uiPrvSetHeaderTitle("Music");
-		settingsGet(&settings);
-		uiPrvMusicSanitizeSettings(&settings);
-		(void)uiPrvPlayMusicLocator(cnv, vol, &ref->locator, ref->name, &settings, NULL);
-		settingsSet(&settings);
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolMusic, DcAppToolActionMusicFile, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolMusic);
-	}
 
 	case UiBrowserOpenGame:
 		if (!uiPrvPrepareForRomReplacement(cnv, vol, "browser game open"))
@@ -8072,7 +8090,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		return UiToolBrowser;
 
 	case UiBrowserOpenImage:
-		uiPrvRunImageSequence(cnv, vol, ref->parentPath, &ref->locator, ref->name);
+		(void)uiPrvRunSdApp(cnv, DcAppIdToolImage, DcAppToolActionImageFile, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolImage);
 
 	case UiBrowserOpenNone:
@@ -8154,7 +8172,7 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", imageViewerFileName, "No .dci or .dca files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No .dci or .dca files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
 	}
@@ -8162,6 +8180,90 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 	(void)uiPrvCardPreUnmount();
 	fatfsUnmount(vol);
 }
+
+#ifdef DCAPP_TOOL_BUILD
+int uiDcAppRunIr(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	switch (args->toolAction) {
+	case DcAppToolActionMain:
+		(void)uiPrvIrTools(args->canvas);
+		return 0;
+	case DcAppToolActionIrButton:
+		if (!args->vol || !args->locator || !args->name)
+			return -1;
+		(void)uiPrvIrButtonSpamLocator(args->canvas, args->vol, args->locator, args->name);
+		return 0;
+	case DcAppToolActionIrPower:
+		if (!args->vol || !args->locator)
+			return -1;
+		(void)uiPrvIrBlastLocator(args->canvas, args->vol, args->locator, NULL, "Power");
+		return 0;
+	case DcAppToolActionIrMute:
+		if (!args->vol || !args->locator)
+			return -1;
+		(void)uiPrvIrBlastLocator(args->canvas, args->vol, args->locator, "Mute", "Mute");
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+int uiDcAppRunImage(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	if (args->toolAction == DcAppToolActionMain) {
+		uiPrvImageViewerTool(args->canvas);
+		return 0;
+	}
+	if (args->toolAction == DcAppToolActionImageFile && args->vol && args->locator && args->name) {
+		uiPrvRunImageSequence(args->canvas, args->vol, args->parentPath, args->locator, args->name);
+		return 0;
+	}
+	return -1;
+}
+
+int uiDcAppRunMusic(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	if (args->toolAction == DcAppToolActionMain) {
+		uiPrvMusicPlayer(args->canvas);
+		return 0;
+	}
+	if (args->toolAction == DcAppToolActionMusicFile && args->vol && args->locator && args->name) {
+		struct Settings settings;
+
+		settingsGet(&settings);
+		uiPrvMusicSanitizeSettings(&settings);
+		(void)uiPrvPlayMusicLocator(args->canvas, args->vol, args->locator, args->name, &settings, NULL);
+		settingsSet(&settings);
+		return 0;
+	}
+	return -1;
+}
+
+int uiDcAppRunBadUsb(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	if (args->toolAction == DcAppToolActionMain) {
+		(void)uiPrvBadUsbTool(args->canvas);
+		return 0;
+	}
+	if (args->toolAction == DcAppToolActionBadUsbFile && args->vol && args->locator && args->name) {
+		(void)uiPrvRunBadUsbLocator(args->canvas, args->vol, args->locator, args->name);
+		return 0;
+	}
+	return -1;
+}
+#endif
 
 #define USB_STORAGE_REDRAW_TICKS TICKS_PER_SECOND
 
@@ -8259,7 +8361,9 @@ static bool uiPrvCurrentGameDefersSelect(void)
 	struct GameSelection selection;
 
 	return uiGetGameSelection(&selection) &&
-		(selection.runtime == GameRuntimeNes || selection.runtime == GameRuntimeArduboy);
+		(selection.runtime == GameRuntimeGb ||
+		 selection.runtime == GameRuntimeNes ||
+		 selection.runtime == GameRuntimeArduboy);
 }
 
 static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -8271,6 +8375,10 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 		toolWorkspaceEnd();
 		uiPrvLoadSavestate();
 		runGameF(userData);
+		if (dcAppLastError()[0]) {
+			uiAlert(cnv, dcAppLastError(), DialogTypeOk);
+			dcAppClearError();
+		}
 		if (!uiSaveSavestate())
 			uiAlert(cnv, "Failed to save state to flash", DialogTypeOk);
 		toolWorkspaceBegin();
@@ -8512,7 +8620,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			case UiToolIr:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
-				(void)uiPrvIrTools(cnv);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 				uiPrvExitTool(activeTool);
 			#endif
 				break;
@@ -8530,7 +8638,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			case UiToolBadUsb:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
-				(void)uiPrvBadUsbTool(cnv);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolBadUsb, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 				uiPrvExitTool(activeTool);
 			#endif
 				break;
@@ -8544,7 +8652,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			case UiToolMusic:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
-				uiPrvMusicPlayer(cnv);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolMusic, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 				uiPrvExitTool(activeTool);
 			#endif
 				break;
@@ -8552,7 +8660,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			case UiToolImage:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
-				uiPrvImageViewerTool(cnv);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolImage, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 				uiPrvExitTool(activeTool);
 			#else
 				uiAlert(cnv, "Image Viewer requires SD card support", DialogTypeOk);

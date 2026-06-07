@@ -7,13 +7,17 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			14
+#define SETTINGS_CUR_VER			15
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
 #define SETTINGS_LED_MIN_BRIGHTNESS	15
 #define SETTINGS_MUSIC_VOLUME_MAX	15
 #define SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13	9
+#define SETTINGS_BADUSB_DEFAULT_VID	0x1209
+#define SETTINGS_BADUSB_DEFAULT_PID	0xdc32
+#define SETTINGS_AUTOCLICKER_MIN_CPS	1
+#define SETTINGS_AUTOCLICKER_MAX_CPS	50
 
 
 union SettingsPage {
@@ -77,6 +81,20 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->ledBrightness = SETTINGS_LED_MIN_BRIGHTNESS;
 	if (settings->musicVolume > SETTINGS_MUSIC_VOLUME_MAX)
 		settings->musicVolume = 7;
+	if (!settings->badUsbVid)
+		settings->badUsbVid = SETTINGS_BADUSB_DEFAULT_VID;
+	if (!settings->badUsbPid)
+		settings->badUsbPid = SETTINGS_BADUSB_DEFAULT_PID;
+	settings->badUsbManufacturer[sizeof(settings->badUsbManufacturer) - 1] = 0;
+	settings->badUsbProduct[sizeof(settings->badUsbProduct) - 1] = 0;
+	if (!settings->badUsbManufacturer[0] || (uint8_t)settings->badUsbManufacturer[0] == 0xff)
+		strcpy(settings->badUsbManufacturer, "DC32");
+	if (!settings->badUsbProduct[0] || (uint8_t)settings->badUsbProduct[0] == 0xff)
+		strcpy(settings->badUsbProduct, "DC32 BadUSB");
+	if (settings->autoclickerButton >= AutoclickerButtonNumButtons)
+		settings->autoclickerButton = AutoclickerButtonLeft;
+	if (settings->autoclickerCps < SETTINGS_AUTOCLICKER_MIN_CPS || settings->autoclickerCps > SETTINGS_AUTOCLICKER_MAX_CPS)
+		settings->autoclickerCps = 5;
 }
 
 void settingsGet(struct Settings *settings)
@@ -170,6 +188,15 @@ void settingsGet(struct Settings *settings)
 		case 13:			//merge reactive touch and button LED patterns
 			if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
 				settings->ledMode = LedModeReactive;
+			//fallthrough
+
+		case 14:			//add USB HID defaults and Autoclicker settings
+			settings->badUsbVid = SETTINGS_BADUSB_DEFAULT_VID;
+			settings->badUsbPid = SETTINGS_BADUSB_DEFAULT_PID;
+			strcpy(settings->badUsbManufacturer, "DC32");
+			strcpy(settings->badUsbProduct, "DC32 BadUSB");
+			settings->autoclickerButton = AutoclickerButtonLeft;
+			settings->autoclickerCps = 5;
 			//fallthrough
 
 		//other cases here, in increasing order

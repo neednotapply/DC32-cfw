@@ -22,6 +22,8 @@ enum DcAppId {
 	DcAppIdToolImage = 101,
 	DcAppIdToolMusic = 102,
 	DcAppIdToolBadUsb = 103,
+	DcAppIdToolAutoclicker = 104,
+	DcAppIdToolGamepad = 105,
 };
 
 enum DcAppToolAction {

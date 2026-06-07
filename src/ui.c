@@ -20,6 +20,7 @@
 #include "badUsb.h"
 #include "usbHid.h"
 #include "usbMsc.h"
+#include "usbXinput.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
 #include "audioPwm.h"
@@ -2636,11 +2637,191 @@ static void __attribute__((noinline)) uiPrvClockSettings(struct Canvas *cnv)
 	}
 }
 
+static void uiPrvUsbSettingsDefaults(struct Settings *settings)
+{
+	settings->badUsbVid = USB_HID_DEFAULT_VID;
+	settings->badUsbPid = USB_HID_DEFAULT_PID;
+	strcpy(settings->badUsbManufacturer, "DC32");
+	strcpy(settings->badUsbProduct, "DC32 BadUSB");
+}
+
+static void uiPrvUsbEditHex16(struct Canvas *cnv, const char *title, uint16_t *valP)
+{
+	uint_fast8_t nibble = 0;
+
+	while (1) {
+		uint_fast16_t key;
+		char msg[64];
+
+		uiPrvSetHeaderTitle(title);
+		uiPrvReset(cnv, false);
+		cnv->font = FontMedium;
+		(void)sprintf(msg, "%04X", (unsigned)*valP);
+		uiPuts(cnv, uiPrvContentTop(cnv), 10, msg, -1);
+		uiPuts(cnv, uiPrvContentTop(cnv) + uiPrvGlyphHeight(cnv) + 1, 10 + nibble * uiPrvCharsWidth(cnv, "0", 1), "^", -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Up/Down Edit  A Done", -1);
+
+		key = uiPrvRecvMenuKeypress(cnv);
+		if (key == KEY_BIT_A || key == KEY_BIT_B || key == UI_KEY_BIT_CENTER)
+			return;
+		if (key == KEY_BIT_LEFT) {
+			if (nibble)
+				nibble--;
+			continue;
+		}
+		if (key == KEY_BIT_RIGHT) {
+			if (nibble < 3)
+				nibble++;
+			continue;
+		}
+		if (key == KEY_BIT_UP || key == KEY_BIT_DOWN) {
+			uint_fast8_t shift = (3 - nibble) * 4;
+			uint16_t mask = (uint16_t)(0xfu << shift);
+			uint_fast8_t digit = (uint_fast8_t)((*valP >> shift) & 0xf);
+
+			if (key == KEY_BIT_UP)
+				digit = (digit + 1) & 0xf;
+			else
+				digit = (digit + 15) & 0xf;
+			*valP = (uint16_t)((*valP & ~mask) | ((uint16_t)digit << shift));
+		}
+	}
+}
+
+static int_fast8_t uiPrvUsbTextCharIndex(char ch)
+{
+	static const char chars[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.";
+	uint_fast8_t i;
+
+	for (i = 0; chars[i]; i++)
+		if (chars[i] == ch)
+			return i;
+	return 0;
+}
+
+static char uiPrvUsbTextCharAt(uint_fast8_t idx)
+{
+	static const char chars[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.";
+	uint_fast8_t len = sizeof(chars) - 1;
+
+	return chars[idx % len];
+}
+
+static void uiPrvUsbEditText(struct Canvas *cnv, const char *title, char *text, uint32_t textLen)
+{
+	uint32_t cursor = 0;
+
+	if (textLen < 2)
+		return;
+	text[textLen - 1] = 0;
+	while (1) {
+		uint32_t len = strlen(text), maxCursor = len < textLen - 1 ? len : textLen - 2;
+		uint_fast16_t key;
+		char msg[64];
+
+		if (cursor > maxCursor)
+			cursor = maxCursor;
+		uiPrvSetHeaderTitle(title);
+		uiPrvReset(cnv, false);
+		cnv->font = FontMedium;
+		uiPrvDrawTruncText(cnv, uiPrvContentTop(cnv), 10, cnv->w - 20, text);
+		(void)sprintf(msg, "Pos %u/%u", (unsigned)(cursor + 1), (unsigned)(textLen - 1));
+		uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, msg, -1);
+		if (text[cursor])
+			(void)sprintf(msg, "Char %c", text[cursor]);
+		else
+			strcpy(msg, "Char END");
+		uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "A Save B Back Sel Del", -1);
+
+		key = uiPrvRecvMenuKeypress(cnv);
+		if (key == KEY_BIT_A || key == KEY_BIT_B || key == UI_KEY_BIT_CENTER)
+			return;
+		if (key == KEY_BIT_LEFT) {
+			if (cursor)
+				cursor--;
+			continue;
+		}
+		if (key == KEY_BIT_RIGHT) {
+			if (cursor < maxCursor)
+				cursor++;
+			continue;
+		}
+		if (key == KEY_BIT_SEL) {
+			if (cursor < len)
+				memmove(text + cursor, text + cursor + 1, len - cursor);
+			continue;
+		}
+		if (key == KEY_BIT_UP || key == KEY_BIT_DOWN) {
+			int_fast8_t idx = uiPrvUsbTextCharIndex(text[cursor] ? text[cursor] : ' ');
+
+			if (key == KEY_BIT_UP)
+				idx++;
+			else
+				idx--;
+			if (idx < 0)
+				idx = (int_fast8_t)(sizeof(" ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.") - 2);
+			text[cursor] = uiPrvUsbTextCharAt((uint_fast8_t)idx);
+			text[textLen - 1] = 0;
+		}
+	}
+}
+
+static void __attribute__((noinline)) uiPrvUsbSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	uint_fast8_t selOption = 0;
+
+	while (1) {
+		enum {
+			UsbSettingDone,
+			UsbSettingVid,
+			UsbSettingPid,
+			UsbSettingManufacturer,
+			UsbSettingProduct,
+			UsbSettingReset,
+			UsbSettingNum,
+		};
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+		char msg[64];
+
+		uiPrvSetHeaderTitle("USB");
+		uiPrvReset(cnv, false);
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingDone), 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingVid), 10, "VID:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingPid), 10, "PID:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingManufacturer), 10, "MFR:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingProduct), 10, "PRODUCT:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingReset), 10, "Reset USB defaults", -1);
+		cnv->foreColor = 15;
+		(void)sprintf(msg, "%04X", (unsigned)settings->badUsbVid);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingVid), 75, msg, -1);
+		(void)sprintf(msg, "%04X", (unsigned)settings->badUsbPid);
+		uiPuts(cnv, uiPrvMenuRow(cnv, UsbSettingPid), 75, msg, -1);
+		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, UsbSettingManufacturer), 75, cnv->w - 75, settings->badUsbManufacturer);
+		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, UsbSettingProduct), 75, cnv->w - 75, settings->badUsbProduct);
+
+		selOption = uiPrvMenu(cnv, selOption, UsbSettingNum, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selOption == UsbSettingDone)
+			return;
+		if (selOption == UsbSettingVid)
+			uiPrvUsbEditHex16(cnv, "USB VID", &settings->badUsbVid);
+		else if (selOption == UsbSettingPid)
+			uiPrvUsbEditHex16(cnv, "USB PID", &settings->badUsbPid);
+		else if (selOption == UsbSettingManufacturer)
+			uiPrvUsbEditText(cnv, "USB MFR", settings->badUsbManufacturer, sizeof(settings->badUsbManufacturer));
+		else if (selOption == UsbSettingProduct)
+			uiPrvUsbEditText(cnv, "USB Product", settings->badUsbProduct, sizeof(settings->badUsbProduct));
+		else if (selOption == UsbSettingReset)
+			uiPrvUsbSettingsDefaults(settings);
+	}
+}
+
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exitOnDone)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
 	struct Settings settings;
-	uint_fast8_t numOptions = exitOnDone ? 5 : 4;
+	uint_fast8_t numOptions = exitOnDone ? 6 : 5;
 
 	uiPrvSetHeaderTitle("Settings");
 	settingsGet(&settings);
@@ -2652,7 +2833,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	uiPrvReset(cnv, false);
 
 	while (1) {
-		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, clockOption = gameOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, selOption;
+		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, clockOption = gameOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, usbOption = screenOption + 1, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvSetHeaderTitle("Settings");
@@ -2663,6 +2844,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 		uiPuts(cnv, uiPrvMenuRow(cnv, clockOption), 10, "Clock", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, screenOption), 10, "Screen", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, usbOption), 10, "USB", -1);
 
 		selOption = uiPrvMenu(cnv, 0, numOptions, &button);
 		if (uiPrvToolExitRequested()) {
@@ -2681,6 +2863,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			uiPrvClockSettings(cnv);
 		else if (selOption == ledSettingsOption)
 			uiPrvLedSettings(cnv, &settings);
+		else if (selOption == usbOption)
+			uiPrvUsbSettings(cnv, &settings);
 		if (uiPrvToolExitRequested()) {
 			settingsSet(&settings);
 			return restartCurGame;
@@ -6907,6 +7091,8 @@ reload_dir:
 		struct BadUsbUiData data;
 		struct BadUsbPreload preload;
 		struct UsbHidDeviceInfo hidInfo;
+		struct UsbHidDeviceInfo defaultHidInfo;
+		struct Settings settings;
 		struct ToolWorkspaceSpan scratchMem = {0};
 		enum BadUsbResult ret = BadUsbResultFileError;
 		char msg[96];
@@ -6939,13 +7125,20 @@ reload_dir:
 			goto out_close;
 		}
 
+		settingsGet(&settings);
+		memset(&defaultHidInfo, 0, sizeof(defaultHidInfo));
+		defaultHidInfo.vid = settings.badUsbVid;
+		defaultHidInfo.pid = settings.badUsbPid;
+		strcpy(defaultHidInfo.manufacturer, settings.badUsbManufacturer);
+		strcpy(defaultHidInfo.product, settings.badUsbProduct);
+
 		reportResult = true;
-		if (!badUsbReadDeviceInfoWithScratch(fil, &hidInfo, scratchMem.ptr, scratchMem.size))
+		if (!badUsbReadDeviceInfoWithDefaultScratch(fil, &defaultHidInfo, &hidInfo, scratchMem.ptr, scratchMem.size))
 			goto out_close;
 		uiPrvBadUsbPreloadForDisplay(&preload, fil, &hidInfo);
 
 		uiPrvBadUsbShowState(&data, &preload, BadUsbStateWillRun, "Starting USB");
-		if (!usbHidBegin(&hidInfo)) {
+		if (!usbHidBeginReportSet(&hidInfo, UsbHidReportSetKeyboardMouseConsumer)) {
 			struct BadUsbStatus usbStatus;
 
 			memset(&usbStatus, 0, sizeof(usbStatus));
@@ -7475,6 +7668,716 @@ static void uiPrvUsbKeyboardTool(struct Canvas *cnv)
 	uiPrvWaitKeysReleased();
 }
 
+#define USB_HID_TOOL_ENUM_WAIT_MS	5000
+#define AUTOCLICKER_PRESS_MS		5
+#define AUTOCLICKER_MIN_CPS		1
+#define AUTOCLICKER_MAX_CPS		50
+#define AUTOCLICKER_A_LOCKOUT_TICKS	((uint64_t)TICKS_PER_SECOND * 150u / 1000u)
+
+static bool uiPrvUsbHidWaitReady(struct Canvas *cnv, const char *title)
+{
+	uint64_t end = getTime() + (uint64_t)USB_HID_TOOL_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+	uint64_t lastDraw = 0;
+
+	while (getTime() < end) {
+		uint64_t now = getTime();
+
+		usbHidTask();
+		if (uiPrvCenterExitPressedRaw()) {
+			uiPrvRequestToolExit();
+			return false;
+		}
+		if (usbHidReady())
+			return true;
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvSetHeaderTitle(title);
+			uiPrvReset(cnv, false);
+			cnv->font = FontMedium;
+			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Center = Exit", -1);
+			lastDraw = now;
+		}
+	}
+	return usbHidReady();
+}
+
+static const char *uiPrvAutoclickerButtonName(uint8_t button)
+{
+	switch (button) {
+	case AutoclickerButtonRight:
+		return "Right";
+	case AutoclickerButtonMiddle:
+		return "Middle";
+	case AutoclickerButtonLeft:
+	default:
+		return "Left";
+	}
+}
+
+static uint8_t uiPrvAutoclickerButtonMask(uint8_t button)
+{
+	switch (button) {
+	case AutoclickerButtonRight:
+		return USB_HID_MOUSE_BUTTON_RIGHT;
+	case AutoclickerButtonMiddle:
+		return USB_HID_MOUSE_BUTTON_MIDDLE;
+	case AutoclickerButtonLeft:
+	default:
+		return USB_HID_MOUSE_BUTTON_LEFT;
+	}
+}
+
+static bool uiPrvAutoclickerAdjustClicks(struct Settings *settings, int_fast8_t delta)
+{
+	uint8_t old = settings->autoclickerCps;
+
+	if (delta > 0) {
+		if (settings->autoclickerCps < AUTOCLICKER_MAX_CPS)
+			settings->autoclickerCps++;
+	}
+	else if (delta < 0 && settings->autoclickerCps > AUTOCLICKER_MIN_CPS) {
+		settings->autoclickerCps--;
+	}
+	return old != settings->autoclickerCps;
+}
+
+static void uiPrvAutoclickerAdjustButton(struct Settings *settings, bool next)
+{
+	if (next)
+		settings->autoclickerButton = (settings->autoclickerButton + 1) % AutoclickerButtonNumButtons;
+	else
+		settings->autoclickerButton = settings->autoclickerButton ? settings->autoclickerButton - 1 : AutoclickerButtonNumButtons - 1;
+}
+
+static void uiPrvAutoclickerDraw(struct Canvas *cnv, const struct Settings *settings, bool running)
+{
+	char msg[64];
+
+	uiPrvSetHeaderTitle("Autoclicker");
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, running ? "Running" : "Stopped", -1);
+	(void)sprintf(msg, "Button: %s", uiPrvAutoclickerButtonName(settings->autoclickerButton));
+	uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, msg, -1);
+	(void)sprintf(msg, "Clicks /s: %u", (unsigned)settings->autoclickerCps);
+	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
+	cnv->foreColor = 15;
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, running ? "A Stop  B Exit" : "A Start  B Exit", -1);
+}
+
+static bool uiPrvAutoclickerDelay(uint32_t msec)
+{
+	uint64_t end = getTime() + (uint64_t)msec * (TICKS_PER_SECOND / 1000);
+
+	while (getTime() < end)
+		usbHidTask();
+	return true;
+}
+
+static void uiPrvAutoclickerTool(struct Canvas *cnv)
+{
+	struct Settings settings;
+	struct UsbHidDeviceInfo info;
+	uint_fast16_t prevKeys = 0;
+	uint_fast16_t repeatKey = 0;
+	uint64_t nextClick = 0, lastDraw = 0;
+	uint64_t repeatNext = 0, aRearmTicks = 0;
+	bool running = false, failed = false, reportsEnabled = false;
+	bool aToggleArmed = true;
+
+	uiPrvSetHeaderTitle("Autoclicker");
+	settingsGet(&settings);
+	usbHidDefaultInfo(&info);
+	strcpy(info.product, "DC32 Autoclicker");
+	if (!usbHidBeginReportSet(&info, UsbHidReportSetMouse)) {
+		char msg[96];
+
+		(void)sprintf(msg, "Autoclicker failed to start\n%s", usbHidLastError());
+		uiAlert(cnv, msg, DialogTypeOk);
+		return;
+	}
+	if (!uiPrvUsbHidWaitReady(cnv, "Autoclicker")) {
+		usbHidEnd();
+		if (!uiPrvToolExitRequested())
+			uiAlert(cnv, "Autoclicker failed to enumerate", DialogTypeOk);
+		uiPrvWaitKeysReleased();
+		return;
+	}
+	usbHidSetReportsEnabled(true);
+	reportsEnabled = true;
+	usbHidReleaseAll();
+	uiPrvWaitKeysReleased();
+
+	while (!uiPrvToolExitRequested()) {
+		uint64_t now = getTime();
+		uint_fast16_t keys = uiGetUiKeysRaw();
+		uint_fast16_t pressed = keys & ~prevKeys;
+		uint_fast16_t speedKey = 0;
+
+		usbHidTask();
+		uiPrvRefreshHeaderClock(cnv);
+		if (pressed & UI_KEY_BIT_CENTER) {
+			uiPrvRequestToolExit();
+			break;
+		}
+		if (pressed & KEY_BIT_B)
+			break;
+		if (!(keys & KEY_BIT_A) && now >= aRearmTicks)
+			aToggleArmed = true;
+		if ((pressed & KEY_BIT_A) && aToggleArmed) {
+			running = !running;
+			nextClick = 0;
+			lastDraw = 0;
+			aToggleArmed = false;
+			aRearmTicks = now + AUTOCLICKER_A_LOCKOUT_TICKS;
+		}
+		if (pressed & KEY_BIT_LEFT) {
+			uiPrvAutoclickerAdjustButton(&settings, false);
+			lastDraw = 0;
+		}
+		else if (pressed & KEY_BIT_RIGHT) {
+			uiPrvAutoclickerAdjustButton(&settings, true);
+			lastDraw = 0;
+		}
+		if (keys & KEY_BIT_UP)
+			speedKey = KEY_BIT_UP;
+		else if (keys & KEY_BIT_DOWN)
+			speedKey = KEY_BIT_DOWN;
+		if (speedKey != repeatKey) {
+			repeatKey = speedKey;
+			repeatNext = speedKey ? now + UI_KEY_REPEAT_INITIAL_TICKS : 0;
+			if (speedKey && uiPrvAutoclickerAdjustClicks(&settings, speedKey == KEY_BIT_UP ? 1 : -1))
+				lastDraw = 0;
+		}
+		else if (speedKey && now >= repeatNext) {
+			repeatNext = now + UI_KEY_REPEAT_INTERVAL_TICKS;
+			if (uiPrvAutoclickerAdjustClicks(&settings, speedKey == KEY_BIT_UP ? 1 : -1))
+				lastDraw = 0;
+		}
+		if (running && (!nextClick || now >= nextClick)) {
+			uint8_t button = uiPrvAutoclickerButtonMask(settings.autoclickerButton);
+			uint64_t interval = TICKS_PER_SECOND / settings.autoclickerCps;
+
+			if (!usbHidMouseReport(button, 0, 0, 0, 0) || !uiPrvAutoclickerDelay(AUTOCLICKER_PRESS_MS) || !usbHidMouseReport(0, 0, 0, 0, 0)) {
+				failed = true;
+				break;
+			}
+			nextClick = now + interval;
+		}
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvAutoclickerDraw(cnv, &settings, running);
+			lastDraw = now;
+		}
+		prevKeys = keys;
+	}
+
+	settingsSet(&settings);
+	if (reportsEnabled) {
+		usbHidReleaseAll();
+		usbHidSetReportsEnabled(false);
+	}
+	usbHidEnd();
+	uiPrvWaitKeysReleased();
+	if (failed && !uiPrvToolExitRequested())
+		uiAlert(cnv, "Autoclicker report failed", DialogTypeOk);
+}
+
+#define USB_GAMEPAD_REPORT_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND / 50u)
+#define USB_GAMEPAD_FEEDBACK_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND / 30u)
+#define USB_GAMEPAD_PING_TICKS			((uint64_t)TICKS_PER_SECOND * 90u / 1000u)
+#define USB_GAMEPAD_PING_FREQ			1319u
+#define USB_GAMEPAD_PING_VOLUME			8u
+#define USB_GAMEPAD_HOME_EXIT_TICKS		((uint64_t)TICKS_PER_SECOND * 1200u / 1000u)
+#define USB_GAMEPAD_TOUCH_CLICK_ZONE_WIDTH_DIV	5u
+#define USB_GAMEPAD_TOUCH_CLICK_ZONE_HEIGHT_DIV	5u
+
+enum UiGamepadProfile {
+	UiGamepadProfilePs4,
+	UiGamepadProfileXbox360,
+};
+
+enum UiGamepadTouchZone {
+	UiGamepadTouchZoneNone,
+	UiGamepadTouchZoneLeftClick,
+	UiGamepadTouchZoneRightClick,
+};
+
+struct UiGamepadFeedback {
+	uint8_t rumbleLeft;
+	uint8_t rumbleRight;
+	uint8_t lightRed;
+	uint8_t lightGreen;
+	uint8_t lightBlue;
+	uint32_t pingSeq;
+};
+
+static const char *uiPrvGamepadProfileName(enum UiGamepadProfile profile)
+{
+	switch (profile) {
+	case UiGamepadProfileXbox360:
+		return "Xbox 360 Controller";
+	case UiGamepadProfilePs4:
+	default:
+		return "PS4 Controller";
+	}
+}
+
+static bool uiPrvGamepadChooseProfile(struct Canvas *cnv, enum UiGamepadProfile *profileP)
+{
+	enum {
+		GamepadChoicePs4,
+		GamepadChoiceXbox360,
+		GamepadChoiceCancel,
+		GamepadChoiceNum,
+	};
+	uint_fast8_t selection = GamepadChoicePs4;
+	uint_fast16_t button;
+
+	while (!uiPrvToolExitRequested()) {
+		uiPrvSetHeaderTitle("USB Gamepad");
+		uiPrvReset(cnv, false);
+		cnv->font = FontMedium;
+		uiPuts(cnv, uiPrvMenuRow(cnv, GamepadChoicePs4), 10, "PS4 Controller", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, GamepadChoiceXbox360), 10, "Xbox 360 Controller", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, GamepadChoiceCancel), 10, "Cancel", -1);
+		uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "A = Start  B = Back", -1);
+
+		button = KEY_BIT_A | KEY_BIT_B;
+		selection = uiPrvMenu(cnv, selection, GamepadChoiceNum, &button);
+		if (button == KEY_BIT_B || uiPrvToolExitRequested() || selection == GamepadChoiceCancel)
+			return false;
+		if (profileP)
+			*profileP = selection == GamepadChoiceXbox360 ? UiGamepadProfileXbox360 : UiGamepadProfilePs4;
+		return true;
+	}
+	return false;
+}
+
+static void uiPrvGamepadTask(enum UiGamepadProfile profile)
+{
+	if (profile == UiGamepadProfileXbox360)
+		usbXinputTask();
+	else
+		usbHidTask();
+}
+
+static bool uiPrvGamepadReady(enum UiGamepadProfile profile)
+{
+	return profile == UiGamepadProfileXbox360 ? usbXinputReady() : usbHidReady();
+}
+
+static bool uiPrvGamepadStart(enum UiGamepadProfile profile)
+{
+	if (profile == UiGamepadProfileXbox360)
+		return usbXinputBegin();
+	else {
+		struct UsbHidDeviceInfo info;
+
+		usbHidDefaultInfo(&info);
+		info.vid = USB_HID_DS4_VID;
+		info.pid = USB_HID_DS4_PID;
+		strcpy(info.manufacturer, "Sony Computer Entertainment");
+		strcpy(info.product, "Wireless Controller");
+		return usbHidBeginReportSet(&info, UsbHidReportSetGamepad);
+	}
+}
+
+static const char *uiPrvGamepadLastError(enum UiGamepadProfile profile)
+{
+	return profile == UiGamepadProfileXbox360 ? usbXinputLastError() : usbHidLastError();
+}
+
+static void uiPrvGamepadSetReportsEnabled(enum UiGamepadProfile profile, bool enabled)
+{
+	if (profile == UiGamepadProfileXbox360)
+		usbXinputSetReportsEnabled(enabled);
+	else
+		usbHidSetReportsEnabled(enabled);
+}
+
+static void uiPrvGamepadReleaseAll(enum UiGamepadProfile profile)
+{
+	if (profile == UiGamepadProfileXbox360)
+		usbXinputReleaseAll();
+	else
+		(void)usbHidGamepadReport(0, 0, 0, 0, 0, 0, UsbHidGamepadHatCentered, 0);
+}
+
+static void uiPrvGamepadEnd(enum UiGamepadProfile profile)
+{
+	if (profile == UiGamepadProfileXbox360)
+		usbXinputEnd();
+	else
+		usbHidEnd();
+}
+
+static bool uiPrvGamepadWaitReady(struct Canvas *cnv, enum UiGamepadProfile profile)
+{
+	uint64_t end = getTime() + (uint64_t)USB_HID_TOOL_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
+	uint64_t lastDraw = 0, homeHoldStart = 0;
+
+	while (getTime() < end) {
+		uint64_t now = getTime();
+
+		uiPrvGamepadTask(profile);
+		if (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
+			if (!homeHoldStart)
+				homeHoldStart = now;
+			else if (now - homeHoldStart >= USB_GAMEPAD_HOME_EXIT_TICKS) {
+				uiPrvRequestToolExit();
+				return false;
+			}
+		}
+		else
+			homeHoldStart = 0;
+		if (uiPrvGamepadReady(profile))
+			return true;
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvSetHeaderTitle("USB Gamepad");
+			uiPrvReset(cnv, false);
+			cnv->font = FontMedium;
+			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+			uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 1), 10, cnv->w - 20, uiPrvGamepadProfileName(profile));
+			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold Home = Exit", -1);
+			lastDraw = now;
+		}
+	}
+	return uiPrvGamepadReady(profile);
+}
+
+static bool uiPrvGamepadSendReport(enum UiGamepadProfile profile, uint8_t hat, uint32_t buttons, const struct UsbHidGamepadTouch *touch)
+{
+	if (profile == UiGamepadProfileXbox360)
+		return usbXinputReport(0, 0, 0, 0, 0, 0, hat, buttons);
+	return usbHidGamepadReportTouch(0, 0, 0, 0, 0, 0, hat, buttons, touch);
+}
+
+static void uiPrvGamepadReadFeedback(enum UiGamepadProfile profile, struct UiGamepadFeedback *feedback)
+{
+	memset(feedback, 0, sizeof(*feedback));
+	if (profile == UiGamepadProfileXbox360) {
+		struct UsbXinputFeedback xinputFeedback;
+
+		usbXinputFeedback(&xinputFeedback);
+		feedback->rumbleLeft = xinputFeedback.rumbleLeft;
+		feedback->rumbleRight = xinputFeedback.rumbleRight;
+		if (xinputFeedback.ledPattern)
+			feedback->lightGreen = 24 + ((xinputFeedback.ledPattern & 0x0f) * 8);
+		feedback->pingSeq = xinputFeedback.pingSeq;
+	}
+	else {
+		struct UsbHidGamepadFeedback hidFeedback;
+
+		usbHidGamepadFeedback(&hidFeedback);
+		feedback->rumbleLeft = hidFeedback.rumbleLeft;
+		feedback->rumbleRight = hidFeedback.rumbleRight;
+		feedback->lightRed = hidFeedback.lightbarRed / 4;
+		feedback->lightGreen = hidFeedback.lightbarGreen / 4;
+		feedback->lightBlue = hidFeedback.lightbarBlue / 4;
+		feedback->pingSeq = hidFeedback.pingSeq;
+	}
+}
+
+static uint8_t uiPrvGamepadVisibleRumble(uint8_t value)
+{
+	if (value && value < 32)
+		return 32;
+	return value;
+}
+
+static void uiPrvGamepadApplyFeedbackLeds(const struct UiGamepadFeedback *feedback)
+{
+	if (feedback->rumbleLeft || feedback->rumbleRight) {
+		uint8_t red = uiPrvGamepadVisibleRumble(feedback->rumbleLeft);
+		uint8_t blue = uiPrvGamepadVisibleRumble(feedback->rumbleRight);
+		uint8_t green = red < blue ? red / 4 : blue / 4;
+
+		badgeLedsOverrideRgb(red, green, blue);
+	}
+	else
+		badgeLedsOverrideRgb(0, 0, 0);
+}
+
+static void uiPrvGamepadUpdatePing(const struct UiGamepadFeedback *feedback, uint32_t *lastPingSeqP, uint64_t *pingEndTicksP, uint_fast8_t restoreVolume)
+{
+	uint64_t now = getTime();
+
+	if (feedback->pingSeq != *lastPingSeqP) {
+		*lastPingSeqP = feedback->pingSeq;
+		if (feedback->pingSeq) {
+			audioPwmSetVolume(restoreVolume ? restoreVolume : USB_GAMEPAD_PING_VOLUME);
+			if (audioPwmTone(USB_GAMEPAD_PING_FREQ))
+				*pingEndTicksP = now + USB_GAMEPAD_PING_TICKS;
+			else
+				audioPwmSetVolume(restoreVolume);
+		}
+	}
+	if (*pingEndTicksP && now >= *pingEndTicksP) {
+		audioPwmStop();
+		audioPwmSetVolume(restoreVolume);
+		*pingEndTicksP = 0;
+	}
+}
+
+static void uiPrvGamepadRestoreFeedback(const struct Settings *settings, uint_fast8_t audioVolume)
+{
+	audioPwmStop();
+	audioPwmSetVolume(audioVolume);
+	badgeLedsOverrideRgb(0, 0, 0);
+	badgeLedsApplySettings(settings, true);
+}
+
+static uint8_t uiPrvGamepadHat(uint_fast8_t keys)
+{
+	bool up = !!(keys & KEY_BIT_UP), down = !!(keys & KEY_BIT_DOWN);
+	bool left = !!(keys & KEY_BIT_LEFT), right = !!(keys & KEY_BIT_RIGHT);
+
+	if (up && !down && right && !left)
+		return UsbHidGamepadHatUpRight;
+	if (down && !up && right && !left)
+		return UsbHidGamepadHatDownRight;
+	if (down && !up && left && !right)
+		return UsbHidGamepadHatDownLeft;
+	if (up && !down && left && !right)
+		return UsbHidGamepadHatUpLeft;
+	if (up && !down)
+		return UsbHidGamepadHatUp;
+	if (right && !left)
+		return UsbHidGamepadHatRight;
+	if (down && !up)
+		return UsbHidGamepadHatDown;
+	if (left && !right)
+		return UsbHidGamepadHatLeft;
+	return UsbHidGamepadHatCentered;
+}
+
+static uint32_t uiPrvGamepadButtons(uint_fast16_t keys)
+{
+	uint32_t buttons = 0;
+
+	if (keys & KEY_BIT_A)
+		buttons |= USB_HID_GAMEPAD_BUTTON_A;
+	if (keys & KEY_BIT_B)
+		buttons |= USB_HID_GAMEPAD_BUTTON_B;
+	if (keys & KEY_BIT_SEL)
+		buttons |= USB_HID_GAMEPAD_BUTTON_SELECT;
+	if (keys & KEY_BIT_START)
+		buttons |= USB_HID_GAMEPAD_BUTTON_START;
+	if (keys & UI_KEY_BIT_CENTER)
+		buttons |= USB_HID_GAMEPAD_BUTTON_HOME;
+	return buttons;
+}
+
+static int32_t uiPrvGamepadClampCoord(int32_t val, int32_t max)
+{
+	if (val < 0)
+		return 0;
+	if (val > max)
+		return max;
+	return val;
+}
+
+static void uiPrvGamepadPackTouchCoord(struct UsbHidGamepadTouch *touch, struct Canvas *cnv, int32_t screenX, int32_t screenY)
+{
+	uint32_t width = cnv->w > 1 ? cnv->w - 1 : 1;
+	uint32_t height = cnv->h > 1 ? cnv->h - 1 : 1;
+
+	screenX = uiPrvGamepadClampCoord(screenX, cnv->w - 1);
+	screenY = uiPrvGamepadClampCoord(screenY, cnv->h - 1);
+	touch->x = (uint16_t)((uint32_t)screenX * (USB_HID_DS4_TOUCHPAD_WIDTH - 1u) / width);
+	touch->y = (uint16_t)((uint32_t)screenY * (USB_HID_DS4_TOUCHPAD_HEIGHT - 1u) / height);
+}
+
+static bool uiPrvGamepadReadTouch(struct Canvas *cnv, enum UiGamepadProfile profile, struct UsbHidGamepadTouch *touch, enum UiGamepadTouchZone *zoneP)
+{
+	struct UiTouchSample sample;
+	int32_t rawScreenX, rawScreenY, screenX, screenY;
+	uint32_t zoneWidth, zoneHeight;
+
+	memset(touch, 0, sizeof(*touch));
+	if (zoneP)
+		*zoneP = UiGamepadTouchZoneNone;
+	if (profile != UiGamepadProfilePs4)
+		return false;
+	if (!uiReadTouchRaw(&sample) || !sample.penDown)
+		return false;
+
+	rawScreenX = 350 - (int32_t)sample.x * 94 / 1024;
+	rawScreenY = 260 - (int32_t)sample.y * 71 / 1024;
+	screenX = rawScreenX;
+	screenY = rawScreenY;
+	touch->active = true;
+	uiPrvGamepadPackTouchCoord(touch, cnv, screenX, screenY);
+
+	zoneWidth = cnv->w / USB_GAMEPAD_TOUCH_CLICK_ZONE_WIDTH_DIV;
+	zoneHeight = cnv->h / USB_GAMEPAD_TOUCH_CLICK_ZONE_HEIGHT_DIV;
+	if (zoneWidth < 1)
+		zoneWidth = 1;
+	if (zoneHeight < 1)
+		zoneHeight = 1;
+	screenX = uiPrvGamepadClampCoord(screenX, cnv->w - 1);
+	screenY = uiPrvGamepadClampCoord(screenY, cnv->h - 1);
+	if ((uint32_t)screenY >= cnv->h - zoneHeight) {
+		if ((uint32_t)screenX < zoneWidth) {
+			touch->click = true;
+			if (zoneP)
+				*zoneP = UiGamepadTouchZoneLeftClick;
+		}
+		else if ((uint32_t)screenX >= cnv->w - zoneWidth) {
+			touch->click = true;
+			if (zoneP)
+				*zoneP = UiGamepadTouchZoneRightClick;
+		}
+	}
+	return true;
+}
+
+static bool uiPrvGamepadTouchChanged(const struct UsbHidGamepadTouch *cur, const struct UsbHidGamepadTouch *prev)
+{
+	return cur->active != prev->active ||
+		cur->click != prev->click ||
+		cur->x != prev->x ||
+		cur->y != prev->y;
+}
+
+static const char *uiPrvGamepadTouchZoneName(enum UiGamepadTouchZone zone)
+{
+	switch (zone) {
+	case UiGamepadTouchZoneLeftClick:
+		return "Left click";
+	case UiGamepadTouchZoneRightClick:
+		return "Right click";
+	case UiGamepadTouchZoneNone:
+	default:
+		return "";
+	}
+}
+
+static void uiPrvGamepadDraw(struct Canvas *cnv, enum UiGamepadProfile profile, uint_fast16_t uiKeys, const struct UiGamepadFeedback *feedback, const struct UsbHidGamepadTouch *touch, enum UiGamepadTouchZone touchZone)
+{
+	char msg[64];
+	uint_fast8_t keys = (uint_fast8_t)uiKeys;
+
+	uiPrvSetHeaderTitle("USB Gamepad");
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+	uiPrvDrawTruncText(cnv, uiPrvContentTop(cnv), 10, cnv->w - 20, uiPrvGamepadProfileName(profile));
+	uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "USB connected", -1);
+	(void)sprintf(msg, "Hat %u Buttons %08x", (unsigned)uiPrvGamepadHat(keys), (unsigned)uiPrvGamepadButtons(uiKeys));
+	uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 2), 10, cnv->w - 20, msg);
+	(void)sprintf(msg, "Rumble L%03u R%03u", (unsigned)feedback->rumbleLeft, (unsigned)feedback->rumbleRight);
+	uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 3), 10, cnv->w - 20, msg);
+	if (profile == UiGamepadProfilePs4) {
+		if (touch->active)
+			(void)sprintf(msg, "Touch %04u,%03u %s", (unsigned)touch->x, (unsigned)touch->y, uiPrvGamepadTouchZoneName(touchZone));
+		else
+			(void)strcpy(msg, "Touch up");
+		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 4), 10, cnv->w - 20, msg);
+	}
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold Home = Exit", -1);
+}
+
+static void uiPrvGamepadTool(struct Canvas *cnv)
+{
+	enum UiGamepadProfile profile;
+	struct Settings ledSettings;
+	struct UiGamepadFeedback feedback;
+	struct UsbHidGamepadTouch touch = {0}, prevTouch = {0};
+	enum UiGamepadTouchZone touchZone = UiGamepadTouchZoneNone, prevTouchZone = UiGamepadTouchZoneNone;
+	uint_fast16_t prevUiKeys = 0xffff;
+	uint_fast8_t prevKeys = 0xff;
+	uint64_t lastDraw = 0, lastReport = 0, lastFeedback = 0, pingEndTicks = 0, homeHoldStart = 0;
+	uint_fast8_t audioVolume;
+	uint32_t lastPingSeq = 0;
+	bool reportsEnabled = false, failed = false;
+
+	uiPrvSetHeaderTitle("USB Gamepad");
+	if (!uiPrvGamepadChooseProfile(cnv, &profile))
+		return;
+	settingsGet(&ledSettings);
+	audioVolume = audioPwmGetVolume();
+	badgeLedsOverrideRgb(0, 0, 0);
+
+	if (!uiPrvGamepadStart(profile)) {
+		char msg[96];
+
+		uiPrvGamepadRestoreFeedback(&ledSettings, audioVolume);
+		(void)sprintf(msg, "USB Gamepad failed to start\n%s", uiPrvGamepadLastError(profile));
+		uiAlert(cnv, msg, DialogTypeOk);
+		return;
+	}
+	if (!uiPrvGamepadWaitReady(cnv, profile)) {
+		uiPrvGamepadEnd(profile);
+		uiPrvGamepadRestoreFeedback(&ledSettings, audioVolume);
+		if (!uiPrvToolExitRequested())
+			uiAlert(cnv, "USB Gamepad failed to enumerate", DialogTypeOk);
+		uiPrvWaitKeysReleased();
+		return;
+	}
+	uiPrvGamepadSetReportsEnabled(profile, true);
+	reportsEnabled = true;
+	uiPrvWaitKeysReleased();
+	uiPrvGamepadReadFeedback(profile, &feedback);
+	lastPingSeq = feedback.pingSeq;
+
+	while (!uiPrvToolExitRequested()) {
+		uint64_t now = getTime();
+		uint_fast16_t uiKeys = uiGetUiKeysRaw();
+		uint_fast8_t keys = (uint_fast8_t)uiKeys;
+		uint8_t hat = uiPrvGamepadHat(keys);
+		uint32_t buttons = uiPrvGamepadButtons(uiKeys);
+
+		(void)uiPrvGamepadReadTouch(cnv, profile, &touch, &touchZone);
+		uiPrvGamepadTask(profile);
+		uiPrvRefreshHeaderClock(cnv);
+		if (uiKeys & UI_KEY_BIT_CENTER) {
+			if (!homeHoldStart)
+				homeHoldStart = now;
+			else if (now - homeHoldStart >= USB_GAMEPAD_HOME_EXIT_TICKS) {
+				uiPrvRequestToolExit();
+				break;
+			}
+		}
+		else
+			homeHoldStart = 0;
+		if (keys != prevKeys || uiKeys != prevUiKeys || touchZone != prevTouchZone ||
+				uiPrvGamepadTouchChanged(&touch, &prevTouch) || !lastReport ||
+				now - lastReport >= USB_GAMEPAD_REPORT_INTERVAL_TICKS) {
+			if (!uiPrvGamepadSendReport(profile, hat, buttons, &touch)) {
+				failed = true;
+				break;
+			}
+			prevKeys = keys;
+			prevUiKeys = uiKeys;
+			prevTouch = touch;
+			prevTouchZone = touchZone;
+			lastReport = now;
+		}
+		if (!lastFeedback || now - lastFeedback >= USB_GAMEPAD_FEEDBACK_INTERVAL_TICKS) {
+			uiPrvGamepadReadFeedback(profile, &feedback);
+			uiPrvGamepadApplyFeedbackLeds(&feedback);
+			uiPrvGamepadUpdatePing(&feedback, &lastPingSeq, &pingEndTicks, audioVolume);
+			lastFeedback = now;
+		}
+		else
+			uiPrvGamepadUpdatePing(&feedback, &lastPingSeq, &pingEndTicks, audioVolume);
+		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvGamepadDraw(cnv, profile, uiKeys, &feedback, &touch, touchZone);
+			lastDraw = now;
+		}
+	}
+
+	if (reportsEnabled) {
+		uiPrvGamepadReleaseAll(profile);
+		uiPrvGamepadSetReportsEnabled(profile, false);
+	}
+	uiPrvGamepadEnd(profile);
+	uiPrvGamepadRestoreFeedback(&ledSettings, audioVolume);
+	uiPrvWaitKeysReleased();
+	if (failed && !uiPrvToolExitRequested())
+		uiAlert(cnv, "USB Gamepad report failed", DialogTypeOk);
+}
+
 static bool uiPrvHaveValidRom(char *romNameOutP, enum RomColorSupport *romColorSupportP, uint32_t *ramSzExpectedP)
 {
 	const struct CartHeader *hdr = (const struct CartHeader*)QSPI_ROM_START;
@@ -7601,6 +8504,8 @@ enum UiToolId {
 	UiToolUsbStorage,
 	UiToolBadUsb,
 	UiToolHidTest,
+	UiToolAutoclicker,
+	UiToolGamepad,
 	UiToolMusic,
 	UiToolImage,
 	UiToolGame,
@@ -7618,6 +8523,8 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
 		case UiToolHidTest: return "USB Keyboard";
+		case UiToolAutoclicker: return "Autoclicker";
+		case UiToolGamepad: return "USB Gamepad";
 		case UiToolMusic: return "Music";
 		case UiToolImage: return "Image Viewer";
 		case UiToolGame:
@@ -7649,6 +8556,8 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 		case UiToolImage:
 		case UiToolUsbStorage:
 		case UiToolHidTest:
+		case UiToolAutoclicker:
+		case UiToolGamepad:
 		case UiToolSettings:
 		case UiToolPowerOff:
 		default:
@@ -7658,7 +8567,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 
 static void uiPrvEnterTool(enum UiToolId tool)
 {
-	if (tool == UiToolBadUsb || tool == UiToolHidTest)
+	if (tool == UiToolBadUsb || tool == UiToolHidTest || tool == UiToolAutoclicker || tool == UiToolGamepad)
 		audioPwmStop();
 	bootGuardEnter(uiPrvBootGuardModeForTool(tool));
 }
@@ -7667,6 +8576,8 @@ static void uiPrvExitTool(enum UiToolId tool)
 {
 	usbHidReleaseAll();
 	usbHidSetReportsEnabled(false);
+	usbXinputSetReportsEnabled(false);
+	usbXinputEnd();
 #ifndef NO_SD_CARD
 	usbMscEnd();
 #endif
@@ -7936,6 +8847,8 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolUsbStorage] = "USB Storage",
 		[UiToolBadUsb] = "BadUSB",
 		[UiToolHidTest] = "USB Keyboard",
+		[UiToolAutoclicker] = "Autoclicker",
+		[UiToolGamepad] = "USB Gamepad",
 		[UiToolMusic] = "Music",
 		[UiToolImage] = "Image Viewer",
 		[UiToolGame] = "Emulation",
@@ -7948,6 +8861,8 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		UiToolUsbStorage,
 		UiToolBadUsb,
 		UiToolHidTest,
+		UiToolAutoclicker,
+		UiToolGamepad,
 		UiToolMusic,
 		UiToolImage,
 		UiToolGame,
@@ -8259,6 +9174,30 @@ int uiDcAppRunBadUsb(const struct DcAppHostApi *host, const struct DcAppRunArgs 
 	}
 	if (args->toolAction == DcAppToolActionBadUsbFile && args->vol && args->locator && args->name) {
 		(void)uiPrvRunBadUsbLocator(args->canvas, args->vol, args->locator, args->name);
+		return 0;
+	}
+	return -1;
+}
+
+int uiDcAppRunAutoclicker(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	if (args->toolAction == DcAppToolActionMain) {
+		uiPrvAutoclickerTool(args->canvas);
+		return 0;
+	}
+	return -1;
+}
+
+int uiDcAppRunGamepad(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
+{
+	(void)host;
+	if (!args || !args->canvas)
+		return -1;
+	if (args->toolAction == DcAppToolActionMain) {
+		uiPrvGamepadTool(args->canvas);
 		return 0;
 	}
 	return -1;
@@ -8647,6 +9586,26 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				uiPrvEnterTool(activeTool);
 				uiPrvUsbKeyboardTool(cnv);
 				uiPrvExitTool(activeTool);
+				break;
+
+			case UiToolAutoclicker:
+			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolAutoclicker, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+				uiPrvExitTool(activeTool);
+			#else
+				uiAlert(cnv, "Autoclicker requires SD card support", DialogTypeOk);
+			#endif
+				break;
+
+			case UiToolGamepad:
+			#ifndef NO_SD_CARD
+				uiPrvEnterTool(activeTool);
+				(void)uiPrvRunSdApp(cnv, DcAppIdToolGamepad, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+				uiPrvExitTool(activeTool);
+			#else
+				uiAlert(cnv, "USB Gamepad requires SD card support", DialogTypeOk);
+			#endif
 				break;
 
 			case UiToolMusic:

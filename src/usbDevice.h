@@ -8,6 +8,14 @@ enum UsbDeviceMode {
 	UsbDeviceModeNone,
 	UsbDeviceModeHid,
 	UsbDeviceModeMsc,
+	UsbDeviceModeXinput,
+};
+
+enum UsbDeviceHidReportSet {
+	UsbDeviceHidReportSetKeyboard,
+	UsbDeviceHidReportSetKeyboardMouseConsumer,
+	UsbDeviceHidReportSetMouse,
+	UsbDeviceHidReportSetGamepad,
 };
 
 struct UsbDeviceInfo {
@@ -15,6 +23,7 @@ struct UsbDeviceInfo {
 	uint16_t pid;
 	char manufacturer[32];
 	char product[32];
+	enum UsbDeviceHidReportSet hidReportSet;
 };
 
 bool usbDevicePrepare(void);

@@ -57,7 +57,7 @@ ROM_PLACEHOLDER_DIRS = {
     "GBC": "Game Boy Color",
     "NES": "Nintendo Entertainment System",
 }
-APP_BINARIES = ("gb.DC32", "nes.DC32", "arduboy.DC32", "ir.DC32", "image.DC32", "music.DC32", "badusb.DC32")
+APP_BINARIES = ("gb.DC32", "nes.DC32", "arduboy.DC32", "ir.DC32", "image.DC32", "music.DC32", "badusb.DC32", "autoclicker.DC32", "gamepad.DC32")
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
 SKIP_SUFFIXES = {".pyc", ".tmp"}

@@ -8,6 +8,7 @@
 const char* badgeLedsModeName(uint_fast8_t mode);
 const char* badgeLedsColorName(uint_fast8_t color);
 void badgeLedsApplySettings(const struct Settings *settings, bool force);
+void badgeLedsOverrideRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue);
 void badgeLedsTick(void);
 void badgeLedsGameWrite(void);
 

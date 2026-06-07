@@ -27,6 +27,13 @@ enum LedColor {
 	LedColorNumColors,
 };
 
+enum AutoclickerButton {
+	AutoclickerButtonLeft,
+	AutoclickerButtonRight,
+	AutoclickerButtonMiddle,
+	AutoclickerButtonNumButtons,
+};
+
 struct Settings {
 	uint8_t actLikeGBC	:	1;
 	uint8_t speed		:	2;
@@ -47,6 +54,13 @@ struct Settings {
 	uint8_t musicLoopTrack	:	1;
 	uint8_t ledColor		:	2;
 	uint8_t reserved		:	1;
+
+	uint16_t badUsbVid;
+	uint16_t badUsbPid;
+	char badUsbManufacturer[32];
+	char badUsbProduct[32];
+	uint8_t autoclickerButton	:	2;
+	uint8_t autoclickerCps		:	6;
 };
 
 

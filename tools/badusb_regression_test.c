@@ -20,7 +20,7 @@ struct FatfsFil {
 };
 
 static uint64_t mNow;
-static uint32_t mUsbBegins, mUsbEnds, mUsbDrops, mReports, mReportEnables, mReportDisables, mReleaseAlls, mSawStart, mSawDone, mSawError, mEofReads;
+static uint32_t mUsbBegins, mUsbEnds, mUsbDrops, mReports, mMouseReports, mConsumerReports, mGamepadReports, mReportEnables, mReportDisables, mReleaseAlls, mSawStart, mSawDone, mSawError, mEofReads;
 static bool mUsbStarted, mReportsEnabled;
 
 static void resetHarness(void)
@@ -30,6 +30,9 @@ static void resetHarness(void)
 	mUsbEnds = 0;
 	mUsbDrops = 0;
 	mReports = 0;
+	mMouseReports = 0;
+	mConsumerReports = 0;
+	mGamepadReports = 0;
 	mReportEnables = 0;
 	mReportDisables = 0;
 	mReleaseAlls = 0;
@@ -74,6 +77,12 @@ bool usbHidBegin(const struct UsbHidDeviceInfo *info)
 	return true;
 }
 
+bool usbHidBeginReportSet(const struct UsbHidDeviceInfo *info, enum UsbHidReportSet reportSet)
+{
+	(void)reportSet;
+	return usbHidBegin(info);
+}
+
 void usbHidTask(void)
 {
 }
@@ -109,6 +118,44 @@ bool usbHidKeyboardReport(uint8_t modifiers, const uint8_t keys[6])
 	if (!mReportsEnabled)
 		return false;
 	mReports++;
+	return true;
+}
+
+bool usbHidMouseReport(uint8_t buttons, int8_t x, int8_t y, int8_t wheel, int8_t pan)
+{
+	(void)buttons;
+	(void)x;
+	(void)y;
+	(void)wheel;
+	(void)pan;
+	if (!mReportsEnabled)
+		return false;
+	mMouseReports++;
+	return true;
+}
+
+bool usbHidConsumerReport(uint16_t usage)
+{
+	(void)usage;
+	if (!mReportsEnabled)
+		return false;
+	mConsumerReports++;
+	return true;
+}
+
+bool usbHidGamepadReport(int8_t x, int8_t y, int8_t z, int8_t rz, int8_t rx, int8_t ry, uint8_t hat, uint32_t buttons)
+{
+	(void)x;
+	(void)y;
+	(void)z;
+	(void)rz;
+	(void)rx;
+	(void)ry;
+	(void)hat;
+	(void)buttons;
+	if (!mReportsEnabled)
+		return false;
+	mGamepadReports++;
 	return true;
 }
 
@@ -300,6 +347,74 @@ static bool runUsbFirstBuffer(const char *name, const char *data, uint32_t size)
 	return true;
 }
 
+static bool runMouseMediaBuffer(const char *name, const char *data, uint32_t size, uint32_t expectedMouseReports, uint32_t expectedConsumerReports)
+{
+	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
+	struct UsbHidDeviceInfo info;
+	struct BadUsbScratch scratch;
+	enum BadUsbResult ret;
+
+	resetHarness();
+	if (!badUsbReadDeviceInfoWithScratch(&fil, &info, &scratch, sizeof(scratch))) {
+		fprintf(stderr, "FAIL: %s failed to read HID info\n", name);
+		return false;
+	}
+	if (!usbHidBeginReportSet(&info, UsbHidReportSetKeyboardMouseConsumer)) {
+		fprintf(stderr, "FAIL: %s USB begin failed\n", name);
+		return false;
+	}
+	usbHidSetReportsEnabled(true);
+	mSawStart++;
+	ret = badUsbRunPreparedFileWithScratch(&fil, NULL, badusbStatus, badusbWaitButton, NULL, &scratch, sizeof(scratch));
+	usbHidDropNow();
+	if (ret != BadUsbResultDone || mSawError) {
+		fprintf(stderr, "FAIL: %s did not finish cleanly (ret=%d)\n", name, ret);
+		return false;
+	}
+	if (mMouseReports != expectedMouseReports || mConsumerReports != expectedConsumerReports) {
+		fprintf(stderr, "FAIL: %s expected mouse=%u consumer=%u got mouse=%u consumer=%u\n",
+			name, (unsigned)expectedMouseReports, (unsigned)expectedConsumerReports,
+			(unsigned)mMouseReports, (unsigned)mConsumerReports);
+		return false;
+	}
+	printf("PASS: %s mouse=%u consumer=%u\n", name, (unsigned)mMouseReports, (unsigned)mConsumerReports);
+	return true;
+}
+
+static bool runDeviceDefaultBuffer(const char *name, const char *data, uint32_t size, bool hasId)
+{
+	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
+	struct UsbHidDeviceInfo defaults, info;
+	struct BadUsbScratch scratch;
+
+	memset(&defaults, 0, sizeof(defaults));
+	defaults.vid = 0x1111;
+	defaults.pid = 0x2222;
+	strcpy(defaults.manufacturer, "Default Maker");
+	strcpy(defaults.product, "Default Product");
+	resetHarness();
+	if (!badUsbReadDeviceInfoWithDefaultScratch(&fil, &defaults, &info, &scratch, sizeof(scratch))) {
+		fprintf(stderr, "FAIL: %s failed to read HID info with defaults\n", name);
+		return false;
+	}
+	if (hasId) {
+		if (info.vid != 0x1209 || info.pid != 0xdc32 || strcmp(info.manufacturer, "Unit Maker") || strcmp(info.product, "Unit Product")) {
+			fprintf(stderr, "FAIL: %s did not let ID override defaults\n", name);
+			return false;
+		}
+	}
+	else if (info.vid != defaults.vid || info.pid != defaults.pid || strcmp(info.manufacturer, defaults.manufacturer) || strcmp(info.product, defaults.product)) {
+		fprintf(stderr, "FAIL: %s did not keep configured defaults\n", name);
+		return false;
+	}
+	if (mUsbBegins || mReports || mMouseReports || mConsumerReports) {
+		fprintf(stderr, "FAIL: %s touched USB during HID info scan\n", name);
+		return false;
+	}
+	printf("PASS: %s default ID precedence\n", name);
+	return true;
+}
+
 static bool failDuringUsbFirstRunBuffer(const char *name, const char *data, uint32_t size, enum BadUsbResult expected)
 {
 	struct FatfsFil fil = {.data = data, .size = size, .pos = 0};
@@ -373,6 +488,21 @@ int main(void)
 	static const char malformedCommandScript[] =
 		"GUI r\n"
 		"NOT_A_REAL_KEY\n";
+	static const char malformedMouseScript[] =
+		"MOUSEMOVE 10\n";
+	static const char malformedMediaScript[] =
+		"MEDIA NO_SUCH_KEY\n";
+	static const char mouseMediaScript[] =
+		"MOUSEMOVE 300 -260\n"
+		"MOUSESCROLL -300\n"
+		"LEFTCLICK\n"
+		"HOLD LEFTCLICK\n"
+		"RELEASE LEFT_CLICK\n"
+		"RIGHT_CLICK\n"
+		"MEDIA PLAY_PAUSE\n";
+	static const char defaultIdScript[] =
+		"REM no ID here\n"
+		"STRING hi\n";
 	static const char usbFirstValidScript[] =
 		"ID 1209:DC32 Unit Maker:Unit Product\n"
 		"REM valid USB-first EOF path\n"
@@ -394,11 +524,16 @@ int main(void)
 	firstLineTooLongScript[sizeof(firstLineTooLongScript) - 2] = '\n';
 	firstLineTooLongScript[sizeof(firstLineTooLongScript) - 1] = 0;
 	ok = runScriptBuffer("embedded long-line script", longLineScript, sizeof(longLineScript) - 1) && ok;
+	ok = runMouseMediaBuffer("mouse/media script", mouseMediaScript, sizeof(mouseMediaScript) - 1, 12, 2) && ok;
+	ok = runDeviceDefaultBuffer("configured default HID info", defaultIdScript, sizeof(defaultIdScript) - 1, false) && ok;
+	ok = runDeviceDefaultBuffer("script ID override HID info", usbFirstValidScript, sizeof(usbFirstValidScript) - 1, true) && ok;
 	ok = runUsbFirstBuffer("valid USB-first script", usbFirstValidScript, sizeof(usbFirstValidScript) - 1) && ok;
 	ok = runUsbFirstBuffer("valid USB-first script without final newline", usbFirstValidNoFinalNewlineScript, sizeof(usbFirstValidNoFinalNewlineScript) - 1) && ok;
 	ok = failDuringUsbFirstRunBuffer("overlong line script", tooLongLineScript, sizeof(tooLongLineScript) - 1, BadUsbResultDecodeError) && ok;
 	ok = failDuringUsbFirstRunBuffer("overlong first line script", firstLineTooLongScript, sizeof(firstLineTooLongScript) - 1, BadUsbResultDecodeError) && ok;
 	ok = failDuringUsbFirstRunBuffer("malformed command script", malformedCommandScript, sizeof(malformedCommandScript) - 1, BadUsbResultDecodeError) && ok;
+	ok = failDuringUsbFirstRunBuffer("malformed mouse script", malformedMouseScript, sizeof(malformedMouseScript) - 1, BadUsbResultDecodeError) && ok;
+	ok = failDuringUsbFirstRunBuffer("malformed media script", malformedMediaScript, sizeof(malformedMediaScript) - 1, BadUsbResultDecodeError) && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/Hacker_Typer.txt") && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/RickRoll_YT_Win.txt") && ok;
 	ok = runScriptFile("C:/Users/mrnic/Desktop/badusb/GoodUSB.txt") && ok;

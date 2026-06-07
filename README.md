@@ -1,20 +1,21 @@
 # DC32 Custom Firmware
 
-`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES and classic Arduboy support, an SD-card file browser, USB microSD storage mode, Universal IR tools, BadUSB scripting, an RTTTL music player, LED controls, settings persistence, and badge hardware bring-up code.
+`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES and classic Arduboy support, an SD-card file browser, USB microSD storage mode, Universal IR tools, BadUSB scripting, USB HID utility apps, an RTTTL music player, LED controls, settings persistence, and badge hardware bring-up code.
 
 The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, USB Keyboard, Music, Game, Settings, and Power Off entries. USB Keyboard exposes a scrollable launcher for common keyboard keys and shortcut chords while mouse/composite HID work remains out of scope.
+- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, USB Keyboard, Autoclicker, USB Gamepad, Music, Game, Settings, and Power Off entries. USB Keyboard exposes a scrollable launcher for common keyboard keys and shortcut chords.
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.hex`, `.arduboy`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
 - **Arduboy compatibility runtime** - Loads classic Arduboy `.hex` files and `.arduboy` packages from SD, runs them through the default Ardens-derived ATmega32u4 runtime with SSD1306, button, and EEPROM handling, renders the 128x64 monochrome display, and persists the 1 KiB EEPROM through the existing save flow. Arduboy FX flash/cart packages are not supported yet. Arduboy audio is disabled for v1 and no speaker-pin callbacks, synthesis, mixers, tone queues, or PWM updates are run by the Arduboy runtime.
 - **Game loading and saves** - Loads games from `/ROMS` or the browser, confirms ROM metadata before flashing/loading, stores the selected game path/runtime in flash, imports saves from `/SAVE`, and exports the current save as `/SAVE/<rom base>.sav` from the emulator menu, exit, and switch-game paths.
 - **Universal IR** - Supports Flipper-style `.ir` signal/library files and the older `DC32IR1` format. Built-in universal remote categories look for Momentum universal IR files in `/IR`; browser actions can send a selected button, Power, or Mute. The IR sender supports raw records plus parsed NEC/NECext/NEC42/Samsung32/RC5/RC6/SIRC variants with bounded repeat, carrier, and raw duration validation.
-- **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand boot-compatible USB HID keyboard. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, and optional first-line USB VID/PID/product overrides with `ID`.
+- **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand USB HID keyboard/mouse/consumer-control device. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, Flipper-style `MEDIA`, mouse click/move/scroll commands, and optional first-line USB VID/PID/product overrides with `ID`. Default BadUSB VID/PID/manufacturer/product values are editable in Settings > USB.
+- **USB utility apps** - Autoclicker exposes a configurable USB mouse clicker with button and Clicks /s settings. USB Gamepad offers PS4/DualShock 4 HID and Xbox 360/XUSB-style profiles so Steam can identify the badge as a known controller while mapping the badge D-pad, A, B, Select, Start, and FN/Home buttons. PS4 mode also maps the badge touchscreen to the DualShock 4 touchpad, with lower-left and lower-right screen zones acting as touchpad click zones. Hold FN/Home to exit the app; the hardware reset button is not firmware-readable as a controller input. Host rumble feedback drives the badge LEDs while the app is active, and controller ping feedback chirps the speaker.
 - **USB Storage** - Exposes the full microSD card to a host computer as a standalone USB Mass Storage device. Eject or unmount from the host before leaving the tool; other SD-card tools are unavailable while storage mode is active.
 - **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
 - **LED controls** - Drives the badge WS2812 LEDs with off, all-on, rainbow, pulse, traveling dot, random, rear-on, front-on, and reactive input patterns. Color modes include custom RGB, rainbow, flame, and random, with speed and brightness controls.
@@ -35,6 +36,7 @@ The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://g
 | Classic Arduboy loading from SD | No | Yes |
 | USB microSD storage mode | No | Yes |
 | BadUSB scripting | No | Yes |
+| Autoclicker and USB Gamepad tools | No | Yes |
 | RTTTL music player | No | Yes |
 | Universal IR tools | No | Yes |
 | Expanded LED pattern/color settings | No | Yes |
@@ -50,7 +52,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
-| `/APPS` | SD-loaded app binaries built by this repo, including emulators plus IR, BadUSB, Music, and Image Viewer. |
+| `/APPS` | SD-loaded app binaries built by this repo, including emulators plus IR, BadUSB, Autoclicker, USB Gamepad, Music, and Image Viewer. |
 | `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
@@ -91,8 +93,8 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `third_party/simavr/` | Vendored simavr core and SSD1306 virtual display pieces kept for the experimental simavr Arduboy runtime. |
 | `src/dispDefcon.c` | LCD driver, framebuffer, PIO program loading, DMA management, brightness, and framerate handling. |
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
-| `src/dcApp.c`, `src/apps/` | Resident SD app loader plus app entry wrappers for emulators, IR, BadUSB, Music, and Image Viewer. |
-| `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard-only HID, and the SD-loaded BadUSB interpreter. |
+| `src/dcApp.c`, `src/apps/` | Resident SD app loader plus app entry wrappers for emulators, IR, BadUSB, Autoclicker, USB Gamepad, Music, and Image Viewer. |
+| `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard/mouse/media/gamepad HID, XUSB-style Xbox 360 gamepad, and the SD-loaded BadUSB interpreter. |
 | `src/irRemote.c`, `src/pioIrdaSIR.c` | SD-loaded IR transmitter support and badge IRDA setup. |
 | `src/rtttlPlayer.c`, `src/audioPwm.c` | SD-loaded RTTTL parsing/playback and resident PWM audio output. |
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
@@ -169,7 +171,7 @@ Adjust the programmer command, permissions, or path for your setup.
 - The ProjectABE-inspired hybrid compatibility runtime and the older Arduous/simavr-derived runtime are kept as experimental build options. Configure with `-DARDUBOY_HYBRID_EXPERIMENTAL=ON` or `-DARDUBOY_SIMAVR_EXPERIMENTAL=ON` to build one of them instead of the default Ardens path.
 - Arduboy implementation references include [Ardens](https://github.com/tiberiusbrown/ardens), [Arduous](https://github.com/libretro/arduous), [simavr](https://github.com/buserror/simavr), [ProjectABE](https://github.com/felipemanga/ProjectABE), [Arduboy2](https://github.com/MLXXXp/Arduboy2), Arduboy Cloud, ESPboy Arduboy2, RP2040-GB, Pico-GB, the Pico SDK, and `arduino-pico`. The default Ardens-derived path is MIT licensed; the experimental simavr path still carries GPLv3 licensing implications if it is enabled.
 - USB Storage exposes the raw microSD card as a read-write Mass Storage device when the dedicated tool is active. Eject/unmount from the host before exiting the tool or unplugging the badge.
-- The USB HID implementation is keyboard-only and attaches only while BadUSB or USB Keyboard is running. BadUSB mouse/media behavior, AutoClicker output, and true consumer-page media keys are not available in this build.
+- USB devices attach only while the matching USB tool is running. BadUSB uses keyboard, mouse, and consumer-control reports; Autoclicker uses mouse reports; USB Gamepad can start as either a DualShock 4-style HID controller or an Xbox 360/XUSB-style controller. Gamepad rumble feedback temporarily overrides the badge LEDs and is restored on app exit.
 
 ## Support and contributions
 

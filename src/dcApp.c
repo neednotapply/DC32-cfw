@@ -115,6 +115,10 @@ static const char *dcAppPrvRuntimePath(uint32_t runtime)
 		return "/APPS/music.DC32";
 	case DcAppIdToolBadUsb:
 		return "/APPS/badusb.DC32";
+	case DcAppIdToolAutoclicker:
+		return "/APPS/autoclicker.DC32";
+	case DcAppIdToolGamepad:
+		return "/APPS/gamepad.DC32";
 	case GameRuntimeNone:
 		break;
 	}
@@ -138,6 +142,10 @@ static const char *dcAppPrvRuntimeName(uint32_t runtime)
 		return "Music";
 	case DcAppIdToolBadUsb:
 		return "BadUSB";
+	case DcAppIdToolAutoclicker:
+		return "Autoclicker";
+	case DcAppIdToolGamepad:
+		return "USB Gamepad";
 	case GameRuntimeNone:
 		break;
 	}

@@ -483,6 +483,12 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force)
 	}
 }
 
+void badgeLedsOverrideRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
+{
+	ws2812SetAllRgb(red, green, blue);
+	ws2812refresh();
+}
+
 void badgeLedsTick(void)
 {
 	uint64_t now;

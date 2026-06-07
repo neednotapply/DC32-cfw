@@ -118,10 +118,12 @@ add_executable(${APP}
     ${SRC_DIR}/usbDevice.c
     ${SRC_DIR}/usbHid.c
     ${SRC_DIR}/usbMsc.c
+    ${SRC_DIR}/usbXinput.c
     ${SRC_DIR}/utf.c
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
+    ${TINYUSB_DIR}/src/class/vendor/vendor_device.c
     ${TINYUSB_DIR}/src/common/tusb_fifo.c
     ${TINYUSB_DIR}/src/device/usbd.c
     ${TINYUSB_DIR}/src/device/usbd_control.c
@@ -255,6 +257,7 @@ set_source_files_properties(
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
+    ${TINYUSB_DIR}/src/class/vendor/vendor_device.c
     ${TINYUSB_DIR}/src/common/tusb_fifo.c
     ${TINYUSB_DIR}/src/device/usbd.c
     ${TINYUSB_DIR}/src/device/usbd_control.c
@@ -271,6 +274,10 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=accessFail
     -Wl,--undefined=arduboyPortInGameMenu
     -Wl,--undefined=audioPwmSetVolume
+    -Wl,--undefined=audioPwmGetVolume
+    -Wl,--undefined=audioPwmStop
+    -Wl,--undefined=audioPwmTone
+    -Wl,--undefined=badgeLedsOverrideRgb
     -Wl,--undefined=dispSetFramerate
     -Wl,--undefined=dispPrvWaitForScanoutStart
     -Wl,--undefined=gbDrawLine
@@ -282,7 +289,23 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=gbExtraIoRegRead
     -Wl,--undefined=gbExtraIoRegWrite
     -Wl,--undefined=nesPortInGameMenu
+    -Wl,--undefined=usbHidBeginReportSet
+    -Wl,--undefined=usbHidConsumerReport
     -Wl,--undefined=usbHidDropNow
+    -Wl,--undefined=usbHidGamepadReport
+    -Wl,--undefined=usbHidGamepadReportTouch
+    -Wl,--undefined=usbHidGamepadFeedback
+    -Wl,--undefined=usbHidMouseReport
+    -Wl,--undefined=usbXinputBegin
+    -Wl,--undefined=usbXinputEnd
+    -Wl,--undefined=usbXinputFeedback
+    -Wl,--undefined=usbXinputLastError
+    -Wl,--undefined=usbXinputReady
+    -Wl,--undefined=usbXinputReleaseAll
+    -Wl,--undefined=usbXinputReport
+    -Wl,--undefined=usbXinputSetReportsEnabled
+    -Wl,--undefined=usbXinputStarted
+    -Wl,--undefined=usbXinputTask
     -Wl,-T${LINKER_SCRIPT}
     -mthumb
     -mcpu=cortex-m33
@@ -417,4 +440,14 @@ add_dcapp(dcapp_badusb badusb 103
     ${SRC_DIR}/apps/badusb_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/badUsb.c
+)
+
+add_dcapp(dcapp_autoclicker autoclicker 104
+    ${SRC_DIR}/apps/autoclicker_app.c
+    ${SRC_DIR}/ui.c
+)
+
+add_dcapp(dcapp_gamepad gamepad 105
+    ${SRC_DIR}/apps/gamepad_app.c
+    ${SRC_DIR}/ui.c
 )

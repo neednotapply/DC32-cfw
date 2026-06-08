@@ -22,6 +22,27 @@ static struct ToolWorkspaceSpan mActiveScratch;
 static bool mActiveScratchValid;
 static char mLastError[128];
 
+static const struct DcAppCatalogEntry mDcAppCatalog[] = {
+	{DcAppIdGameGb, "Game Boy", "/APPS/gb.DC32", false},
+	{DcAppIdGameNes, "NES", "/APPS/nes.DC32", false},
+	{DcAppIdGameArduboy, "Arduboy", "/APPS/arduboy.DC32", false},
+	{DcAppIdToolIr, "Universal IR", "/APPS/ir.DC32", false},
+	{DcAppIdToolImage, "Image Viewer", "/APPS/image.DC32", false},
+	{DcAppIdToolMusic, "Music", "/APPS/music.DC32", false},
+	{DcAppIdToolBadUsb, "BadUSB", "/APPS/badusb.DC32", false},
+	{DcAppIdToolAutoclicker, "Autoclicker", "/APPS/autoclicker.DC32", false},
+	{DcAppIdToolGamepad, "USB Gamepad", "/APPS/gamepad.DC32", false},
+	{DcAppIdPong, "Pong", "/APPS/pong.DC32", true},
+	{DcAppIdTetris, "Tetris", "/APPS/tetris.DC32", true},
+	{DcAppIdArkanoid, "Arkanoid", "/APPS/arkanoid.DC32", true},
+	{DcAppIdFlappy, "Flappy Bird", "/APPS/flappy.DC32", true},
+	{DcAppIdLabyrinth, "Labyrinth", "/APPS/labyrinth.DC32", true},
+	{DcAppIdTrex, "T-Rex Runner", "/APPS/trex.DC32", true},
+	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
+	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
+	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
+};
+
 static void *dcAppPrvDisplayFb(void)
 {
 	return dispGetFb();
@@ -65,6 +86,23 @@ static enum DcAppResult dcAppPrvFail(enum DcAppResult result, const char *msg)
 	return result;
 }
 
+const struct DcAppCatalogEntry *dcAppCatalogEntries(uint_fast8_t *countP)
+{
+	if (countP)
+		*countP = sizeof(mDcAppCatalog) / sizeof(*mDcAppCatalog);
+	return mDcAppCatalog;
+}
+
+const struct DcAppCatalogEntry *dcAppCatalogFind(uint32_t appId)
+{
+	uint_fast8_t i;
+
+	for (i = 0; i < sizeof(mDcAppCatalog) / sizeof(*mDcAppCatalog); i++)
+		if ((uint32_t)mDcAppCatalog[i].appId == appId)
+			return &mDcAppCatalog[i];
+	return NULL;
+}
+
 const char *dcAppLastError(void)
 {
 	return mLastError;
@@ -100,56 +138,16 @@ const char *dcAppResultName(enum DcAppResult result)
 
 static const char *dcAppPrvRuntimePath(uint32_t runtime)
 {
-	switch (runtime) {
-	case GameRuntimeGb:
-		return "/APPS/gb.DC32";
-	case GameRuntimeNes:
-		return "/APPS/nes.DC32";
-	case GameRuntimeArduboy:
-		return "/APPS/arduboy.DC32";
-	case DcAppIdToolIr:
-		return "/APPS/ir.DC32";
-	case DcAppIdToolImage:
-		return "/APPS/image.DC32";
-	case DcAppIdToolMusic:
-		return "/APPS/music.DC32";
-	case DcAppIdToolBadUsb:
-		return "/APPS/badusb.DC32";
-	case DcAppIdToolAutoclicker:
-		return "/APPS/autoclicker.DC32";
-	case DcAppIdToolGamepad:
-		return "/APPS/gamepad.DC32";
-	case GameRuntimeNone:
-		break;
-	}
-	return NULL;
+	const struct DcAppCatalogEntry *entry = dcAppCatalogFind(runtime);
+
+	return entry ? entry->path : NULL;
 }
 
 static const char *dcAppPrvRuntimeName(uint32_t runtime)
 {
-	switch (runtime) {
-	case GameRuntimeGb:
-			return "Game Boy";
-		case GameRuntimeNes:
-		return "NES";
-	case GameRuntimeArduboy:
-		return "Arduboy";
-	case DcAppIdToolIr:
-		return "Universal IR";
-	case DcAppIdToolImage:
-		return "Image Viewer";
-	case DcAppIdToolMusic:
-		return "Music";
-	case DcAppIdToolBadUsb:
-		return "BadUSB";
-	case DcAppIdToolAutoclicker:
-		return "Autoclicker";
-	case DcAppIdToolGamepad:
-		return "USB Gamepad";
-	case GameRuntimeNone:
-		break;
-	}
-	return "app";
+	const struct DcAppCatalogEntry *entry = dcAppCatalogFind(runtime);
+
+	return entry ? entry->name : "app";
 }
 
 static bool dcAppPrvDiskRead(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
@@ -183,6 +181,11 @@ static bool dcAppPrvReadExact(struct FatfsFil *fil, void *dst, uint32_t len)
 	uint32_t got = 0;
 
 	return fatfsFileRead(fil, dst, len, &got) && got == len;
+}
+
+static const struct DcAppImageHeader *dcAppPrvCachedHeader(void)
+{
+	return (const struct DcAppImageHeader*)flashUncachedPtr(QSPI_APP_CACHE_START);
 }
 
 static uint32_t dcAppPrvCrc32Update(uint32_t crc, const void *data, uint32_t len)
@@ -242,13 +245,61 @@ static enum DcAppResult dcAppPrvValidateHeader(const struct DcAppImageHeader *hd
 	return DcAppResultOk;
 }
 
-static bool dcAppPrvCachedBuildMatches(const struct DcAppImageHeader *wanted, uint32_t runtime)
+static bool dcAppPrvCachedHeaderLooksValid(const struct DcAppImageHeader *hdr)
 {
-	const struct DcAppImageHeader *cached = (const struct DcAppImageHeader*)QSPI_APP_CACHE_START;
+	if (!hdr || hdr->magic != DCAPP_MAGIC || hdr->headerSize != DCAPP_HEADER_SIZE)
+		return false;
+	if (hdr->abiVersion != DCAPP_ABI_VERSION)
+		return false;
+	if (hdr->loadAddr != QSPI_APP_CACHE_START ||
+			hdr->appRamStart != DCAPP_RAM_START ||
+			hdr->appRamSize != DCAPP_RAM_SIZE)
+		return false;
+	return hdr->imageSize > hdr->headerSize && hdr->imageSize <= QSPI_APP_CACHE_SIZE;
+}
+
+static uint32_t dcAppPrvCachedEraseSpan(uint32_t imageSize)
+{
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
+	uint32_t eraseSize = dcAppPrvAlignUp(imageSize, QSPI_ERASE_GRANULARITY);
+
+	if (dcAppPrvCachedHeaderLooksValid(cached)) {
+		uint32_t cachedEraseSize = dcAppPrvAlignUp(cached->imageSize, QSPI_ERASE_GRANULARITY);
+
+		if (eraseSize < cachedEraseSize)
+			eraseSize = cachedEraseSize;
+	}
+	else
+		eraseSize = QSPI_APP_CACHE_SIZE;
+	return eraseSize;
+}
+
+static uint32_t dcAppPrvCachedImageCrc32(const struct DcAppImageHeader *hdr)
+{
+	uint32_t crc = 0xffffffffu;
+
+	crc = dcAppPrvCrc32Update(crc, flashUncachedPtr(QSPI_APP_CACHE_START + hdr->headerSize),
+		hdr->imageSize - hdr->headerSize);
+	return crc ^ 0xffffffffu;
+}
+
+static bool dcAppPrvVerifyCachedImage(const struct DcAppImageHeader *wanted, uint32_t runtime)
+{
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
 
 	return dcAppPrvValidateHeader(cached, runtime) == DcAppResultOk &&
-		!memcmp(cached->buildId, wanted->buildId, sizeof(wanted->buildId));
+		!memcmp(cached, wanted, sizeof(*wanted)) &&
+		dcAppPrvCachedImageCrc32(cached) == cached->crc32;
 }
+
+static bool dcAppPrvCachedBuildMatches(const struct DcAppImageHeader *wanted, uint32_t runtime)
+{
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
+
+	return !memcmp(cached->buildId, wanted->buildId, sizeof(wanted->buildId)) &&
+		dcAppPrvVerifyCachedImage(wanted, runtime);
+}
+
 
 static bool dcAppPrvApplyAppRam(const struct DcAppImageHeader *hdr)
 {
@@ -279,6 +330,23 @@ static void dcAppPrvClearActiveRamContext(void)
 	mActiveScratch.ptr = NULL;
 	mActiveScratch.size = 0;
 	mActiveScratchValid = false;
+}
+
+static void dcAppPrvClearActiveCallbacks(void)
+{
+	mActiveAbort = NULL;
+	mActiveRefresh = NULL;
+}
+
+static void dcAppPrvClearActiveAppContext(void)
+{
+	dcAppPrvClearActiveCallbacks();
+	dcAppPrvClearActiveRamContext();
+}
+
+static void dcAppPrvSyncExecutableCache(void)
+{
+	flashSyncExecutableRange(QSPI_APP_CACHE_START, QSPI_APP_CACHE_SIZE);
 }
 
 static void dcAppPrvBeginActiveRamContext(const struct DcAppImageHeader *hdr)
@@ -321,6 +389,7 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 	enum DcAppResult result;
 
 	dcAppClearError();
+	dcAppPrvClearActiveAppContext();
 	if (!path)
 		return dcAppPrvFail(DcAppResultInvalid, "No app is registered for this game type");
 	if (!vol) {
@@ -356,7 +425,7 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		goto out;
 	}
 	if (dcAppPrvCachedBuildMatches(&hdr, runtime)) {
-		mLoadedHeader = *(const struct DcAppImageHeader*)QSPI_APP_CACHE_START;
+		mLoadedHeader = *dcAppPrvCachedHeader();
 		mLoadedRuntime = runtime;
 		result = DcAppResultOk;
 		goto out;
@@ -366,7 +435,7 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultReadError, "Cannot rewind app file");
 		goto out;
 	}
-	eraseSize = dcAppPrvAlignUp(hdr.imageSize, QSPI_ERASE_GRANULARITY);
+	eraseSize = dcAppPrvCachedEraseSpan(hdr.imageSize);
 	if (!flashWrite(QSPI_APP_CACHE_START, eraseSize, NULL, 0)) {
 		result = dcAppPrvFail(DcAppResultFlashError, "Cannot erase app cache");
 		goto out;
@@ -401,8 +470,13 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultInvalid, "App CRC check failed");
 		goto out;
 	}
+	if (!dcAppPrvVerifyCachedImage(&hdr, runtime)) {
+		result = dcAppPrvFail(DcAppResultFlashError, "App flash verify failed");
+		goto out;
+	}
+	dcAppPrvSyncExecutableCache();
 
-	mLoadedHeader = *(const struct DcAppImageHeader*)QSPI_APP_CACHE_START;
+	mLoadedHeader = *dcAppPrvCachedHeader();
 	mLoadedRuntime = runtime;
 	result = DcAppResultOk;
 
@@ -431,6 +505,8 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 
 	if (mLoadedRuntime != runtime || dcAppPrvValidateHeader(&mLoadedHeader, runtime) != DcAppResultOk)
 		return dcAppPrvFail(DcAppResultNoLoadedApp, "No compatible app is loaded");
+	dcAppPrvClearActiveAppContext();
+	dcAppPrvSyncExecutableCache();
 	if (!dcAppPrvApplyAppRam(&mLoadedHeader))
 		return dcAppPrvFail(DcAppResultInvalid, "Cannot initialize app RAM");
 
@@ -439,9 +515,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	mActiveAbort = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.abortOffset);
 	mActiveRefresh = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.refreshOffset);
 	ret = entry(&mHostApi, args);
-	dcAppPrvClearActiveRamContext();
-	mActiveAbort = NULL;
-	mActiveRefresh = NULL;
+	dcAppPrvClearActiveAppContext();
 	if (ret) {
 		dcAppPrvSetError("App returned an error");
 		return DcAppResultInvalid;

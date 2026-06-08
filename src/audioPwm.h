@@ -10,6 +10,11 @@
 void audioPwmSetVolume(uint_fast8_t volume);
 uint_fast8_t audioPwmGetVolume(void);
 bool audioPwmTone(uint32_t freq);
+bool audioPwmPcmStart(uint32_t sampleRate);
+bool audioPwmPcmCanWrite(void);
+bool audioPwmPcmWriteU8(uint8_t sample);
+void audioPwmPcmDrain(void);
+void audioPwmPcmStop(void);
 void audioPwmStop(void);
 
 #endif

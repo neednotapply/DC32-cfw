@@ -8,6 +8,7 @@
 #include "gb.h"
 #include "imageViewer.h"
 #include "memMap.h"
+#include "picojpeg.h"
 #include "qspi.h"
 #include "raster.h"
 #include "sd.h"
@@ -34,6 +35,8 @@
 #define DCA_BPP_INDEXED         8u
 #define DCA_CODEC_RAW           0u
 #define DCA_CODEC_RLE           1u
+#define IMAGE_DIRECT_MAX_W       2048u
+#define IMAGE_DIRECT_MAX_H       2048u
 
 struct ImageDciHeader {
 	uint32_t magic;
@@ -117,7 +120,9 @@ static bool imagePrvEndsWithNoCase(const char *str, const char *suffix)
 
 bool imageViewerFileName(const char *name)
 {
-	return imagePrvEndsWithNoCase(name, ".dci") || imagePrvEndsWithNoCase(name, ".dca");
+	return imagePrvEndsWithNoCase(name, ".dci") || imagePrvEndsWithNoCase(name, ".dca") ||
+		imagePrvEndsWithNoCase(name, ".jpg") || imagePrvEndsWithNoCase(name, ".jpeg") ||
+		imagePrvEndsWithNoCase(name, ".bmp");
 }
 
 static bool imagePrvReadExact(struct FatfsFil *fil, void *buf, uint32_t size)
@@ -345,6 +350,210 @@ static enum ImageViewerResult imagePrvRunDci1(struct Canvas *cnv, struct FatfsVo
 		ret = imagePrvShowDci1Static(cnv, fil);
 	fatfsFileClose(fil);
 	return ret;
+}
+
+static uint16_t imagePrvRgb555To565(uint16_t v)
+{
+	uint32_t r = (v >> 10) & 0x1fu;
+	uint32_t g = (v >> 5) & 0x1fu;
+	uint32_t b = v & 0x1fu;
+
+	return (uint16_t)(r << 11) | (uint16_t)(((g << 1) | (g >> 4)) << 5) | (uint16_t)b;
+}
+
+static uint16_t imagePrvReadLe16(const uint8_t *p)
+{
+	return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t imagePrvReadLe32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int32_t imagePrvReadLe32s(const uint8_t *p)
+{
+	return (int32_t)imagePrvReadLe32(p);
+}
+
+static enum ImageViewerResult imagePrvRunBmp(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator)
+{
+	struct FatfsFil *fil;
+	struct ToolWorkspaceSpan mem;
+	uint8_t header[54];
+	uint32_t dataOffset, dibSize, width, height, compression, rowStride;
+	uint16_t planes, bpp;
+	int32_t signedW, signedH;
+	bool topDown;
+	enum ImageViewerResult ret = ImageViewerResultDecodeError;
+	uint8_t *rowBuf;
+	struct RasterRect fit;
+
+	fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+	if (!fil)
+		return ImageViewerResultOpenError;
+	if (!imagePrvReadExact(fil, header, sizeof(header)))
+		goto out_file;
+	if (header[0] != 'B' || header[1] != 'M')
+		goto out_file;
+	dataOffset = imagePrvReadLe32(header + 10);
+	dibSize = imagePrvReadLe32(header + 14);
+	signedW = imagePrvReadLe32s(header + 18);
+	signedH = imagePrvReadLe32s(header + 22);
+	planes = imagePrvReadLe16(header + 26);
+	bpp = imagePrvReadLe16(header + 28);
+	compression = imagePrvReadLe32(header + 30);
+	if (dibSize < 40u || signedW <= 0 || signedH == 0 || planes != 1u || compression != 0u)
+		goto out_file;
+	width = (uint32_t)signedW;
+	topDown = signedH < 0;
+	height = (uint32_t)(topDown ? -signedH : signedH);
+	if (!width || !height || width > IMAGE_DIRECT_MAX_W || height > IMAGE_DIRECT_MAX_H ||
+			(bpp != 16u && bpp != 24u && bpp != 32u))
+		goto out_file;
+	rowStride = (((width * bpp) + 31u) / 32u) * 4u;
+	if (!rowStride || rowStride > fatfsFileGetSize(fil) || dataOffset > fatfsFileGetSize(fil) ||
+			(uint64_t)dataOffset + (uint64_t)rowStride * height > fatfsFileGetSize(fil)) {
+		ret = ImageViewerResultTooLarge;
+		goto out_file;
+	}
+	if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerImage, &mem)) {
+		ret = ImageViewerResultNoMemory;
+		goto out_file;
+	}
+	if (rowStride > mem.size) {
+		ret = ImageViewerResultTooLarge;
+		goto out_mem;
+	}
+	rowBuf = (uint8_t*)mem.ptr;
+	fit = rasterFit(width, height, cnv->w, cnv->h);
+	dispPrvWaitForScanoutStart();
+	rasterClear(cnv, 0);
+	for (uint32_t y = 0; y < height; y++) {
+		uint32_t fileY = topDown ? y : height - 1u - y;
+
+		if (!fatfsFileSeek(fil, dataOffset + fileY * rowStride) ||
+				!imagePrvReadExact(fil, rowBuf, rowStride)) {
+			ret = ImageViewerResultReadError;
+			goto out_mem;
+		}
+		for (uint32_t x = 0; x < width; x++) {
+			uint16_t color;
+
+			if (bpp == 16u) {
+				uint16_t v = imagePrvReadLe16(rowBuf + x * 2u);
+
+				color = imagePrvRgb555To565(v);
+			}
+			else if (bpp == 24u) {
+				const uint8_t *p = rowBuf + x * 3u;
+
+				color = rasterRgb565(p[2], p[1], p[0]);
+			}
+			else {
+				const uint8_t *p = rowBuf + x * 4u;
+
+				color = rasterRgb565(p[2], p[1], p[0]);
+			}
+			rasterDrawScaledPixel(cnv, &fit, width, height, x, y, color);
+		}
+		if (!(y & 7u))
+			badgeLedsTick();
+	}
+	ret = imagePrvWaitForStaticInput();
+out_mem:
+	toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerImage);
+out_file:
+	fatfsFileClose(fil);
+	return ret;
+}
+
+struct ImageJpegStream {
+	struct FatfsFil *fil;
+	bool readError;
+};
+
+static unsigned char imagePrvJpegNeedBytes(unsigned char *buf, unsigned char bufSize, unsigned char *bytesReadP, void *userData)
+{
+	struct ImageJpegStream *stream = (struct ImageJpegStream*)userData;
+	uint32_t got = 0;
+
+	if (!fatfsFileRead(stream->fil, buf, bufSize, &got)) {
+		stream->readError = true;
+		got = 0;
+	}
+	*bytesReadP = (unsigned char)got;
+	return 0;
+}
+
+static enum ImageViewerResult imagePrvRunJpeg(struct Canvas *cnv, struct FatfsVol *vol, const struct FatFileLocator *locator)
+{
+	struct FatfsFil *fil;
+	struct ImageJpegStream stream;
+	pjpeg_image_info_t info;
+	uint8_t status;
+	struct RasterRect fit;
+	uint32_t mcuTotal, mcuIdx;
+
+	fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+	if (!fil)
+		return ImageViewerResultOpenError;
+	memset(&stream, 0, sizeof(stream));
+	stream.fil = fil;
+	memset(&info, 0, sizeof(info));
+	status = pjpeg_decode_init(&info, imagePrvJpegNeedBytes, &stream, 0);
+	if (stream.readError) {
+		fatfsFileClose(fil);
+		return ImageViewerResultReadError;
+	}
+	if (status) {
+		fatfsFileClose(fil);
+		return status == PJPG_NOTENOUGHMEM ? ImageViewerResultNoMemory : ImageViewerResultDecodeError;
+	}
+	if (info.m_width <= 0 || info.m_height <= 0 ||
+			(uint32_t)info.m_width > IMAGE_DIRECT_MAX_W || (uint32_t)info.m_height > IMAGE_DIRECT_MAX_H) {
+		fatfsFileClose(fil);
+		return ImageViewerResultTooLarge;
+	}
+	fit = rasterFit((uint32_t)info.m_width, (uint32_t)info.m_height, cnv->w, cnv->h);
+	dispPrvWaitForScanoutStart();
+	rasterClear(cnv, 0);
+	mcuTotal = (uint32_t)info.m_MCUSPerRow * (uint32_t)info.m_MCUSPerCol;
+	for (mcuIdx = 0; mcuIdx < mcuTotal; mcuIdx++) {
+		uint32_t mcuX = (mcuIdx % (uint32_t)info.m_MCUSPerRow) * (uint32_t)info.m_MCUWidth;
+		uint32_t mcuY = (mcuIdx / (uint32_t)info.m_MCUSPerRow) * (uint32_t)info.m_MCUHeight;
+		uint32_t blocksPerRow = (uint32_t)info.m_MCUWidth / 8u;
+
+		status = pjpeg_decode_mcu();
+		if (status) {
+			fatfsFileClose(fil);
+			return stream.readError ? ImageViewerResultReadError : ImageViewerResultDecodeError;
+		}
+		for (uint32_t y = 0; y < (uint32_t)info.m_MCUHeight; y++) {
+			uint32_t srcY = mcuY + y;
+
+			if (srcY >= (uint32_t)info.m_height)
+				continue;
+			for (uint32_t x = 0; x < (uint32_t)info.m_MCUWidth; x++) {
+				uint32_t srcX = mcuX + x;
+				uint32_t block = (y / 8u) * blocksPerRow + x / 8u;
+				uint32_t off = block * 64u + (y & 7u) * 8u + (x & 7u);
+				uint8_t r, g, b;
+
+				if (srcX >= (uint32_t)info.m_width)
+					continue;
+				r = info.m_pMCUBufR[off];
+				g = info.m_comps == 1 ? r : info.m_pMCUBufG[off];
+				b = info.m_comps == 1 ? r : info.m_pMCUBufB[off];
+				rasterDrawScaledPixel(cnv, &fit, (uint32_t)info.m_width, (uint32_t)info.m_height,
+					srcX, srcY, rasterRgb565(r, g, b));
+			}
+		}
+		if (!(mcuIdx & 7u))
+			badgeLedsTick();
+	}
+	fatfsFileClose(fil);
+	return imagePrvWaitForStaticInput();
 }
 
 static uint32_t imagePrvFbIndex(const struct Canvas *cnv, uint32_t x, uint32_t y)
@@ -644,5 +853,9 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 		return imagePrvRunDca(cnv, vol, initialLocator);
 	if (imagePrvEndsWithNoCase(initialName, ".dci"))
 		return imagePrvRunDci1(cnv, vol, initialLocator);
+	if (imagePrvEndsWithNoCase(initialName, ".bmp"))
+		return imagePrvRunBmp(cnv, vol, initialLocator);
+	if (imagePrvEndsWithNoCase(initialName, ".jpg") || imagePrvEndsWithNoCase(initialName, ".jpeg"))
+		return imagePrvRunJpeg(cnv, vol, initialLocator);
 	return ImageViewerResultUnsupported;
 }

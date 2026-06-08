@@ -1,14 +1,16 @@
 # DC32 Custom Firmware
 
-`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES and classic Arduboy support, an SD-card file browser, USB microSD storage mode, Universal IR tools, BadUSB scripting, USB HID utility apps, an RTTTL music player, LED controls, settings persistence, and badge hardware bring-up code.
+`DC32-cfw` is a custom DEF CON 32 badge firmware based on Dmitry Grinberg's uGB badge firmware. The current firmware boots into a badge-native tool shell named `DC32-cfw` and targets the Raspberry Pi RP2350-based DEF CON 32 badge. It combines the uGB Game Boy emulator with NES and classic Arduboy support, categorized SD-card app menus, an SD-card file browser, USB microSD storage mode, Universal IR tools, BadUSB scripting, USB HID utility apps, an RTTTL/WAV music player, LED controls, settings persistence, and badge hardware bring-up code.
 
 The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader work is highlighted at [dmitry.gr](https://dmitry.gr/), with hardware collaboration and support from [Entropic Engineering](https://www.entropicengineering.com/).
 
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, USB Storage, BadUSB, USB Keyboard, Autoclicker, USB Gamepad, Music, Game, Settings, and Power Off entries. USB Keyboard exposes a scrollable launcher for common keyboard keys and shortcut chords.
-- **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.hex`, `.arduboy`, `.ir`, `.badusb`, `.rtttl`, and `.txt`.
+- **Main Menu** - Provides File Browser, Universal IR, USB, Media, Games, Settings, and Power Off entries. USB groups USB Storage, USB Keyboard, BadUSB, Autoclicker, and USB Gamepad. Media groups Music, Image Viewer, Starfield, Spiro, and Cube. Games groups Emulation, Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, and T-Rex Runner.
+- **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.hex`, `.arduboy`, `.ir`, `.badusb`, `.rtttl`, `.txt`, `.wav`, `.dci`, `.dca`, `.jpg`, `.jpeg`, and `.bmp`.
+- **Categorized app menus** - Launches resident tools and standalone `/APPS/*.DC32` apps from USB, Media, and Games categories. Standalone SD apps include Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube.
+- **Image Viewer** - Opens badge-native `.dci` stills and `.dca` animations plus direct `.jpg`, `.jpeg`, and uncompressed `.bmp` still images from `/IMAGES` or the browser.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
 - **Arduboy compatibility runtime** - Loads classic Arduboy `.hex` files and `.arduboy` packages from SD, runs them through the default Ardens-derived ATmega32u4 runtime with SSD1306, button, and EEPROM handling, renders the 128x64 monochrome display, and persists the 1 KiB EEPROM through the existing save flow. Arduboy FX flash/cart packages are not supported yet. Arduboy audio is disabled for v1 and no speaker-pin callbacks, synthesis, mixers, tone queues, or PWM updates are run by the Arduboy runtime.
@@ -17,7 +19,7 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 - **BadUSB** - Runs scripts from `/BADUSB` or from the browser using the badge as an on-demand USB HID keyboard/mouse/consumer-control device. Supported commands include `REM`, `DELAY`, `DEFAULT_DELAY`, `STRING`, `STRINGLN`, `STRING_DELAY`, `DEFAULT_STRING_DELAY`, `HOLD`, `RELEASE`, `ALTCHAR`, `ALTSTRING`/`ALTCODE`, `SYSRQ`, `GLOBE`, `WAIT_FOR_BUTTON_PRESS`, `REPEAT`, key chords, Flipper-style `MEDIA`, mouse click/move/scroll commands, and optional first-line USB VID/PID/product overrides with `ID`. Default BadUSB VID/PID/manufacturer/product values are editable in Settings > USB.
 - **USB utility apps** - Autoclicker exposes a configurable USB mouse clicker with button and Clicks /s settings. USB Gamepad offers PS4/DualShock 4 HID and Xbox 360/XUSB-style profiles so Steam can identify the badge as a known controller while mapping the badge D-pad, A, B, Select, Start, and FN/Home buttons. PS4 mode also maps the badge touchscreen to the DualShock 4 touchpad, with lower-left and lower-right screen zones acting as touchpad click zones. Hold FN/Home to exit the app; the hardware reset button is not firmware-readable as a controller input. Host rumble feedback drives the badge LEDs while the app is active, and controller ping feedback chirps the speaker.
 - **USB Storage** - Exposes the full microSD card to a host computer as a standalone USB Mass Storage device. Eject or unmount from the host before leaving the tool; other SD-card tools are unavailable while storage mode is active.
-- **RTTTL music player** - Plays `.rtttl` and RTTTL `.txt` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
+- **Music player** - Plays `.rtttl`, RTTTL `.txt`, and PCM `.wav` files from `/MUSIC` or from the browser, with folder navigation, progress display, play/pause, previous/next, per-track loop, and persistent volume.
 - **LED controls** - Drives the badge WS2812 LEDs with off, all-on, rainbow, pulse, traveling dot, random, rear-on, front-on, and reactive input patterns. Color modes include custom RGB, rainbow, flame, and random, with speed and brightness controls.
 - **Settings** - Persists Game, LED, Screen, and Music settings in QSPI flash. Game settings include color mode, upscaling, and display speed (`50%`, `100%`, `150%`, `200%`). Screen settings include rotation and brightness. LED settings include pattern, color, custom RGB, speed, and brightness.
 - **Hardware self-test hooks** - Contains a badge self-test path for display, buttons, touch, RTC, IMU/ADC readings, LEDs, and power sequencing when the self-test trigger condition is present.
@@ -37,12 +39,12 @@ The comparison below uses the public [DEFCON-32-BadgeFirmware archive](https://g
 | USB microSD storage mode | No | Yes |
 | BadUSB scripting | No | Yes |
 | Autoclicker and USB Gamepad tools | No | Yes |
-| RTTTL music player | No | Yes |
+| RTTTL/WAV music player | No | Yes |
 | Universal IR tools | No | Yes |
 | Expanded LED pattern/color settings | No | Yes |
 | Safe tool-shell recovery after crashes/resets | No | Yes |
 
-Stock firmware is still the right choice if you want the original badge experience with the official game image. `DC32-cfw` is aimed at using the badge as a post-con tool platform: loading ROMs, browsing SD-card content, replaying IR files, running HID scripts, playing RTTTL files, and experimenting with the badge hardware.
+Stock firmware is still the right choice if you want the original badge experience with the official game image. `DC32-cfw` is aimed at using the badge as a post-con tool platform: loading ROMs, browsing SD-card content, launching SD app binaries, replaying IR files, running HID scripts, playing RTTTL/WAV files, and experimenting with the badge hardware.
 
 ## SD card layout
 
@@ -52,11 +54,11 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
-| `/APPS` | SD-loaded app binaries built by this repo, including emulators plus IR, BadUSB, Autoclicker, USB Gamepad, Music, and Image Viewer. |
+| `/APPS` | SD-loaded app binaries built by this repo, including emulators, tools, and standalone apps such as Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube. |
 | `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
-| `/MUSIC` | Music picker for `.rtttl` and RTTTL `.txt` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
-| `/IMAGES` | Image viewer files. Run `/IMAGES/image_converter.py` on a PC to convert still images into badge-native `.dci` files and animated GIF/APNG/WebP files into `.dca` animations. |
+| `/MUSIC` | Music picker for `.rtttl`, RTTTL `.txt`, and PCM `.wav` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
+| `/IMAGES` | Image viewer files. `.jpg`, `.jpeg`, uncompressed `.bmp`, `.dci`, and `.dca` are supported; run `/IMAGES/image_converter.py` on a PC for badge-native stills and animations. |
 
 In-game save confirmations update the emulator's battery-backed RAM first. When the emulator menu opens or gameplay exits, the firmware copies that RAM to the QSPI save cache. SD-card export happens from safe UI paths such as selecting another game or leaving the emulator, so gameplay is not interrupted by FAT writes. Older save files named exactly like the ROM, such as `Pokemon.gbc` or `Game.nes`, are still imported as a fallback and will be re-exported with the `.sav` name.
 
@@ -73,7 +75,7 @@ Release builds include two optional SD-card bundles. Extract `SD-apps.zip` to th
 | `/MUSIC` | [neverfa11ing/FlipperMusicRTTTL](https://github.com/neverfa11ing/FlipperMusicRTTTL) |
 | `/ROMS/AB` | [eried/ArduboyCollection](https://github.com/eried/ArduboyCollection), genre folders with flattened `.hex` files only. |
 | `/ROMS/GB`, `/ROMS/GBC`, `/ROMS/NES` | Folders for user-provided ROMs, each with a `README.txt` placeholder; add only files you can lawfully use and redistribute. |
-| `/IMAGES` | Local `image_converter.py` helper for creating `.dci` still images and `.dca` animations from user-provided images. |
+| `/IMAGES` | Direct JPEG/BMP still-image support plus local `image_converter.py` helper for creating `.dci` still images and `.dca` animations from user-provided images. |
 
 Credit and licensing for bundled external assets remain with their upstream projects.
 
@@ -93,10 +95,10 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `third_party/simavr/` | Vendored simavr core and SSD1306 virtual display pieces kept for the experimental simavr Arduboy runtime. |
 | `src/dispDefcon.c` | LCD driver, framebuffer, PIO program loading, DMA management, brightness, and framerate handling. |
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
-| `src/dcApp.c`, `src/apps/` | Resident SD app loader plus app entry wrappers for emulators, IR, BadUSB, Autoclicker, USB Gamepad, Music, and Image Viewer. |
+| `src/dcApp.c`, `src/dcAppDraw.c`, `src/apps/` | Resident SD app loader, shared SD app drawing helpers, and app entry wrappers for emulators, tools, and standalone apps. |
 | `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard/mouse/media/gamepad HID, XUSB-style Xbox 360 gamepad, and the SD-loaded BadUSB interpreter. |
 | `src/irRemote.c`, `src/pioIrdaSIR.c` | SD-loaded IR transmitter support and badge IRDA setup. |
-| `src/rtttlPlayer.c`, `src/audioPwm.c` | SD-loaded RTTTL parsing/playback and resident PWM audio output. |
+| `src/rtttlPlayer.c`, `src/wavPlayer.c`, `src/audioPwm.c` | SD-loaded RTTTL/WAV parsing/playback and resident PWM tone/PCM audio output. |
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
 | `src/settings.c`, `src/bootGuard.c`, `src/toolWorkspace.c` | Persistent settings, tool crash/reset recovery, and shared workspace allocation. |
 | `tools/bin_to_uf2.py` | Converts the raw binary image to the RP2350 UF2 update file. |

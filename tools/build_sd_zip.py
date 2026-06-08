@@ -57,7 +57,26 @@ ROM_PLACEHOLDER_DIRS = {
     "GBC": "Game Boy Color",
     "NES": "Nintendo Entertainment System",
 }
-APP_BINARIES = ("gb.DC32", "nes.DC32", "arduboy.DC32", "ir.DC32", "image.DC32", "music.DC32", "badusb.DC32", "autoclicker.DC32", "gamepad.DC32")
+APP_BINARIES = (
+    "gb.DC32",
+    "nes.DC32",
+    "arduboy.DC32",
+    "ir.DC32",
+    "image.DC32",
+    "music.DC32",
+    "badusb.DC32",
+    "autoclicker.DC32",
+    "gamepad.DC32",
+    "pong.DC32",
+    "tetris.DC32",
+    "arkanoid.DC32",
+    "flappy.DC32",
+    "labyrinth.DC32",
+    "trex.DC32",
+    "starfield.DC32",
+    "spiro.DC32",
+    "cube.DC32",
+)
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
 SKIP_SUFFIXES = {".pyc", ".tmp"}
@@ -438,8 +457,8 @@ def create_image_dir(stage: Path) -> None:
     image_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(__file__).resolve().parent / "image_converter.py", image_dir / "image_converter.py")
     (image_dir / "README.txt").write_text(
-        "Place images in this folder, then run image_converter.py on your PC.\n"
-        "The badge image viewer opens generated .dci stills and .dca animations.\n",
+        "Place .jpg, .jpeg, uncompressed .bmp, .dci, or .dca files in this folder.\n"
+        "The badge opens JPEG/BMP stills directly. Run image_converter.py on your PC for badge-native .dci stills and .dca animations.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -531,7 +550,7 @@ their upstream projects.
 
 - SD path: IMAGES/
 - Files: image_converter.py, README.txt
-- Notes: Run image_converter.py on a PC to convert still PNG/JPEG images into badge-native .dci files and animated GIF/APNG/WebP files into .dca animations.
+- Notes: JPEG and uncompressed BMP stills can be opened directly. Run image_converter.py on a PC to convert still PNG/JPEG images into badge-native .dci files and animated GIF/APNG/WebP files into .dca animations.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

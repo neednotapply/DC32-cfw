@@ -8,6 +8,9 @@
 
 #define QSPI_ERASE_GRANULARITY			0x1000
 #define QSPI_WRITE_GRANULARITY			0x0100
+const void *flashUncachedPtr(uint32_t addr);
+void flashFlushXipCacheRange(uint32_t addr, uint32_t size);
+void flashSyncExecutableRange(uint32_t addr, uint32_t size);
 bool flashWrite(uint32_t addr, uint32_t erzSz, const void *dataSrc, uint32_t writeSz);	//will erase as needed, sz must be >= 256
 
 void flashBootInit(void);

@@ -8,6 +8,7 @@ set(APP DC32-cfw)
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(TINYUSB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyusb")
 set(MINIZ_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/miniz.c")
+set(PICOJPEG_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/picojpeg.c")
 set(SIMAVR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/simavr")
 set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
@@ -95,6 +96,7 @@ add_executable(${APP}
     ${SRC_DIR}/bootGuard.c
     ${SRC_DIR}/crt_rp2350.S
     ${SRC_DIR}/dcApp.c
+    ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/dispDefcon.c
     ${SRC_DIR}/fatfs.c
     ${SRC_DIR}/fonts.c
@@ -140,6 +142,7 @@ target_include_directories(${APP} PRIVATE
     ${ARDENS_DIR}
     ${SRC_DIR}/nes
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg
     ${SIMAVR_DIR}
     ${SIMAVR_DIR}/simavr/sim
     ${SIMAVR_DIR}/simavr/cores
@@ -239,6 +242,7 @@ set_source_files_properties(
 
 set_source_files_properties(
     ${MINIZ_SRC}
+    ${PICOJPEG_SRC}
     PROPERTIES
         COMPILE_OPTIONS "-Wno-error"
 )
@@ -249,7 +253,10 @@ set_source_files_properties(
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/badgeLeds.c
     ${SRC_DIR}/imageViewer.c
+    ${SRC_DIR}/wavPlayer.c
     ${SRC_DIR}/raster.c
+    ${SRC_DIR}/dcAppDraw.c
+    ${SRC_DIR}/apps/picoware_ports.c
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
 
@@ -277,8 +284,23 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=audioPwmGetVolume
     -Wl,--undefined=audioPwmStop
     -Wl,--undefined=audioPwmTone
+    -Wl,--undefined=audioPwmPcmStart
+    -Wl,--undefined=audioPwmPcmCanWrite
+    -Wl,--undefined=audioPwmPcmWriteU8
+    -Wl,--undefined=audioPwmPcmDrain
+    -Wl,--undefined=audioPwmPcmStop
     -Wl,--undefined=badgeLedsOverrideRgb
+    -Wl,--undefined=dcAppDrawRgb565
+    -Wl,--undefined=dcAppDrawInit
+    -Wl,--undefined=dcAppDrawClear
+    -Wl,--undefined=dcAppDrawFill
+    -Wl,--undefined=dcAppDrawPixel
+    -Wl,--undefined=dcAppDrawLine
+    -Wl,--undefined=dcAppDrawPresent
+    -Wl,--undefined=dcAppDrawFrame
+    -Wl,--undefined=dcAppDrawWaitRelease
     -Wl,--undefined=dispSetFramerate
+    -Wl,--undefined=dispPrvFrameCtrWait
     -Wl,--undefined=dispPrvWaitForScanoutStart
     -Wl,--undefined=gbDrawLine
     -Wl,--undefined=gbExtAccelRead
@@ -357,6 +379,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
         ${DC32_FIRMWARE_COMPILE_DEFINITIONS}
         DCAPP_BUILD=1
         DCAPP_TOOL_BUILD=1
+        DCAPP_RUNTIME_ID=${RUNTIME_ID}
     )
     target_compile_options(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_COMPILE_OPTIONS})
     target_link_options(${TARGET_NAME} PRIVATE
@@ -428,12 +451,14 @@ add_dcapp(dcapp_image image 101
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/imageViewer.c
     ${SRC_DIR}/raster.c
+    ${PICOJPEG_SRC}
 )
 
 add_dcapp(dcapp_music music 102
     ${SRC_DIR}/apps/music_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/rtttlPlayer.c
+    ${SRC_DIR}/wavPlayer.c
 )
 
 add_dcapp(dcapp_badusb badusb 103
@@ -450,4 +475,45 @@ add_dcapp(dcapp_autoclicker autoclicker 104
 add_dcapp(dcapp_gamepad gamepad 105
     ${SRC_DIR}/apps/gamepad_app.c
     ${SRC_DIR}/ui.c
+)
+
+set(PICOWARE_APP_SOURCES
+    ${SRC_DIR}/apps/picoware_app.c
+    ${SRC_DIR}/apps/picoware_ports.c
+)
+
+add_dcapp(dcapp_pong pong 200
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_tetris tetris 201
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_arkanoid arkanoid 202
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_flappy flappy 203
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_labyrinth labyrinth 204
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_trex trex 205
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_starfield starfield 220
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_spiro spiro 221
+    ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_cube cube 222
+    ${PICOWARE_APP_SOURCES}
 )

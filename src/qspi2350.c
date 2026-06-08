@@ -2,6 +2,7 @@
 #include "printf.h"
 #include "2350.h"
 #include "qspi.h"
+#include "hardware/regs/addressmap.h"
 
 #pragma GCC optimize ("Os")
 #define __ramcode	__attribute__((section(".fastcode")))
@@ -9,6 +10,8 @@
 //#define SPEED_TEST_FLASH
 
 #define QSPI_LARGE_ERASE_GRANULARITY		32768
+#define QSPI_XIP_ADDR_MASK			0x03ffffffu
+#define QSPI_XIP_MAINT_INVALIDATE		2u
 
 static uint64_t mFlashUid;
 
@@ -163,12 +166,43 @@ static void __ramcode flashPrvErz(uint32_t addr, uint8_t cmd)
 	flashPrvBusyWait();
 }
 
+const void *flashUncachedPtr(uint32_t addr)
+{
+	return (const void*)(uintptr_t)(XIP_NOCACHE_NOALLOC_BASE + (addr & QSPI_XIP_ADDR_MASK));
+}
+
+void __ramcode flashFlushXipCacheRange(uint32_t addr, uint32_t size)
+{
+	uint32_t offset = (addr & QSPI_XIP_ADDR_MASK) &~ 7u;
+	uint32_t span = ((addr & QSPI_XIP_ADDR_MASK) - offset + size + 7u) &~ 7u;
+	uint32_t i;
+
+	if (!size)
+		return;
+	__DSB();
+	for (i = 0; i < span; i += 8)
+		*(volatile uint32_t*)(XIP_MAINTENANCE_BASE + offset + i) = QSPI_XIP_MAINT_INVALIDATE;
+	__DSB();
+	__ISB();
+}
+
+void __ramcode flashSyncExecutableRange(uint32_t addr, uint32_t size)
+{
+	flashFlushXipCacheRange(addr, size);
+	__DSB();
+	SCB->ICIALLU = 0;
+	SCB->BPIALL = 0;
+	__DSB();
+	__ISB();
+}
+
 bool __attribute__((noinline)) __ramcode flashWrite(uint32_t addr, uint32_t erzSz, const void *dataSrc, uint32_t writeSz)	//will erase as needed, sz must be >= 256
 {
 	const uint8_t *buf = (const uint8_t*)dataSrc;
-	uint32_t i, prevPrimask, curAddr, now, largerSize;
+	uint32_t i, prevPrimask, curAddr, now, largerSize, xipAddr;
 	bool ret = true;
 	
+	xipAddr = XIP_BASE + (addr & QSPI_XIP_ADDR_MASK);
 	addr &= 0x00ffffff;	//24-bit addressing
 
 	if (erzSz % QSPI_ERASE_GRANULARITY)
@@ -206,12 +240,11 @@ bool __attribute__((noinline)) __ramcode flashWrite(uint32_t addr, uint32_t erzS
 	for (curAddr = addr, i = 0; i < writeSz; i += QSPI_WRITE_GRANULARITY, curAddr += QSPI_WRITE_GRANULARITY, buf += QSPI_WRITE_GRANULARITY)
 		flashPrvProgram(curAddr, buf, QSPI_WRITE_GRANULARITY);
 
+	flashPrvEnterXipMode();
+
 	//flush
 	largerSize = erzSz > writeSz ? erzSz : writeSz;
-	for (i = 0; i < largerSize; i += 8)
-		*(volatile uint32_t*)(0x18000000 + i + addr) = 2;
-
-	flashPrvEnterXipMode();
+	flashSyncExecutableRange(xipAddr, largerSize);
 	
 	//now we can take irqs
 	asm volatile("msr PRIMASK, %0"::"r"(prevPrimask):"memory");

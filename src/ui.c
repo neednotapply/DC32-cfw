@@ -8,6 +8,7 @@
 #include "badgeRtc.h"
 #include "bootGuard.h"
 #include "dcApp.h"
+#include "dispDefcon.h"
 #include "memMap.h"
 #include "printf.h"
 #include "sleep.h"
@@ -23,6 +24,7 @@
 #include "usbXinput.h"
 #include "musicPlayer.h"
 #include "rtttlPlayer.h"
+#include "wavPlayer.h"
 #include "audioPwm.h"
 #include "imageViewer.h"
 #include "timebase.h"
@@ -932,6 +934,12 @@ static void uiPrvReset(struct Canvas *cnv, bool invert)
 	cnv->font = FontMedium;
 	cnv->foreColor = invert ? 0 : 15;
 	cnv->backColor = invert ? 15 : 0;
+}
+
+static void uiPrvBeginPacedRedraw(void)
+{
+	dispPrvFrameCtrWait();
+	dispPrvWaitForScanoutStart();
 }
 
 static uint32_t uiPrvDrawWrappedString(struct Canvas *cnv, const char *str, uint32_t r, uint32_t c)	//return num rows printed
@@ -6233,7 +6241,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static bool uiPrvMusicPlayableName(const char *fname)
 	{
-		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt");
+		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt") ||
+			uiPrvStrEndsWithNoCase(fname, ".wav");
 	}
 
 	struct MusicListCtx {
@@ -6477,7 +6486,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		cnv->foreColor = 0;
 		uiPrvFillRect(cnv, 10, row, cnv->w - 1, row + uiPrvGlyphHeight(cnv));
 		cnv->foreColor = 15;
-		uiPrintf(cnv, row, 10, "%s %u%% RTTTL %ubpm", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+		uiPrintf(cnv, row, 10, "%s %u%% %uHz", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
 		cnv->foreColor = fore;
 	}
 
@@ -6521,6 +6530,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			bool progressDraw = pct != data->lastPct || progressFillRight != data->lastProgressFillRight;
 
 			if (fullDraw || ((now - data->lastDraw > TICKS_PER_SECOND / 4) && progressDraw)) {
+				uiPrvBeginPacedRedraw();
 				if (fullDraw) {
 					uiPrvReset(cnv, false);
 					uiPrvDrawTruncText(cnv, row, 10, cnv->w - 20, data->name);
@@ -6571,7 +6581,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		data.prevKeys = uiGetUiKeysRaw();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
-		ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
+		if (uiPrvStrEndsWithNoCase(name, ".wav"))
+			ret = wavPlayerPlayFile(fil, uiPrvMusicControl, &data);
+		else
+			ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		if (focusP)
 			*focusP = data.focus;
 		audioPwmStop();
@@ -6583,7 +6596,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		if (ret == MusicPlayerResultFileError)
 			uiAlert(cnv, "Music read failed", DialogTypeOk);
 		else if (ret == MusicPlayerResultDecodeError)
-			uiAlert(cnv, "Bad RTTTL file", DialogTypeOk);
+			uiAlert(cnv, uiPrvStrEndsWithNoCase(name, ".wav") ? "Bad WAV file" : "Bad RTTTL file", DialogTypeOk);
 
 		return ret;
 	}
@@ -6978,6 +6991,7 @@ reload_dir:
 			badStatus.state = BadUsbStateScriptError;
 			badStatus.message = "Status invalid";
 			strcpy(badStatus.error, "Status invalid");
+			uiPrvBeginPacedRedraw();
 			uiPrvBadUsbDrawStatus(data, &badStatus, BadUsbStateScriptError, "Status invalid");
 			return false;
 		}
@@ -6988,6 +7002,7 @@ reload_dir:
 
 		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
 		    status->unsupportedCommands != data->lastUnsupportedCommands || now - data->lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvBadUsbDrawStatus(data, &data->lastStatus, status->state, status->message);
 			data->lastDraw = now;
 			data->lastLine = status->lineNo;
@@ -7078,6 +7093,7 @@ reload_dir:
 			if (usbHidReady())
 				return true;
 			if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+				uiPrvBeginPacedRedraw();
 				uiPrvBadUsbShowState(data, preload, BadUsbStateNotConnected, "Waiting for USB");
 				lastDraw = now;
 			}
@@ -7378,6 +7394,7 @@ static bool uiPrvUsbKeyboardWaitReady(struct Canvas *cnv)
 		if (usbHidReady())
 			return true;
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvSetHeaderTitle("USB Keyboard");
 			uiPrvReset(cnv, false);
 			cnv->font = FontMedium;
@@ -7690,6 +7707,7 @@ static bool uiPrvUsbHidWaitReady(struct Canvas *cnv, const char *title)
 		if (usbHidReady())
 			return true;
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvSetHeaderTitle(title);
 			uiPrvReset(cnv, false);
 			cnv->font = FontMedium;
@@ -7865,6 +7883,7 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 			nextClick = now + interval;
 		}
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvAutoclickerDraw(cnv, &settings, running);
 			lastDraw = now;
 		}
@@ -8033,6 +8052,7 @@ static bool uiPrvGamepadWaitReady(struct Canvas *cnv, enum UiGamepadProfile prof
 		if (uiPrvGamepadReady(profile))
 			return true;
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvSetHeaderTitle("USB Gamepad");
 			uiPrvReset(cnv, false);
 			cnv->font = FontMedium;
@@ -8362,6 +8382,7 @@ static void uiPrvGamepadTool(struct Canvas *cnv)
 		else
 			uiPrvGamepadUpdatePing(&feedback, &lastPingSeq, &pingEndTicks, audioVolume);
 		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+			uiPrvBeginPacedRedraw();
 			uiPrvGamepadDraw(cnv, profile, uiKeys, &feedback, &touch, touchZone);
 			lastDraw = now;
 		}
@@ -8503,11 +8524,14 @@ enum UiToolId {
 	UiToolIr,
 	UiToolUsbStorage,
 	UiToolBadUsb,
+	UiToolUsb,
 	UiToolHidTest,
 	UiToolAutoclicker,
 	UiToolGamepad,
+	UiToolMedia,
 	UiToolMusic,
 	UiToolImage,
+	UiToolGames,
 	UiToolGame,
 	UiToolSettings,
 	UiToolPowerOff,
@@ -8522,14 +8546,17 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolIr: return "Universal IR";
 		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
+		case UiToolUsb: return "USB";
 		case UiToolHidTest: return "USB Keyboard";
 		case UiToolAutoclicker: return "Autoclicker";
 		case UiToolGamepad: return "USB Gamepad";
+		case UiToolMedia: return "Media";
 		case UiToolMusic: return "Music";
 		case UiToolImage: return "Image Viewer";
+		case UiToolGames: return "Games";
 		case UiToolGame:
 		case UiToolRunGame:
-			return "Game";
+			return "Emulation";
 		case UiToolSettings: return "Settings";
 		case UiToolPowerOff: return "Power Off";
 		default: return "Main Menu";
@@ -8540,6 +8567,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 {
 	switch (tool) {
 		case UiToolGame:
+		case UiToolGames:
 		case UiToolRunGame:
 			return BootGuardModeGame;
 
@@ -8555,9 +8583,11 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 		case UiToolBrowser:
 		case UiToolImage:
 		case UiToolUsbStorage:
+		case UiToolUsb:
 		case UiToolHidTest:
 		case UiToolAutoclicker:
 		case UiToolGamepad:
+		case UiToolMedia:
 		case UiToolSettings:
 		case UiToolPowerOff:
 		default:
@@ -8661,7 +8691,7 @@ static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
 		uiAlert(cnv, "Cannot decode image file", DialogTypeOk);
 		break;
 	case ImageViewerResultUnsupported:
-		uiAlert(cnv, "Open a .dci still image or .dca animation. Use /IMAGES/image_converter.py on a PC", DialogTypeOk);
+		uiAlert(cnv, "Open .dci, .dca, .jpg, .jpeg, or uncompressed .bmp. Use /IMAGES/image_converter.py for animated/heavy formats", DialogTypeOk);
 		break;
 	case ImageViewerResultTooLarge:
 		uiAlert(cnv, "Image is too large for this firmware", DialogTypeOk);
@@ -8676,7 +8706,9 @@ static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
 
 static bool uiPrvImageFileName(const char *name)
 {
-	return uiPrvStrEndsWithNoCase(name, ".dci") || uiPrvStrEndsWithNoCase(name, ".dca");
+	return uiPrvStrEndsWithNoCase(name, ".dci") || uiPrvStrEndsWithNoCase(name, ".dca") ||
+		uiPrvStrEndsWithNoCase(name, ".jpg") || uiPrvStrEndsWithNoCase(name, ".jpeg") ||
+		uiPrvStrEndsWithNoCase(name, ".bmp");
 }
 
 static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const char *curName, bool forward, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
@@ -8846,30 +8878,28 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolIr] = "Universal IR",
 		[UiToolUsbStorage] = "USB Storage",
 		[UiToolBadUsb] = "BadUSB",
+		[UiToolUsb] = "USB",
 		[UiToolHidTest] = "USB Keyboard",
 		[UiToolAutoclicker] = "Autoclicker",
 		[UiToolGamepad] = "USB Gamepad",
+		[UiToolMedia] = "Media",
 		[UiToolMusic] = "Music",
 		[UiToolImage] = "Image Viewer",
+		[UiToolGames] = "Games",
 		[UiToolGame] = "Emulation",
 		[UiToolSettings] = "Settings",
 		[UiToolPowerOff] = "Power Off",
 	};
-	static const enum UiToolId toolOrder[UiToolNum] = {
+	static const enum UiToolId toolOrder[] = {
 		UiToolBrowser,
 		UiToolIr,
-		UiToolUsbStorage,
-		UiToolBadUsb,
-		UiToolHidTest,
-		UiToolAutoclicker,
-		UiToolGamepad,
-		UiToolMusic,
-		UiToolImage,
-		UiToolGame,
+		UiToolUsb,
+		UiToolMedia,
+		UiToolGames,
 		UiToolSettings,
 		UiToolPowerOff,
 	};
-	uint_fast8_t itemHeight, i, selOption;
+	uint_fast8_t itemHeight, i, selOption, numTools = sizeof(toolOrder) / sizeof(*toolOrder);
 	uint_fast8_t curOption = 0;
 	uint_fast16_t button = KEY_BIT_A;
 
@@ -8879,13 +8909,13 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	uiPrvSetHeaderTitle("Main Menu");
 	uiPrvReset(cnv, false);
 	itemHeight = uiPrvGlyphHeight(cnv) + 1;
-	for (i = 0; i < UiToolNum; i++) {
+	for (i = 0; i < numTools; i++) {
 		if (toolOrder[i] == curTool)
 			curOption = i;
 		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, names[toolOrder[i]], -1);
 	}
 
-	selOption = uiPrvMenu(cnv, curOption, UiToolNum, &button);
+	selOption = uiPrvMenu(cnv, curOption, numTools, &button);
 	return toolOrder[selOption];
 }
 
@@ -9087,7 +9117,7 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No .dci or .dca files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No image files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
 	}
@@ -9282,6 +9312,7 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 			break;
 		}
 		if (!lastDraw || now - lastDraw > USB_STORAGE_REDRAW_TICKS) {
+			uiPrvBeginPacedRedraw();
 			uiPrvUsbStorageDraw(cnv);
 			lastDraw = now;
 		}
@@ -9522,6 +9553,188 @@ enum UiGameAction uiGameMenu(void)
 	return UiGameActionResume;
 }
 
+enum UiCategoryEntryKind {
+	UiCategoryEntryTool,
+	UiCategoryEntrySdApp,
+};
+
+struct UiCategoryEntry {
+	const char *label;
+	enum UiCategoryEntryKind kind;
+	enum UiToolId tool;
+	enum DcAppId appId;
+};
+
+static void uiPrvCategoryReturnFence(void)
+{
+	uiPrvClearToolExit();
+	uiPrvWaitKeysReleased();
+}
+
+static void uiPrvRunCategoryToolEntry(struct Canvas *cnv, enum UiToolId tool, UiRunGameF runGameF, void *userData)
+{
+	uiPrvSetHeaderTitle(uiPrvToolHeaderTitle(tool));
+
+	switch (tool) {
+		case UiToolUsbStorage:
+		#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			uiPrvUsbStorageTool(cnv);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "USB Storage requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
+		case UiToolHidTest:
+			uiPrvEnterTool(tool);
+			uiPrvUsbKeyboardTool(cnv);
+			uiPrvExitTool(tool);
+			break;
+
+		case UiToolAutoclicker:
+	#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolAutoclicker, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "Autoclicker requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
+		case UiToolBadUsb:
+	#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolBadUsb, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+	#else
+			uiAlert(cnv, "BadUSB requires SD card support", DialogTypeOk);
+	#endif
+			break;
+
+		case UiToolGamepad:
+	#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolGamepad, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "USB Gamepad requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
+		case UiToolMusic:
+		#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolMusic, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "Music requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
+		case UiToolImage:
+		#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolImage, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "Image Viewer requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
+		case UiToolGame:
+			uiPrvEnterTool(tool);
+			(void)uiPrvGameTool(cnv, runGameF, userData);
+			uiPrvExitTool(tool);
+			break;
+
+		default:
+			break;
+	}
+
+	uiPrvCategoryReturnFence();
+}
+
+static void uiPrvRunCategorySdAppEntry(struct Canvas *cnv, enum UiToolId ownerTool, const char *label, enum DcAppId appId)
+{
+#ifndef NO_SD_CARD
+	uiPrvSetHeaderTitle(label);
+	uiPrvEnterTool(ownerTool);
+	(void)uiPrvRunSdApp(cnv, appId, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+	uiPrvExitTool(ownerTool);
+#else
+	(void)appId;
+	uiAlert(cnv, "This app requires SD card support", DialogTypeOk);
+#endif
+	uiPrvCategoryReturnFence();
+}
+
+static enum UiToolId uiPrvCategoryTool(struct Canvas *cnv, enum UiToolId categoryTool, const char *title,
+	const struct UiCategoryEntry *entries, uint_fast8_t numEntries, UiRunGameF runGameF, void *userData)
+{
+	while (1) {
+		uint_fast8_t i, selOption;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+		uiPrvSetHeaderTitle(title);
+		uiPrvReset(cnv, false);
+		for (i = 0; i < numEntries; i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, entries[i].label, -1);
+
+		selOption = uiPrvMenu(cnv, 0, numEntries, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B) {
+			uiPrvCategoryReturnFence();
+			return categoryTool;
+		}
+
+		if (entries[selOption].kind == UiCategoryEntryTool)
+			uiPrvRunCategoryToolEntry(cnv, entries[selOption].tool, runGameF, userData);
+		else
+			uiPrvRunCategorySdAppEntry(cnv, categoryTool, entries[selOption].label, entries[selOption].appId);
+	}
+}
+
+static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry entries[] = {
+		{"USB Storage", UiCategoryEntryTool, UiToolUsbStorage, 0},
+		{"USB Keyboard", UiCategoryEntryTool, UiToolHidTest, 0},
+		{"BadUSB", UiCategoryEntryTool, UiToolBadUsb, 0},
+		{"Autoclicker", UiCategoryEntryTool, UiToolAutoclicker, 0},
+		{"USB Gamepad", UiCategoryEntryTool, UiToolGamepad, 0},
+	};
+
+	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+}
+
+static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry entries[] = {
+		{"Music", UiCategoryEntryTool, UiToolMusic, 0},
+		{"Image Viewer", UiCategoryEntryTool, UiToolImage, 0},
+		{"Starfield", UiCategoryEntrySdApp, UiToolMedia, DcAppIdStarfield},
+		{"Spiro", UiCategoryEntrySdApp, UiToolMedia, DcAppIdSpiro},
+		{"Cube", UiCategoryEntrySdApp, UiToolMedia, DcAppIdCube},
+	};
+
+	return uiPrvCategoryTool(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+}
+
+static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry entries[] = {
+		{"Emulation", UiCategoryEntryTool, UiToolGame, 0},
+		{"Pong", UiCategoryEntrySdApp, UiToolGames, DcAppIdPong},
+		{"Tetris", UiCategoryEntrySdApp, UiToolGames, DcAppIdTetris},
+		{"Arkanoid", UiCategoryEntrySdApp, UiToolGames, DcAppIdArkanoid},
+		{"Flappy Bird", UiCategoryEntrySdApp, UiToolGames, DcAppIdFlappy},
+		{"Labyrinth", UiCategoryEntrySdApp, UiToolGames, DcAppIdLabyrinth},
+		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolGames, DcAppIdTrex},
+	};
+
+	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+}
+
 void uiRunToolShell(UiRunGameF runGameF, void *userData)
 {
 	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
@@ -9582,6 +9795,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			#endif
 				break;
 
+			case UiToolUsb:
+				activeTool = uiPrvUsbCategoryTool(cnv, runGameF, userData);
+				break;
+
 			case UiToolHidTest:
 				uiPrvEnterTool(activeTool);
 				uiPrvUsbKeyboardTool(cnv);
@@ -9608,6 +9825,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			#endif
 				break;
 
+			case UiToolMedia:
+				activeTool = uiPrvMediaCategoryTool(cnv, runGameF, userData);
+				break;
+
 			case UiToolMusic:
 			#ifndef NO_SD_CARD
 				uiPrvEnterTool(activeTool);
@@ -9624,6 +9845,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 			#else
 				uiAlert(cnv, "Image Viewer requires SD card support", DialogTypeOk);
 			#endif
+				break;
+
+			case UiToolGames:
+				activeTool = uiPrvGamesCategoryTool(cnv, runGameF, userData);
 				break;
 
 			case UiToolGame:

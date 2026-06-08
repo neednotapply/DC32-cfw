@@ -24,6 +24,15 @@ enum DcAppId {
 	DcAppIdToolBadUsb = 103,
 	DcAppIdToolAutoclicker = 104,
 	DcAppIdToolGamepad = 105,
+	DcAppIdPong = 200,
+	DcAppIdTetris = 201,
+	DcAppIdArkanoid = 202,
+	DcAppIdFlappy = 203,
+	DcAppIdLabyrinth = 204,
+	DcAppIdTrex = 205,
+	DcAppIdStarfield = 220,
+	DcAppIdSpiro = 221,
+	DcAppIdCube = 222,
 };
 
 enum DcAppToolAction {
@@ -95,6 +104,13 @@ typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRu
 typedef void (*DcAppVoidF)(void);
 struct ToolWorkspaceSpan;
 
+struct DcAppCatalogEntry {
+	enum DcAppId appId;
+	const char *name;
+	const char *path;
+	bool launcherVisible;
+};
+
 enum DcAppResult {
 	DcAppResultOk,
 	DcAppResultMissing,
@@ -115,6 +131,8 @@ enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *arg
 void dcAppAbortActive(void);
 void dcAppRefreshActive(void);
 bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP);
+const struct DcAppCatalogEntry *dcAppCatalogEntries(uint_fast8_t *countP);
+const struct DcAppCatalogEntry *dcAppCatalogFind(uint32_t appId);
 const char *dcAppLastError(void);
 void dcAppClearError(void);
 const char *dcAppResultName(enum DcAppResult result);

@@ -54,7 +54,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
-| `/APPS` | SD-loaded app binaries built by this repo, including emulators, tools, and standalone apps such as Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube. |
+| `/APPS` | SD-loaded app binaries built by this repo, including emulators, tools, `doom.DC32` plus `doom1.whx`, and standalone apps such as Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube. |
 | `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl`, RTTTL `.txt`, and PCM `.wav` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |

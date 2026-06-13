@@ -61,6 +61,9 @@ def main() -> int:
         (ir_src / "notes.txt").write_text("not an IR asset\n", encoding="ascii")
         for name in builder.APP_BINARIES:
             (apps / name).write_bytes(f"{name}\n".encode("ascii"))
+        fake_doom_whx = tmp_path / "doom1.whx"
+        fake_doom_whx.write_bytes(b"IWHX-test")
+        builder.APP_DATA_FILES["APPS/doom1.whx"] = fake_doom_whx
         for genre in builder.ARDUBOY_GENRE_DIRS:
             (repo / genre).mkdir(parents=True)
 
@@ -90,10 +93,14 @@ def main() -> int:
 
         app_hashes = builder.copy_app_binaries(apps, stage)
         app_files = sorted(path.name for path in (stage / "APPS").iterdir() if path.is_file())
-        expect("All DCAPP binaries are copied to /APPS", app_files == sorted(builder.APP_BINARIES))
-        expect("App hashes are recorded", sorted(app_hashes) == sorted(builder.APP_BINARIES))
+        expected_hash_files = sorted((*builder.APP_BINARIES, *builder.APP_DATA_FILES))
+        expect("All app binaries and app data are copied to /APPS", app_files == sorted((*builder.APP_BINARIES, "doom1.whx")))
+        expect("DOOM WHX is copied to /APPS", (stage / "APPS" / "doom1.whx").is_file())
+        expect("DOOM data is not copied to /ROMS/DOOM", not (stage / "ROMS" / "DOOM").exists())
+        expect("App hashes are recorded", sorted(app_hashes) == expected_hash_files)
         manifest = builder.app_source_manifest(app_hashes)
         expect("App hashes appear in app manifest", manifest["sources"]["apps"]["files"] == app_hashes)
+        expect("DOOM app source metadata is present", manifest["sources"]["doom"]["sd_path"] == "APPS/")
         builder.write_app_sources(stage, app_hashes)
         apps_zip = tmp_path / "SD-apps.zip"
         builder.build_zip(stage, apps_zip)
@@ -102,7 +109,9 @@ def main() -> int:
             sources_md = zf.read("SOURCES.md").decode("utf-8")
         expect("SD-apps.zip contains SOURCES.md", "SOURCES.md" in names)
         expect("SD-apps.zip contains /APPS binaries", all(f"APPS/{name}" in names for name in builder.APP_BINARIES))
-        expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in builder.APP_BINARIES))
+        expect("SD-apps.zip contains DOOM WHX", "APPS/doom1.whx" in names)
+        expect("SD-apps.zip excludes /ROMS/DOOM", not any(name.startswith("ROMS/DOOM/") for name in names))
+        expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in expected_hash_files))
 
     print("SD assets/apps builder tests passed")
     return 0

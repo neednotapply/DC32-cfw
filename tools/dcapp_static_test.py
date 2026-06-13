@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import binascii
+import subprocess
 import struct
 from pathlib import Path
 
@@ -20,6 +21,20 @@ APP_RAM_END = APP_RAM_START + APP_RAM_SIZE
 WORKSPACE_WRAM_SIZE = 0x8000
 WORKSPACE_VRAM_SIZE = 0x4000
 QSPI_APP_CACHE_SIZE = 0x40000
+QSPI_APP_CACHE_START = 0x10080000
+QSPI_SETTINGS_START = 0x100C0000
+QSPI_SETTINGS_LEN = 0x1F000
+QSPI_FILENAME_START = 0x100DF000
+QSPI_FILENAME_MAXLEN = 0x1000
+QSPI_RAM_COPY_START = 0x100E0000
+QSPI_RAM_SIZE_MAX = 0x10000
+QSPI_ROM_START = 0x10100000
+QSPI_ROM_SIZE_MAX = 0x300000
+DOOM_SHORTPTR_BASE = 0x20030000
+DOOM_SHORTPTR_END = DOOM_SHORTPTR_BASE + 0x40000
+DOOM_WHX_PATH = ROOT / "third_party" / "rp2040-doom" / "doom1.whx"
+DOOM_WHX_LEGACY_VPATCH_COUNT = 384
+DOOM_WHX_CURRENT_VPATCH_COUNT = 385
 BADUSB_SCRATCH_MIN = 2048 + 2048 + 128
 IMAGE_TRANSFER_MIN = 32768
 PICOWARE_APP_SCRATCH_MIN = 4096
@@ -39,6 +54,7 @@ APPS = {
     "flappy.DC32": 203,
     "labyrinth.DC32": 204,
     "trex.DC32": 205,
+    "doom.DC32": 206,
     "starfield.DC32": 220,
     "spiro.DC32": 221,
     "cube.DC32": 222,
@@ -91,12 +107,149 @@ def active_vram_size(scratch_size: int) -> int:
     return min(scratch_size - WORKSPACE_WRAM_SIZE, WORKSPACE_VRAM_SIZE)
 
 
+def ranges_overlap(start_a: int, size_a: int, start_b: int, size_b: int) -> bool:
+    return start_a < start_b + size_b and start_b < start_a + size_a
+
+
+def doom_symbol_address(symbol: str) -> int:
+    elf_path = ROOT / "build" / "dcapp_doom"
+    expect("DOOM ELF exists", elf_path.is_file())
+    try:
+        result = subprocess.run(
+            ["arm-none-eabi-nm", "-n", str(elf_path)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise SystemExit("FAIL: arm-none-eabi-nm is available for DOOM symbol checks")
+
+    expect("arm-none-eabi-nm reads DOOM ELF", result.returncode == 0)
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-1] == symbol:
+            return int(parts[0], 16)
+    raise SystemExit(f"FAIL: DOOM symbol {symbol} exists")
+
+
+def check_doom_shortptr_symbols() -> None:
+    thinkercap = doom_symbol_address("thinkercap")
+    expect(
+        "DOOM thinkercap stays in shortptr window",
+        DOOM_SHORTPTR_BASE + 4 <= thinkercap < DOOM_SHORTPTR_END,
+    )
+
+
+def check_flash_layout() -> None:
+    app_cache_end = QSPI_APP_CACHE_START + QSPI_APP_CACHE_SIZE
+    regions = {
+        "settings": (QSPI_SETTINGS_START, QSPI_SETTINGS_LEN),
+        "filename": (QSPI_FILENAME_START, QSPI_FILENAME_MAXLEN),
+        "RAM copy": (QSPI_RAM_COPY_START, QSPI_RAM_SIZE_MAX),
+        "ROM staging": (QSPI_ROM_START, QSPI_ROM_SIZE_MAX),
+    }
+
+    for label, (start, size) in regions.items():
+        expect(
+            f"app cache does not overlap {label}",
+            not ranges_overlap(QSPI_APP_CACHE_START, QSPI_APP_CACHE_SIZE, start, size),
+        )
+    expect("app cache ends at settings start", app_cache_end <= QSPI_SETTINGS_START)
+
+
+def whx_lump_span(data: bytes, lump_num: int) -> tuple[int, int]:
+    num_lumps = struct.unpack_from("<I", data, 4)[0]
+    info_table_ofs = struct.unpack_from("<I", data, 8)[0]
+
+    expect("doom1.whx lump range", lump_num < num_lumps)
+    raw0 = struct.unpack_from("<I", data, info_table_ofs + lump_num * 4)[0]
+    raw1 = struct.unpack_from("<I", data, info_table_ofs + (lump_num + 1) * 4)[0]
+    offset = raw0 & 0x00FFFFFF
+    size = ((raw1 - raw0) & 0x00FFFFFF) - (raw0 >> 30)
+    expect("doom1.whx lump span fits", offset <= len(data) and size <= len(data) - offset)
+    return offset, size
+
+
+def whx_named_lump(data: bytes, name: bytes) -> tuple[int, int, int]:
+    num_lumps = struct.unpack_from("<I", data, 4)[0]
+    info_table_ofs = struct.unpack_from("<I", data, 8)[0]
+    named_count = struct.unpack_from("<H", data, 34)[0]
+    names_ofs = 36 + (num_lumps + 1) * 4
+
+    expect("doom1.whx directory fits", info_table_ofs + (num_lumps + 1) * 4 <= len(data))
+    expect("doom1.whx names fit", names_ofs + named_count * 12 <= len(data))
+    for i in range(named_count):
+        entry_ofs = names_ofs + i * 12
+        entry_name = data[entry_ofs : entry_ofs + 10].split(b"\0", 1)[0].lower()
+        if entry_name == name:
+            lump_num = struct.unpack_from("<H", data, entry_ofs + 10)[0]
+            expect("doom1.whx named lump range", lump_num < num_lumps)
+            offset, size = whx_lump_span(data, lump_num)
+            return lump_num, offset, size
+    raise SystemExit(f"FAIL: doom1.whx missing {name.decode('ascii')}")
+
+
+def doom_vpatch_index(name: str) -> int:
+    text = (ROOT / "third_party" / "rp2040-doom" / "src" / "whddata.h").read_text(encoding="utf-8")
+    start = text.index("#define VPATCH_LIST")
+    end = text.index("#define NAMED_FLAT_LIST", start)
+    entries: list[str] = []
+
+    for raw_line in text[start:end].splitlines()[1:]:
+        line = raw_line.split("\\", 1)[0].strip().rstrip(",").strip()
+
+        if line == "VPATCH_NAME_INVALID":
+            entries.append("INVALID")
+        elif line.startswith("VPATCH_NAME(") and line.endswith(")"):
+            entries.append(line.removeprefix("VPATCH_NAME(").removesuffix(")"))
+    expect("doom vpatch enum parsed", len(entries) == DOOM_WHX_CURRENT_VPATCH_COUNT)
+    return entries.index(name)
+
+
+def whx_vpatch_has_palette_seed(data: bytes, lump_num: int) -> bool:
+    offset, size = whx_lump_span(data, lump_num)
+
+    expect("doom1.whx vpatch header fits", size >= 4)
+    return bool(data[offset + 2] and (data[offset + 3] & 1))
+
+
+def check_doom_whx() -> None:
+    expect("doom1.whx exists", DOOM_WHX_PATH.is_file())
+    data = DOOM_WHX_PATH.read_bytes()
+    whx_size = struct.unpack_from("<I", data, 12)[0]
+    source_name = data[20:34].split(b"\0", 1)[0]
+    _, pstart_offset, pstart_size = whx_named_lump(data, b"p_start")
+    pstart_entries = pstart_size // 2
+    pstart = [
+        struct.unpack_from("<H", data, pstart_offset + i * 2)[0]
+        for i in range(pstart_entries)
+    ]
+    stbar_idx = doom_vpatch_index("STBAR")
+    m_bright_idx = doom_vpatch_index("M_BRIGHT")
+    stcfn033_idx = doom_vpatch_index("STCFN033")
+
+    expect("doom1.whx magic", data[:4] == b"IWHX")
+    expect("doom1.whx size field", whx_size == len(data))
+    expect("doom1.whx source WAD metadata", source_name == b"DOOM1.WAD")
+    expect("doom1.whx P_START entries are 16-bit", pstart_size % 2 == 0)
+    expect("doom1.whx legacy vpatch count", pstart_entries == DOOM_WHX_LEGACY_VPATCH_COUNT)
+    expect("doom vpatch gap is before STCFN033", m_bright_idx + 1 == stcfn033_idx)
+    expect("doom1.whx keeps pre-gap vpatches aligned", whx_vpatch_has_palette_seed(data, pstart[stbar_idx]))
+    expect("doom1.whx omits M_BRIGHT vpatch", whx_vpatch_has_palette_seed(data, pstart[stcfn033_idx - 1]))
+    expect("doom1.whx STCFN033 raw slot is shifted", not whx_vpatch_has_palette_seed(data, pstart[stcfn033_idx]))
+
+
 def check_loader_source() -> None:
     text = (ROOT / "src" / "dcApp.c").read_text(encoding="utf-8")
     qspi_h = (ROOT / "src" / "qspi.h").read_text(encoding="utf-8")
     qspi_c = (ROOT / "src" / "qspi2350.c").read_text(encoding="utf-8")
     workspace = (ROOT / "src" / "toolWorkspace.c").read_text(encoding="utf-8")
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    sd_zip = (ROOT / "tools" / "build_sd_zip.py").read_text(encoding="utf-8")
+    doom_platform = (ROOT / "src" / "apps" / "doom" / "doom_dc32_platform.c").read_text(encoding="utf-8")
+    doom_app = (ROOT / "src" / "apps" / "doom" / "doom_app.c").read_text(encoding="utf-8")
+    doom_sound = (ROOT / "src" / "apps" / "doom" / "doom_dc32_sound.c").read_text(encoding="utf-8")
     run_start = text.find("static enum DcAppResult dcAppRunLoadedById")
     run_entry = text.find("ret = entry(&mHostApi, args)", run_start)
     run_sync = text.find("dcAppPrvSyncExecutableCache();", run_start)
@@ -118,6 +271,7 @@ def check_loader_source() -> None:
     expect("loader syncs rewritten image after verify", verify_sync != -1)
     expect("loader syncs app cache before app entry", run_sync != -1 and run_entry != -1 and run_sync < run_entry)
     expect("loader clears active app context before load and run", text.count("dcAppPrvClearActiveAppContext();") >= 3)
+    expect("loader stops PWM audio around DC app execution", text.count("audioPwmStop();") >= 2)
     expect("QSPI exposes uncached XIP reads", "flashUncachedPtr" in qspi_h and "XIP_NOCACHE_NOALLOC_BASE" in qspi_c)
     expect("QSPI exposes XIP cache flush helper", "flashFlushXipCacheRange" in qspi_h and "XIP_MAINTENANCE_BASE" in qspi_c and "QSPI_XIP_MAINT_INVALIDATE" in qspi_c)
     expect("QSPI exposes executable sync helper", "flashSyncExecutableRange" in qspi_h and "SCB->ICIALLU" in qspi_c and "SCB->BPIALL" in qspi_c)
@@ -130,7 +284,45 @@ def check_loader_source() -> None:
     for filename, runtime in APPS.items():
         output = filename.removesuffix(".DC32")
         expect(f"{filename} has CMake dcapp target", f" {output} {runtime}" in cmake)
-        expect(f"{filename} is in SD apps package", f'"{filename}"' in cmake or f'"{filename}"' in (ROOT / "tools" / "build_sd_zip.py").read_text(encoding="utf-8"))
+        expect(f"{filename} is in SD apps package", f'"{filename}"' in cmake or f'"{filename}"' in sd_zip)
+    expect("DOOM WHX is packaged under APPS", '"APPS/doom1.whx"' in sd_zip and "rp2040-doom" in sd_zip)
+    expect("DOOM shareware label is explicit", '"DOOM (shareware)"' in text and '"DOOM (shareware)"' in (ROOT / "src" / "ui.c").read_text(encoding="utf-8"))
+    expect("DOOM converter is not packaged", "doom_whx_convert" not in sd_zip and "ROMS/DOOM" not in sd_zip)
+    expect("DOOM accepts WHX M_BRIGHT vpatch gap", "DC32_WHD_OMITS_M_BRIGHT_VPATCH=1" in cmake)
+    expect("DOOM repairs WHX M_BRIGHT vpatch gap", "VPATCH_M_BRIGHT" in cmake)
+    expect("DOOM accepts current and legacy vpatch counts", "doom WHX vpatches %d expected %d/%d" in cmake)
+    expect("DOOM trims local build paths from assertions", "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build" in cmake)
+    expect("DOOM no longer forces shareware demo mode", "DEMO1_ONLY=1" not in cmake)
+    expect("DOOM opens APPS doom1.whx only", 'DOOM_DC32_WHX_PATH "/APPS/doom1.whx"' in (ROOT / "src" / "apps" / "doom" / "doom_dc32.h").read_text(encoding="utf-8") and "fatfsFileOpen(vol, DOOM_DC32_WHX_PATH" in doom_app)
+    expect("DOOM does not scan ROMS/DOOM", "fatfsDirOpen" not in doom_app and "fatfsFileOpenWithLocator" not in doom_app and "ROMS/DOOM" not in doom_app)
+    expect("DOOM requires shareware WHX source", "WHX source %s is not DOOM1.WAD" in doom_app)
+    expect("DOOM staged identity includes size hash source", "doomDc32WhxSameIdentity" in doom_app and "hash" in doom_app and "sourceName" in doom_app)
+    expect("DOOM rejects oversized WHX staging", "QSPI_ROM_SIZE_MAX" in doom_app and "exceeds" in doom_app)
+    expect("DOOM requires P_START and E1M1", "WHX missing P_START" in doom_app and "WHX missing E1M1" in doom_app)
+    expect("DOOM builds real intermission", "doom/wi_stuff.c" in cmake and "void WI_Start" not in (ROOT / "src" / "apps" / "doom" / "doom_dc32_stubs.c").read_text(encoding="utf-8"))
+    expect("DOOM restores attract demo playback", "D_Dc32DeferDemoIfPresent" in cmake and "G_DeferedPlayDemo(name)" in cmake)
+    expect("DOOM guards invalid demo sprite frames", "r_things_dc32.c" in cmake and "if (demoplayback)\\n            return;" in cmake and "psp->state->frame & FF_FRAMEMASK" in cmake)
+    expect("DOOM guards missing demo screen pages", "pagename ? W_CheckNumForName(pagename) : -1" in cmake and "D_AdvanceDemo();" in cmake)
+    expect("DOOM links real sound frontend", "i_sound.c" in cmake and "doom/s_sound.c" in cmake and "doom/sounds.c" in cmake)
+    expect("DOOM ships with audio disabled", "DOOM_DC32_ENABLE_AUDIO=0" in cmake and "audio disabled in DC32 safe mode" in doom_sound)
+    expect("DOOM keeps experimental audio behind guard", "#if DOOM_DC32_ENABLE_AUDIO" in doom_sound and "audioPwmPcmStart" in doom_sound and "audioPwmPcmWriteU8" in doom_sound)
+    expect("DOOM guarded audio decodes WHX ADPCM SFX", "ADPCM_BLOCK_SIZE" in doom_sound and "data[0] != 0x03" in doom_sound and "data[1] != 0x80" in doom_sound)
+    expect("DOOM disabled audio is not frame-pumped", "I_UpdateSound();" not in doom_platform and "doomDc32SoundStopAll();" in doom_app)
+    expect("DOOM converts host ticks to microseconds", "doomDc32TicksToUsec(doomDc32HostTicks())" in doom_platform and "ticks % TICKS_PER_SECOND" in doom_platform)
+    expect("DOOM converts host ticks to game tics", "doomDc32HostTicks() * TICRATE) / TICKS_PER_SECOND" in doom_platform)
+    expect("DOOM converts host ticks to milliseconds", "doomDc32HostTicks() * 1000ull) / TICKS_PER_SECOND" in doom_platform)
+    expect("DOOM maps Start to menu enter", "doomDc32PostKey(KEY_ENTER, (keys & KEY_BIT_START) != 0)" in doom_platform)
+    expect("DOOM maps Select to menu escape", "doomDc32PostKey(KEY_ESCAPE, (keys & KEY_BIT_SEL) != 0)" in doom_platform)
+    expect("DOOM maps B to use/open", "doomDc32PostKey(' ', (keys & KEY_BIT_B) != 0)" in doom_platform)
+    expect("DOOM maps Start+Select to pause", "KEY_BIT_START | KEY_BIT_SEL" in doom_platform and "doomDc32PostKey(KEY_PAUSE, pauseDown)" in doom_platform)
+    expect("DOOM B no longer maps to run", "doomDc32PostKey(KEY_RSHIFT, (keys & KEY_BIT_B)" not in doom_platform)
+    expect("DOOM disables missing WHX brightness menu", "BRIGHTNESS_MENU 0 // DC32 WHX omits M_BRIGHT" in cmake)
+    expect("DOOM guards invalid shared vpatch palettes", "vpatch_shared_palette(patch) >= NUM_SHARED_PALETTES" in cmake)
+    expect("DOOM recovers corrupt patch decoder cache", "dc32_reset_patch_decoder_cache" in cmake and "header->size == 0" in cmake and "offset_or_inverse_slot = patch_offset_or_inverse_slot(patch_num)" in cmake)
+    expect("DOOM presenter handles wipe video type", "case VIDEO_TYPE_WIPE:" in doom_platform and "doomDc32AdvanceWipe" in doom_platform)
+    expect("DOOM presenter keeps overlay active list", "vpatchlists->vpatch_next[prev]" in doom_platform and "doomDc32DrawOverlayLine" in doom_platform)
+    expect("DOOM receives screen orientation setting", "if (appId == DcAppIdDoom)" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8") and "args.rotate = settings.rotation" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8"))
+    expect("DOOM applies screen orientation setting", "doomDc32Canvas.flipped = 1u" in doom_app and "args && args->rotate" in doom_app)
 
 
 def check_artifacts() -> None:
@@ -190,8 +382,11 @@ def check_artifacts() -> None:
 
 
 def main() -> int:
+    check_flash_layout()
+    check_doom_whx()
     check_loader_source()
     check_artifacts()
+    check_doom_shortptr_symbols()
     print("DCAPP static tests passed")
     return 0
 

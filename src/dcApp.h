@@ -30,6 +30,7 @@ enum DcAppId {
 	DcAppIdFlappy = 203,
 	DcAppIdLabyrinth = 204,
 	DcAppIdTrex = 205,
+	DcAppIdDoom = 206,
 	DcAppIdStarfield = 220,
 	DcAppIdSpiro = 221,
 	DcAppIdCube = 222,

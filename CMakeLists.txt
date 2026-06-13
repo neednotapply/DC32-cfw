@@ -482,6 +482,408 @@ set(PICOWARE_APP_SOURCES
     ${SRC_DIR}/apps/picoware_ports.c
 )
 
+set(RP2040_DOOM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rp2040-doom")
+set(DOOM_SRC_DIR "${RP2040_DOOM_DIR}/src")
+set(DOOM_RENDER_DIR "${CMAKE_CURRENT_BINARY_DIR}/doom_dc32")
+set(DOOM_RENDER_SOURCE "${DOOM_RENDER_DIR}/pd_render_dc32.cpp")
+set(DOOM_LOOP_SOURCE "${DOOM_RENDER_DIR}/d_loop_dc32.c")
+set(DOOM_D_MAIN_SOURCE "${DOOM_RENDER_DIR}/d_main_dc32.c")
+set(DOOM_MENU_SOURCE "${DOOM_RENDER_DIR}/m_menu_dc32.c")
+set(DOOM_R_DATA_WHD_SOURCE "${DOOM_RENDER_DIR}/r_data_whd_dc32.c")
+set(DOOM_R_THINGS_SOURCE "${DOOM_RENDER_DIR}/r_things_dc32.c")
+set(DOOM_VIDEO_SOURCE "${DOOM_RENDER_DIR}/v_video_dc32.c")
+
+file(MAKE_DIRECTORY "${DOOM_RENDER_DIR}")
+file(READ "${DOOM_SRC_DIR}/pd_render.cpp" DOOM_PD_RENDER_SOURCE)
+string(REPLACE "#include \"picodoom.h\""
+    "#include \"picodoom.h\"\n#include \"doom_dc32.h\""
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#define USE_CORE1_FOR_FLATS 1"
+    "#define USE_CORE1_FOR_FLATS 0"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#define USE_CORE1_FOR_REGULAR 1"
+    "#define USE_CORE1_FOR_REGULAR 0"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#define USE_INTERP PICO_ON_DEVICE"
+    "#define USE_INTERP 0"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#if !PICO_RP2350\n#define RENDER_COL_MAX 3600\n#else\n#define RENDER_COL_MAX 7200\n#endif"
+    "#define RENDER_COL_MAX DOOM_DC32_RENDER_COL_MAX"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "extern uint8_t __aligned(4) frame_buffer[2][SCREENWIDTH * MAIN_VIEWHEIGHT];"
+    "extern uint8_t (*frame_buffer)[SCREENWIDTH * MAIN_VIEWHEIGHT];"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "static uint8_t __aligned(4) list_buffer[RENDER_COL_MAX * sizeof(pd_column) + 64*64]; // extra 64*64 is for one flat\nstatic uint8_t *last_list_buffer_limit = list_buffer + sizeof(list_buffer);\n//static_assert(text_font_cpy > list_buffer, \"\");\n#define MAX_CACHED_FLATS (sizeof(list_buffer) / 4096)"
+    "extern uint8_t *doomDc32ListBuffer;\nextern uint32_t doomDc32ListBufferSize;\n#define list_buffer doomDc32ListBuffer\nstatic uint8_t *last_list_buffer_limit;\n#define MAX_CACHED_FLATS 8"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "void pd_init() {\n    sem_init(&core1_wake, 0, 1);"
+    "void pd_init() {\n    last_list_buffer_limit = list_buffer + doomDc32ListBufferSize;\n    sem_init(&core1_wake, 0, 1);"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#if PICO_ON_DEVICE\n    static_assert(sizeof(vpatchlists_t) < 0xc00, \"\");\n#if !PICO_RP2350\n    vpatchlists = (vpatchlists_t *)(USBCTRL_DPRAM_BASE + 0x400);\n#else\n    static_assert(SRAM_SCRATCH_X_BASE - 0xc00 >= SHORTPTR_BASE + 0x4000, \"\"); // avoid potential heap locations\n    vpatchlists = (vpatchlists_t *)(SRAM_SCRATCH_X_BASE - 0xc00);\n#endif\n#else\n    vpatchlists = (vpatchlists_t*)malloc(sizeof(vpatchlists_t));\n#endif"
+    "    vpatchlists = (vpatchlists_t*)doomDc32VpatchLists();"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "    uint8_t *list_buffer_limit = list_buffer + count_of(list_buffer);"
+    "    uint8_t *list_buffer_limit = list_buffer + doomDc32ListBufferSize;"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "    sem_release(&core0_done);\n    sem_acquire_blocking(&core1_done);"
+    "    if (USE_CORE1_FOR_FLATS || USE_CORE1_FOR_REGULAR) {\n        sem_release(&core0_done);\n        sem_acquire_blocking(&core1_done);\n    }"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "void pd_core1_loop() {\n#if PICO_ON_DEVICE"
+    "void pd_core1_loop() {\n#if 0"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "#if PICO_ON_DEVICE\nextern \"C\" {\n#include \"i_picosound.h\"\n}"
+    "#if 0\nextern \"C\" {\n#include \"i_picosound.h\"\n}"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "    sem_release(&render_frame_ready);\n    DEBUG_PINS_CLR(start_end, 2);"
+    "    sem_release(&render_frame_ready);\n    doomDc32PresentFrame();\n    DEBUG_PINS_CLR(start_end, 2);"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "static uint16_t patch_decoder_tmp_table_patch_numbers[WHD_MAX_COL_UNIQUE_PATCHES];"
+    "static uint16_t patch_decoder_tmp_table_patch_numbers[WHD_MAX_COL_UNIQUE_PATCHES];\nstatic void dc32_reset_patch_decoder_cache(void) {\n    memset(patch_hash_offsets, -1, sizeof(patch_hash_offsets));\n    memset(patch_decoder_circular_buf, 0, sizeof(patch_decoder_circular_buf));\n    patch_decoder_circular_buf_write_pos = 0;\n    patch_decoder_circular_buf_write_limit = PATCH_DECODER_CIRCULAR_BUFFER_SIZE;\n    memset(patch_decoder_tmp_table_patch_numbers, 0, sizeof(patch_decoder_tmp_table_patch_numbers));\n}"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "    memset(patch_hash_offsets, -1, sizeof(patch_hash_offsets));\n    patch_decoder_circular_buf_write_limit = PATCH_DECODER_CIRCULAR_BUFFER_SIZE;"
+    "    dc32_reset_patch_decoder_cache();"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "        assert(slot == patch_hash(header->patch_num));\n        if (header->patch_num == patch_num) return offset;"
+    "        if (slot != patch_hash(header->patch_num)) {\n            dc32_reset_patch_decoder_cache();\n            return ~slot;\n        }\n        if (header->patch_num == patch_num) return offset;"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "                        assert(*last != -1);\n                        *last = ((patch_hash_entry_header *) (patch_decoder_circular_buf + *last))->next;\n                        for (int p = 0; p < pdi_count; p++) {\n                            if (pdis[p].header.patch_num == header->patch_num) {\n                                pdis[p].decoder = nullptr;\n                            }\n                        }\n                        patch_decoder_circular_buf_write_limit += header->size;"
+    "                        if (*last == -1 || header->size == 0 ||\n                            patch_decoder_circular_buf_write_limit + header->size > PATCH_DECODER_CIRCULAR_BUFFER_SIZE) {\n                            dc32_reset_patch_decoder_cache();\n                            for (int p = 0; p < pdi_count; p++) {\n                                pdis[p].decoder = nullptr;\n                            }\n                            offset_or_inverse_slot = patch_offset_or_inverse_slot(patch_num);\n                            continue;\n                        }\n                        *last = ((patch_hash_entry_header *) (patch_decoder_circular_buf + *last))->next;\n                        for (int p = 0; p < pdi_count; p++) {\n                            if (pdis[p].header.patch_num == header->patch_num) {\n                                pdis[p].decoder = nullptr;\n                            }\n                        }\n                        patch_decoder_circular_buf_write_limit += header->size;"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "        case GS_DEMOSCREEN:\n            patch_num = W_GetNumForName(pagename);\n            break;"
+    "        case GS_DEMOSCREEN: {\n            int pnum = pagename ? W_CheckNumForName(pagename) : -1;\n            if (pnum >= 0) patch_num = pnum;\n            break;\n        }"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+string(REPLACE "                    int pnum = W_GetNumForName(pagename);\n                    assert(pnum);\n                    maybe_draw_single_screen(pnum);"
+    "                    int pnum = pagename ? W_CheckNumForName(pagename) : -1;\n                    if (pnum >= 0) {\n                        maybe_draw_single_screen(pnum);\n                    } else {\n                        D_AdvanceDemo();\n                    }"
+    DOOM_PD_RENDER_SOURCE "${DOOM_PD_RENDER_SOURCE}")
+file(WRITE "${DOOM_RENDER_SOURCE}" "${DOOM_PD_RENDER_SOURCE}")
+
+file(READ "${DOOM_SRC_DIR}/d_loop.c" DOOM_D_LOOP_SOURCE)
+string(REPLACE "            if (net_client_connected && lplayer_count < 2) {\n                net_client_connected = false;\n                piconet_stop();\n            }"
+    "#if USE_PICO_NET\n            if (net_client_connected && lplayer_count < 2) {\n                net_client_connected = false;\n                piconet_stop();\n            }\n#endif"
+    DOOM_D_LOOP_SOURCE "${DOOM_D_LOOP_SOURCE}")
+file(WRITE "${DOOM_LOOP_SOURCE}" "${DOOM_D_LOOP_SOURCE}")
+
+file(READ "${DOOM_SRC_DIR}/doom/d_main.c" DOOM_D_MAIN_SOURCE_TEXT)
+string(REPLACE "void D_AdvanceDemo (void)\n{\n    advancedemo = true;\n}"
+    "void D_AdvanceDemo (void)\n{\n    advancedemo = true;\n}\n\nstatic void D_Dc32DeferDemoIfPresent(const char *name)\n{\n    if (name && W_CheckNumForName(name) >= 0)\n        G_DeferedPlayDemo(name);\n    else\n        D_AdvanceDemo();\n}"
+    DOOM_D_MAIN_SOURCE_TEXT "${DOOM_D_MAIN_SOURCE_TEXT}")
+string(REPLACE "G_DeferedPlayDemo(DEH_String(\"demo1\"));"
+    "D_Dc32DeferDemoIfPresent(DEH_String(\"demo1\"));"
+    DOOM_D_MAIN_SOURCE_TEXT "${DOOM_D_MAIN_SOURCE_TEXT}")
+string(REPLACE "G_DeferedPlayDemo(DEH_String(\"demo2\"));"
+    "D_Dc32DeferDemoIfPresent(DEH_String(\"demo2\"));"
+    DOOM_D_MAIN_SOURCE_TEXT "${DOOM_D_MAIN_SOURCE_TEXT}")
+string(REPLACE "G_DeferedPlayDemo(DEH_String(\"demo3\"));"
+    "D_Dc32DeferDemoIfPresent(DEH_String(\"demo3\"));"
+    DOOM_D_MAIN_SOURCE_TEXT "${DOOM_D_MAIN_SOURCE_TEXT}")
+string(REPLACE "G_DeferedPlayDemo(DEH_String(\"demo4\"));"
+    "D_Dc32DeferDemoIfPresent(DEH_String(\"demo4\"));"
+    DOOM_D_MAIN_SOURCE_TEXT "${DOOM_D_MAIN_SOURCE_TEXT}")
+file(WRITE "${DOOM_D_MAIN_SOURCE}" "${DOOM_D_MAIN_SOURCE_TEXT}")
+
+file(READ "${DOOM_SRC_DIR}/doom/r_things.c" DOOM_R_THINGS_SOURCE_TEXT)
+string(REPLACE "    if ((unsigned int) mobj_sprite(thing) >= (unsigned int) numsprites)\n        I_Error(\"R_ProjectSprite: invalid sprite number %i \",\n                mobj_sprite(thing));"
+    "    if ((unsigned int) mobj_sprite(thing) >= (unsigned int) numsprites) {\n        if (demoplayback)\n            return;\n        I_Error(\"R_ProjectSprite: invalid sprite number %i \",\n                mobj_sprite(thing));\n    }"
+    DOOM_R_THINGS_SOURCE_TEXT "${DOOM_R_THINGS_SOURCE_TEXT}")
+string(REPLACE "    if ((mobj_frame(thing) & FF_FRAMEMASK) >= sprite_numframes(mobj_sprite(thing)))\n        I_Error(\"R_ProjectSprite: invalid sprite frame %i : %i \",\n                mobj_sprite(thing), mobj_frame(thing));"
+    "    if ((mobj_frame(thing) & FF_FRAMEMASK) >= sprite_numframes(mobj_sprite(thing))) {\n        if (demoplayback)\n            return;\n        I_Error(\"R_ProjectSprite: invalid sprite frame %i : %i \",\n                mobj_sprite(thing), mobj_frame(thing));\n    }"
+    DOOM_R_THINGS_SOURCE_TEXT "${DOOM_R_THINGS_SOURCE_TEXT}")
+string(REPLACE "    if ((unsigned) psp->state->sprite >= (unsigned int) numsprites)\n        I_Error(\"R_ProjectSprite: invalid sprite number %i \",\n                psp->state->sprite);"
+    "    if ((unsigned) psp->state->sprite >= (unsigned int) numsprites) {\n        if (demoplayback)\n            return;\n        I_Error(\"R_ProjectSprite: invalid sprite number %i \",\n                psp->state->sprite);\n    }"
+    DOOM_R_THINGS_SOURCE_TEXT "${DOOM_R_THINGS_SOURCE_TEXT}")
+string(REPLACE "    if ((psp->state->frame & FF_FRAMEMASK) >= sprite_numframes(psp->state->sprite))\n        I_Error(\"R_ProjectSprite: invalid sprite frame %i : %i \",\n                psp->state->sprite, psp->state->frame);"
+    "    if ((psp->state->frame & FF_FRAMEMASK) >= sprite_numframes(psp->state->sprite)) {\n        if (demoplayback)\n            return;\n        I_Error(\"R_ProjectSprite: invalid sprite frame %i : %i \",\n                psp->state->sprite, psp->state->frame);\n    }"
+    DOOM_R_THINGS_SOURCE_TEXT "${DOOM_R_THINGS_SOURCE_TEXT}")
+file(WRITE "${DOOM_R_THINGS_SOURCE}" "${DOOM_R_THINGS_SOURCE_TEXT}")
+
+file(READ "${DOOM_SRC_DIR}/doom/m_menu.c" DOOM_M_MENU_SOURCE)
+string(REPLACE "#define BRIGHTNESS_MENU 1 // for badge"
+    "#define BRIGHTNESS_MENU 0 // DC32 WHX omits M_BRIGHT"
+    DOOM_M_MENU_SOURCE "${DOOM_M_MENU_SOURCE}")
+string(REPLACE "    // \"Game\" for Network\n    V_DrawPatchDirect(OptionsDef.x + 105, OptionsDef.y + LINEHEIGHT * networkgame,\n                      VPATCH_HANDLE(VPATCH_NAME(M_GAME)));"
+    "#if USE_PICO_NET\n    // \"Game\" for Network\n    V_DrawPatchDirect(OptionsDef.x + 105, OptionsDef.y + LINEHEIGHT * networkgame,\n                      VPATCH_HANDLE(VPATCH_NAME(M_GAME)));\n#endif"
+    DOOM_M_MENU_SOURCE "${DOOM_M_MENU_SOURCE}")
+file(WRITE "${DOOM_MENU_SOURCE}" "${DOOM_M_MENU_SOURCE}")
+
+file(READ "${DOOM_SRC_DIR}/doom/r_data_whd.c" DOOM_R_DATA_WHD_SOURCE_TEXT)
+string(REPLACE "#include <stdio.h>"
+    "#include <stdio.h>\n#include <string.h>"
+    DOOM_R_DATA_WHD_SOURCE_TEXT "${DOOM_R_DATA_WHD_SOURCE_TEXT}")
+string(REPLACE "    whd_vpatch_numbers = (const uint16_t *) W_CacheLumpName(\"P_START\", PU_STATIC);\n    if (W_LumpLength(W_GetNumForName(\"P_START\")) != NUM_VPATCHES * 2) {\n        I_Error(\"whd is out of sync with VPATCH enum\"); // make sure whd_gen is up to date with code, and whd is regenerated\n    }"
+    "    {\n        lumpindex_t pstart_lump = W_GetNumForName(\"P_START\");\n        const uint16_t *raw_vpatch_numbers = (const uint16_t *) W_CacheLumpNum(pstart_lump, PU_STATIC);\n        int pstart_len = W_LumpLength(pstart_lump);\n#if DC32_WHD_OMITS_M_BRIGHT_VPATCH\n        static uint16_t dc32_vpatch_numbers[NUM_VPATCHES];\n        if (pstart_len == (NUM_VPATCHES - 1) * 2) {\n            const int missing_vpatch = VPATCH_M_BRIGHT;\n            memcpy(dc32_vpatch_numbers, raw_vpatch_numbers, missing_vpatch * sizeof(dc32_vpatch_numbers[0]));\n            dc32_vpatch_numbers[missing_vpatch] = raw_vpatch_numbers[VPATCH_NAME_INVALID];\n            memcpy(dc32_vpatch_numbers + missing_vpatch + 1, raw_vpatch_numbers + missing_vpatch,\n                   pstart_len - missing_vpatch * sizeof(raw_vpatch_numbers[0]));\n            whd_vpatch_numbers = dc32_vpatch_numbers;\n        } else if (pstart_len == NUM_VPATCHES * 2) {\n            whd_vpatch_numbers = raw_vpatch_numbers;\n        } else {\n            I_Error(\"doom WHX vpatches %d expected %d/%d\", pstart_len / 2, NUM_VPATCHES - 1, NUM_VPATCHES);\n        }\n#else\n        whd_vpatch_numbers = raw_vpatch_numbers;\n        if (pstart_len != NUM_VPATCHES * 2) {\n            I_Error(\"whd is out of sync with VPATCH enum\"); // make sure whd_gen is up to date with code, and whd is regenerated\n        }\n#endif\n    }"
+    DOOM_R_DATA_WHD_SOURCE_TEXT "${DOOM_R_DATA_WHD_SOURCE_TEXT}")
+file(WRITE "${DOOM_R_DATA_WHD_SOURCE}" "${DOOM_R_DATA_WHD_SOURCE_TEXT}")
+
+file(READ "${DOOM_SRC_DIR}/v_video.c" DOOM_VIDEO_SOURCE_TEXT)
+string(REPLACE "        const patch_t *patch = resolve_vpatch_handle(patchlist[l].entry.patch_handle);"
+    "        if (patchlist[l].entry.patch_handle == VPATCH_NAME_INVALID)\n            continue;\n        const patch_t *patch = resolve_vpatch_handle(patchlist[l].entry.patch_handle);"
+    DOOM_VIDEO_SOURCE_TEXT "${DOOM_VIDEO_SOURCE_TEXT}")
+string(REPLACE "        const uint8_t *pal;\n        if (!vpatch_has_shared_palette(patch)) {"
+    "        if (vpatch_has_shared_palette(patch) && vpatch_shared_palette(patch) >= NUM_SHARED_PALETTES)\n            continue;\n        const uint8_t *pal;\n        if (!vpatch_has_shared_palette(patch)) {"
+    DOOM_VIDEO_SOURCE_TEXT "${DOOM_VIDEO_SOURCE_TEXT}")
+string(REPLACE "void V_DrawPatchN(int x, int y, vpatch_handle_large_t patch_handle, int repeat) {\n    int count;"
+    "void V_DrawPatchN(int x, int y, vpatch_handle_large_t patch_handle, int repeat) {\n#if USE_WHD\n    if (patch_handle == VPATCH_NAME_INVALID)\n        return;\n#endif\n    int count;"
+    DOOM_VIDEO_SOURCE_TEXT "${DOOM_VIDEO_SOURCE_TEXT}")
+string(REPLACE "void V_DrawPatchFlipped(int x, int y, vpatch_handle_large_t patch_handle) {\n#if !USE_WHD"
+    "void V_DrawPatchFlipped(int x, int y, vpatch_handle_large_t patch_handle) {\n#if USE_WHD\n    if (patch_handle == VPATCH_NAME_INVALID)\n        return;\n#endif\n#if !USE_WHD"
+    DOOM_VIDEO_SOURCE_TEXT "${DOOM_VIDEO_SOURCE_TEXT}")
+file(WRITE "${DOOM_VIDEO_SOURCE}" "${DOOM_VIDEO_SOURCE_TEXT}")
+
+set(DOOM_COMMON_SOURCES
+    ${DOOM_SRC_DIR}/m_argv.c
+    ${DOOM_SRC_DIR}/m_misc.c
+    ${DOOM_SRC_DIR}/i_sound.c
+    ${DOOM_SRC_DIR}/d_event.c
+    ${DOOM_SRC_DIR}/d_iwad.c
+    ${DOOM_LOOP_SOURCE}
+    ${DOOM_SRC_DIR}/d_mode.c
+    ${DOOM_SRC_DIR}/deh_str.c
+    ${DOOM_SRC_DIR}/gusconf.c
+    ${DOOM_SRC_DIR}/m_bbox.c
+    ${DOOM_SRC_DIR}/m_cheat.c
+    ${DOOM_SRC_DIR}/m_config.c
+    ${DOOM_SRC_DIR}/m_controls.c
+    ${DOOM_SRC_DIR}/m_fixed.c
+    ${DOOM_SRC_DIR}/net_client.c
+    ${DOOM_SRC_DIR}/sha1.c
+    ${DOOM_SRC_DIR}/memio.c
+    ${DOOM_SRC_DIR}/tables.c
+    ${DOOM_SRC_DIR}/v_diskicon.c
+    ${DOOM_VIDEO_SOURCE}
+    ${DOOM_SRC_DIR}/w_checksum.c
+    ${DOOM_SRC_DIR}/w_main.c
+    ${DOOM_SRC_DIR}/w_wad.c
+    ${DOOM_SRC_DIR}/w_file.c
+    ${SRC_DIR}/apps/doom/doom_w_file_memory.c
+    ${DOOM_SRC_DIR}/w_merge.c
+    ${DOOM_SRC_DIR}/z_zone.c
+    ${DOOM_SRC_DIR}/tiny_huff.c
+    ${DOOM_SRC_DIR}/musx_decoder.c
+    ${DOOM_SRC_DIR}/image_decoder.c
+)
+
+set(DOOM_GAME_SOURCES
+    ${DOOM_SRC_DIR}/doom/deh_ammo.c
+    ${DOOM_SRC_DIR}/doom/deh_bexstr.c
+    ${DOOM_SRC_DIR}/doom/deh_cheat.c
+    ${DOOM_SRC_DIR}/doom/deh_doom.c
+    ${DOOM_SRC_DIR}/doom/deh_frame.c
+    ${DOOM_SRC_DIR}/doom/deh_misc.c
+    ${DOOM_SRC_DIR}/doom/deh_ptr.c
+    ${DOOM_SRC_DIR}/doom/deh_sound.c
+    ${DOOM_SRC_DIR}/doom/deh_thing.c
+    ${DOOM_SRC_DIR}/doom/deh_weapon.c
+    ${DOOM_SRC_DIR}/doom/d_items.c
+    ${DOOM_D_MAIN_SOURCE}
+    ${DOOM_SRC_DIR}/doom/d_net.c
+    ${DOOM_SRC_DIR}/doom/doomdef.c
+    ${DOOM_SRC_DIR}/doom/doomstat.c
+    ${DOOM_SRC_DIR}/doom/dstrings.c
+    ${DOOM_SRC_DIR}/doom/f_wipe.c
+    ${DOOM_SRC_DIR}/doom/g_game.c
+    ${DOOM_SRC_DIR}/doom/hu_lib.c
+    ${DOOM_SRC_DIR}/doom/hu_stuff.c
+    ${DOOM_SRC_DIR}/doom/info.c
+    ${DOOM_MENU_SOURCE}
+    ${DOOM_SRC_DIR}/doom/m_random.c
+    ${DOOM_SRC_DIR}/doom/p_ceilng.c
+    ${DOOM_SRC_DIR}/doom/p_doors.c
+    ${DOOM_SRC_DIR}/doom/p_enemy.c
+    ${DOOM_SRC_DIR}/doom/p_floor.c
+    ${DOOM_SRC_DIR}/doom/p_inter.c
+    ${DOOM_SRC_DIR}/doom/p_lights.c
+    ${DOOM_SRC_DIR}/doom/p_map.c
+    ${DOOM_SRC_DIR}/doom/p_maputl.c
+    ${DOOM_SRC_DIR}/doom/p_mobj.c
+    ${DOOM_SRC_DIR}/doom/p_plats.c
+    ${DOOM_SRC_DIR}/doom/p_pspr.c
+    ${DOOM_SRC_DIR}/doom/p_setup.c
+    ${DOOM_SRC_DIR}/doom/p_sight.c
+    ${DOOM_SRC_DIR}/doom/p_spec.c
+    ${DOOM_SRC_DIR}/doom/p_switch.c
+    ${DOOM_SRC_DIR}/doom/p_telept.c
+    ${DOOM_SRC_DIR}/doom/p_tick.c
+    ${DOOM_SRC_DIR}/doom/p_user.c
+    ${DOOM_SRC_DIR}/doom/r_bsp.c
+    ${DOOM_R_DATA_WHD_SOURCE}
+    ${DOOM_SRC_DIR}/doom/r_data.c
+    ${DOOM_SRC_DIR}/doom/r_draw.c
+    ${DOOM_SRC_DIR}/doom/r_main.c
+    ${DOOM_SRC_DIR}/doom/r_plane.c
+    ${DOOM_SRC_DIR}/doom/r_segs.c
+    ${DOOM_SRC_DIR}/doom/r_sky.c
+    ${DOOM_R_THINGS_SOURCE}
+    ${DOOM_SRC_DIR}/doom/s_sound.c
+    ${DOOM_SRC_DIR}/doom/sounds.c
+    ${DOOM_SRC_DIR}/doom/statdump.c
+    ${DOOM_SRC_DIR}/doom/st_lib.c
+    ${DOOM_SRC_DIR}/doom/st_stuff.c
+    ${DOOM_SRC_DIR}/doom/wi_stuff.c
+)
+
+set(DOOM_APP_SOURCES
+    ${SRC_DIR}/apps/doom/doom_app.c
+    ${SRC_DIR}/apps/doom/doom_dc32_platform.c
+    ${SRC_DIR}/apps/doom/doom_dc32_sound.c
+    ${SRC_DIR}/apps/doom/doom_dc32_stubs.c
+    ${DOOM_RENDER_SOURCE}
+    ${DOOM_COMMON_SOURCES}
+    ${DOOM_GAME_SOURCES}
+)
+
+set_source_files_properties(
+    ${SRC_DIR}/apps/doom/doom_app.c
+    ${SRC_DIR}/apps/doom/doom_dc32_sound.c
+    ${SRC_DIR}/apps/doom/doom_dc32_stubs.c
+    PROPERTIES COMPILE_OPTIONS "-Os"
+)
+
+add_dcapp(dcapp_doom doom 206
+    ${DOOM_APP_SOURCES}
+)
+
+target_include_directories(dcapp_doom BEFORE PRIVATE
+    ${SRC_DIR}/apps/doom/compat
+    ${SRC_DIR}/apps/doom
+    ${DOOM_SRC_DIR}
+    ${DOOM_SRC_DIR}/doom
+    ${DOOM_RENDER_DIR}
+)
+
+target_compile_definitions(dcapp_doom PRIVATE
+    PICO_BUILD=1
+    PICO_ON_DEVICE=1
+    PICO_RP2350=1
+    DOOM_DC32_ENABLE_AUDIO=0
+    DOOM_TINY=1
+    SHRINK_MOBJ=1
+    DOOM_ONLY=1
+    DOOM_SMALL=1
+    DOOM_CONST=1
+    SOUND_LOW_PASS=1
+    NUM_SOUND_CHANNELS=8
+    NO_USE_CHECKSUM=1
+    NO_USE_RELOAD=1
+    USE_SINGLE_IWAD=1
+    NO_USE_WIPE=1
+    NO_USE_JOYSTICK=1
+    NO_USE_MOUSE=1
+    NO_USE_DEH=1
+    NO_USE_MUSIC_PACKS=1
+    USE_FLAT_MAX_256=1
+    USE_MEMMAP_ONLY=1
+    USE_LIGHTMAP_INDEXES=1
+    USE_ERASE_FRAME=1
+    NO_DRAW_MID=1
+    NO_DRAW_TOP=1
+    NO_DRAW_BOTTOM=1
+    NO_DRAW_MASKED=1
+    NO_DRAW_SKY=1
+    NO_DRAW_SPRITES=1
+    NO_DRAW_PSPRITES=1
+    NO_VISPLANE_GUTS=1
+    NO_VISPLANE_CACHES=1
+    NO_DRAWSEGS=1
+    NO_VISSPRITES=1
+    NO_MASKED_FLOOR_CLIP=1
+    PD_DRAW_COLUMNS=1
+    PD_DRAW_MARKERS=1
+    PD_DRAW_PLANES=1
+    PD_SCALE_SORT=1
+    PD_CLIP_WALLS=1
+    PD_QUANTIZE=1
+    PD_SANITY=1
+    PD_COLUMNS=1
+    PICO_DOOM=1
+    NO_USE_DS_COLORMAP=1
+    NO_USE_DC_COLORMAP=1
+    USE_READONLY_MMAP=1
+    USE_ROWAD=1
+    NO_USE_TIMIDITY=1
+    NO_USE_GUS=1
+    NO_USE_LIBSAMPLERATE=1
+    NO_USE_STATE_MISC=1
+    USE_RAW_MAPNODE=1
+    USE_RAW_MAPVERTEX=1
+    USE_RAW_MAPSEG=1
+    USE_RAW_MAPLINEDEF=1
+    USE_RAW_MAPTHING=1
+    USE_INDEX_LINEBUFFER=1
+    NO_USE_ZLIGHT=1
+    NO_Z_ZONE_ID=1
+    Z_MALOOC_EXTRA_DATA=1
+    USE_THINKER_POOL=1
+    NO_INTERCEPTS_OVERRUN=1
+    TEMP_IMMUTABLE_DISABLED=1
+    USE_CONST_SFX=1
+    USE_CONST_MUSIC=1
+    NO_DEMO_RECORDING=1
+    PICO_NO_TIMING_DEMO=1
+    NO_USE_EXIT=1
+    NO_RDRAW=1
+    PICO_TIME_DEFAULT_ALARM_POOL_DISABLED=1
+    PICO_TIME_DEFAULT_ALARM_POOL_MAX_TIMERS=1
+    PICO_DISABLE_SHARED_IRQ_HANDLERS=1
+    PICO_USE_OPTIMISTIC_SBRK=1
+    NO_USE_NET=1
+    USE_PICO_NET=0
+    NO_FILE_ACCESS=1
+    SAVE_COMPRESSED=1
+    LOAD_COMPRESSED=1
+    NO_USE_ARGS=1
+    NO_USE_SAVE_CONFIG=1
+    NO_USE_FLOAT=1
+    USE_VANILLA_KEYBOARD_MAPPING_ONLY=1
+    NO_USE_LOADING_DISK=1
+    USE_WHD=1
+    NO_Z_MALLOC_USER_PTR=1
+    FIXED_SCREENWIDTH=1
+    FLOOR_CEILING_CLIP_8BIT=1
+    USE_MUSX=1
+    MUSX_COMPRESSED=1
+    NO_SCREENSHOT=1
+    NO_USE_BOUND_CONFIG=1
+    USE_FPS=1
+    USE_MEMORY_WAD=1
+    PICO_DEBUG_MALLOC=1
+    EMU8950_NO_RATECONV=1
+    EMU8950_NO_FLOAT=1
+    PICO_CORE1_STACK_SIZE=0x4f8
+    NO_IERROR=0
+    PICODOOM_RENDER_NEWHOPE=1
+    MERGE_DISTSCALE0_INTO_VIEWCOSSINANGLE=1
+    PICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=4
+    PICO_SCANVIDEO_LINKED_SCANLINE_BUFFERS=1
+    PICO_SCANVIDEO_SCANLINE_RELEASE_FUNCTION=1
+    PICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=164
+    PICO_SCANVIDEO_PIXEL_BSHIFT=0
+    PICO_SCANVIDEO_PIXEL_GSHIFT=6
+    PICO_SCANVIDEO_PIXEL_RSHIFT=11
+    WHD_SUPER_TINY=1
+    DC32_WHD_OMITS_M_BRIGHT_VPATCH=1
+    NO_USE_FINALE_CAST=1
+    NO_USE_FINALE_BUNNY=1
+    TINY_WAD_ADDR=0x10100000
+    NO_USE_LOAD=1
+    NO_USE_SAVE=1
+    NO_USE_ENDDOOM=1
+    USB_SUPPORT=0
+    hard_assert=assert
+)
+
+target_compile_options(dcapp_doom PRIVATE
+    -fno-common
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build"
+    -Wno-error
+    -Wno-format-truncation
+    -Wno-array-bounds
+    -Wno-cast-align
+    -Wno-sign-compare
+    -Wno-missing-field-initializers
+    -Wno-unused-const-variable
+)
+
 add_dcapp(dcapp_pong pong 200
     ${PICOWARE_APP_SOURCES}
 )

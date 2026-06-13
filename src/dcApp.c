@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "audioPwm.h"
 #include "dispDefcon.h"
 #include "fatfs.h"
 #include "memMap.h"
@@ -38,6 +39,7 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdFlappy, "Flappy Bird", "/APPS/flappy.DC32", true},
 	{DcAppIdLabyrinth, "Labyrinth", "/APPS/labyrinth.DC32", true},
 	{DcAppIdTrex, "T-Rex Runner", "/APPS/trex.DC32", true},
+	{DcAppIdDoom, "DOOM (shareware)", "/APPS/doom.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
 	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
@@ -507,6 +509,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 		return dcAppPrvFail(DcAppResultNoLoadedApp, "No compatible app is loaded");
 	dcAppPrvClearActiveAppContext();
 	dcAppPrvSyncExecutableCache();
+	audioPwmStop();
 	if (!dcAppPrvApplyAppRam(&mLoadedHeader))
 		return dcAppPrvFail(DcAppResultInvalid, "Cannot initialize app RAM");
 
@@ -515,6 +518,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	mActiveAbort = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.abortOffset);
 	mActiveRefresh = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.refreshOffset);
 	ret = entry(&mHostApi, args);
+	audioPwmStop();
 	dcAppPrvClearActiveAppContext();
 	if (ret) {
 		dcAppPrvSetError("App returned an error");

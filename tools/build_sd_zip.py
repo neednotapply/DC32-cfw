@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 IR_REPO = "https://github.com/Next-Flip/Momentum-Firmware.git"
 IR_BRANCH = "dev"
 IR_ASSET_PATH = Path("applications/main/infrared/resources/infrared/assets")
@@ -46,6 +47,10 @@ ARDUBOY_GENRE_DIRS = (
     "Sports",
 )
 
+DOOM_REPO = "https://github.com/kilograham/rp2040-doom.git"
+DOOM_RELEASE = "defcon32_v1"
+DOOM_WHX_SOURCE = REPO_ROOT / "third_party" / "rp2040-doom" / "doom1.whx"
+
 ROM_DIRS = {
     "AB": "Arduboy",
     "GB": "Game Boy",
@@ -73,10 +78,14 @@ APP_BINARIES = (
     "flappy.DC32",
     "labyrinth.DC32",
     "trex.DC32",
+    "doom.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
 )
+APP_DATA_FILES = {
+    "APPS/doom1.whx": DOOM_WHX_SOURCE,
+}
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
 SKIP_SUFFIXES = {".pyc", ".tmp"}
@@ -159,7 +168,13 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
             "apps": {
                 "sd_path": "APPS/",
                 "files": app_hashes,
-                "notes": "Built from this repository and distributed as shell-returning .DC32 binaries.",
+                "notes": "Built .DC32 binaries from this repository plus app data payloads copied to their runtime SD paths.",
+            },
+            "doom": {
+                "repository": DOOM_REPO,
+                "release": DOOM_RELEASE,
+                "paths": ["doom1.whx"],
+                "sd_path": "APPS/",
             },
         },
     }
@@ -476,7 +491,12 @@ def collect_app_hashes(apps_dir: Path) -> dict[str, str]:
     missing = [name for name in APP_BINARIES if not (apps_dir / name).is_file()]
     if missing:
         raise FileNotFoundError(f"Missing app binaries in {apps_dir}: {', '.join(missing)}")
-    return {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
+    missing_data = [name for name, src in APP_DATA_FILES.items() if not src.is_file()]
+    if missing_data:
+        raise FileNotFoundError(f"Missing app data files: {', '.join(missing_data)}")
+    hashes = {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
+    hashes.update({name: sha256_file(src) for name, src in APP_DATA_FILES.items()})
+    return hashes
 
 
 def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
@@ -486,6 +506,10 @@ def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
     dst.mkdir(parents=True, exist_ok=True)
     for name in APP_BINARIES:
         shutil.copyfile(apps_dir / name, dst / name)
+    for sd_path, src in APP_DATA_FILES.items():
+        target = stage / sd_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
     return hashes
 
 
@@ -556,17 +580,26 @@ their upstream projects.
 
 
 def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
-    app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in APP_BINARIES)
+    app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in (*APP_BINARIES, *APP_DATA_FILES))
     text = f"""# SD-apps.zip Sources
 
 These app binaries were built from this repository and are loaded by the
-resident firmware shell from /APPS.
+resident firmware shell from /APPS. DOOM also includes the WHX data payload
+from the rp2040-doom DEF CON 32 release under /APPS.
 
 ## APPS
 
 - SD path: APPS/
 - Files:
 {app_lines}
+
+## DOOM
+
+- Repository: {DOOM_REPO}
+- Release: {DOOM_RELEASE}
+- Source paths: doom1.whx
+- SD path: APPS/
+- Notes: Shareware DOOM1.WAD data is staged from APPS/doom1.whx at launch; raw WAD loading is not part of this build.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 
@@ -600,7 +633,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    default_apps_dir = Path(__file__).resolve().parents[1] / "build" / "apps"
+    default_apps_dir = REPO_ROOT / "build" / "apps"
     apps_dir = (args.apps_dir or default_apps_dir).resolve()
     assets_output = (args.assets_output or args.output).resolve() if (args.assets_output or args.output) else None
     apps_output = args.apps_output.resolve() if args.apps_output else None

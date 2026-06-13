@@ -8978,6 +8978,7 @@ static enum UiToolId uiPrvBrowserLaunchedToolReturn(enum UiToolId launchedTool)
 static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppToolAction action,
 	struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, const char *parentPath)
 {
+	struct Settings settings;
 	struct DcAppRunArgs args = {
 		.toolAction = action,
 		.canvas = cnv,
@@ -8986,7 +8987,12 @@ static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppTool
 		.name = name,
 		.parentPath = parentPath,
 	};
-	enum DcAppResult result = dcAppRunTool(appId, &args);
+	enum DcAppResult result;
+
+	settingsGet(&settings);
+	if (appId == DcAppIdDoom)
+		args.rotate = settings.rotation;
+	result = dcAppRunTool(appId, &args);
 
 	if (result != DcAppResultOk) {
 		if (dcAppLastError()[0])
@@ -9730,6 +9736,7 @@ static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Flappy Bird", UiCategoryEntrySdApp, UiToolGames, DcAppIdFlappy},
 		{"Labyrinth", UiCategoryEntrySdApp, UiToolGames, DcAppIdLabyrinth},
 		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolGames, DcAppIdTrex},
+		{"DOOM (shareware)", UiCategoryEntrySdApp, UiToolGames, DcAppIdDoom},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

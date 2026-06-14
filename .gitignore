@@ -4,9 +4,5 @@ src/*.o
 src/DC32-cfw
 src/DC32-cfw.bin
 src/DC32-cfw.uf2
-.codex-remote-attachments/019ea046-99e9-7c62-8c80-5af5ea421305/3c671b6d-bb05-4f4e-bceb-25ac6b6f3211/1-Photo-1.jpg
-.codex-remote-attachments/019ea046-99e9-7c62-8c80-5af5ea421305/3c671b6d-bb05-4f4e-bceb-25ac6b6f3211/2-Photo-2.jpg
-.codex-remote-attachments/019ea046-99e9-7c62-8c80-5af5ea421305/3c671b6d-bb05-4f4e-bceb-25ac6b6f3211/3-Photo-3.jpg
-.codex-remote-attachments/019ea046-99e9-7c62-8c80-5af5ea421305/3c671b6d-bb05-4f4e-bceb-25ac6b6f3211/4-Photo-4.jpg
 /.codex-remote-attachments
 /test-assets/doom-wads/

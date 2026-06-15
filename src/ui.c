@@ -9664,10 +9664,15 @@ static void uiPrvRunCategoryToolEntry(struct Canvas *cnv, enum UiToolId tool, Ui
 static void uiPrvRunCategorySdAppEntry(struct Canvas *cnv, enum UiToolId ownerTool, const char *label, enum DcAppId appId)
 {
 #ifndef NO_SD_CARD
+	struct FatfsVol *vol = uiPrvMountCard(cnv, false);
+
+	if (!vol)
+		return;
 	uiPrvSetHeaderTitle(label);
 	uiPrvEnterTool(ownerTool);
-	(void)uiPrvRunSdApp(cnv, appId, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+	(void)uiPrvRunSdApp(cnv, appId, DcAppToolActionMain, vol, NULL, NULL, NULL);
 	uiPrvExitTool(ownerTool);
+	(void)fatfsUnmount(vol);
 #else
 	(void)appId;
 	uiAlert(cnv, "This app requires SD card support", DialogTypeOk);
@@ -9737,6 +9742,11 @@ static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Labyrinth", UiCategoryEntrySdApp, UiToolGames, DcAppIdLabyrinth},
 		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolGames, DcAppIdTrex},
 		{"DOOM (shareware)", UiCategoryEntrySdApp, UiToolGames, DcAppIdDoom},
+		{"Chip's Challenge", UiCategoryEntrySdApp, UiToolGames, DcAppIdChips},
+		{"Scorched Earth", UiCategoryEntrySdApp, UiToolGames, DcAppIdScorch},
+		{"Pipe Dream", UiCategoryEntrySdApp, UiToolGames, DcAppIdPipe},
+		{"Cave Story", UiCategoryEntrySdApp, UiToolGames, DcAppIdCave},
+		{"Sokoban", UiCategoryEntrySdApp, UiToolGames, DcAppIdSokoban},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

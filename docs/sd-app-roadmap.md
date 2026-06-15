@@ -1,60 +1,71 @@
 # DC32 SD App Roadmap
 
-This document tracks candidates for the SD-loaded `/APPS` registry. The loader ABI remains the current `.DC32` contract unless a future app proves it cannot fit: 256 KiB image cache, about 80 KiB app RAM, and the existing static app gates.
+This document tracks SD-loaded `/APPS` registry candidates. Existing small apps keep the original `.DC32` contract: 256 KiB app cache at `QSPI_APP_CACHE_START` plus the app RAM window. Source-derived faithful ports that cannot fit may set `DCAPP_IMAGE_FLAG_LARGE_XIP`, link at `QSPI_ROM_START`, and use up to `QSPI_ROM_SIZE_MAX`.
 
-## First Batch
+## Current Shipped Apps
 
-| App | SD file | ID | Source reference | License status | Hardware blockers | RAM/flash risk | Status |
-| --- | --- | ---: | --- | --- | --- | --- | --- |
-| Pong | `/APPS/pong.DC32` | 200 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Tetris | `/APPS/tetris.DC32` | 201 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Arkanoid | `/APPS/arkanoid.DC32` | 202 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Flappy Bird | `/APPS/flappy.DC32` | 203 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer; sprite-art pass is deferred | Low | Implemented as standalone app |
-| Labyrinth | `/APPS/labyrinth.DC32` | 204 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | Badge accelerometer hook is not used yet; buttons drive the maze in this batch | Low | Implemented; maze reachability is statically checked |
-| T-Rex Runner | `/APPS/trex.DC32` | 205 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer; sprite-art pass is deferred | Low | Implemented as standalone app |
-| DOOM | `/APPS/doom.DC32` plus `/APPS/doom1.whx` | 206 | [kilograham/rp2040-doom `defcon32_v1`](https://github.com/kilograham/rp2040-doom/releases/tag/defcon32_v1) | GPL-2.0-or-later Chocolate Doom-derived code; source vendoring requires license notices | DC32 display/input/time shims are implemented; the bundled shareware WHX is staged into the original WHX flash window; SFX audio is enabled if the app remains under the 256 KiB cache limit | High | Implemented as SD app prototype |
-| Starfield | `/APPS/starfield.DC32` | 220 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Spiro | `/APPS/spiro.DC32` | 221 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Cube | `/APPS/cube.DC32` | 222 | [jblanked/Picoware](https://github.com/jblanked/Picoware) | Picoware metadata: GPL-3.0; no Picoware source vendored in this implementation | None after DC32 framebuffer/buttons/timing layer | Low | Implemented as standalone app |
-| Direct JPEG/BMP viewing | `/APPS/image.DC32` | 101 | [jblanked/Picoware](https://github.com/jblanked/Picoware) JPEG viewer reference; local picojpeg decoder | Local decoder source is vendored in `third_party/image_decoders/picojpeg`; converter path remains local | JPEG/BMP stills only; animated/heavier formats stay on converter path | Medium for large JPEG decode speed, low for app image size | Implemented |
-| WAV playback | `/APPS/music.DC32` | 102 | [jblanked/Picoware](https://github.com/jblanked/Picoware) audio-player reference | Local PCM WAV implementation | Timer-buffered mono PWM on `PIN_SPQR`; no I2S/DAC dependency | Low | Implemented |
-| MP3 playback | `/APPS/music.DC32` | 102 | [jblanked/Picoware](https://github.com/jblanked/Picoware), `minimp3` candidate | Needs license notice if vendored | Decoder CPU, image size, and scratch-memory gates must be proven | Medium/high | Deferred until WAV build size and scratch headroom are measured |
+| App | SD file | ID | Source reference | Status |
+| --- | --- | ---: | --- | --- |
+| Game Boy | `/APPS/gb.DC32` | 1 | uGB-derived runtime | Implemented |
+| NES | `/APPS/nes.DC32` | 2 | InfoNES-derived runtime | Implemented |
+| Arduboy | `/APPS/arduboy.DC32` | 3 | Ardens-derived runtime | Implemented |
+| Universal IR | `/APPS/ir.DC32` | 100 | Local Flipper-style IR parser | Implemented |
+| Image Viewer | `/APPS/image.DC32` | 101 | Local JPEG/BMP/DCI/DCA support | Implemented |
+| Music | `/APPS/music.DC32` | 102 | Local RTTTL/WAV player | Implemented |
+| BadUSB | `/APPS/badusb.DC32` | 103 | Local DuckyScript-style runner | Implemented |
+| Autoclicker | `/APPS/autoclicker.DC32` | 104 | Local USB HID app | Implemented |
+| USB Gamepad | `/APPS/gamepad.DC32` | 105 | Local USB HID/XInput-style app | Implemented |
+| Pong | `/APPS/pong.DC32` | 200 | Picoware-inspired local app | Implemented |
+| Tetris | `/APPS/tetris.DC32` | 201 | Picoware-inspired local app | Implemented |
+| Arkanoid | `/APPS/arkanoid.DC32` | 202 | Picoware-inspired local app | Implemented |
+| Flappy Bird | `/APPS/flappy.DC32` | 203 | Picoware-inspired local app | Implemented |
+| Labyrinth | `/APPS/labyrinth.DC32` | 204 | Picoware-inspired local app | Implemented |
+| T-Rex Runner | `/APPS/trex.DC32` | 205 | Picoware-inspired local app | Implemented |
+| DOOM | `/APPS/doom.DC32` plus `/APPS/doom1.whx` | 206 | `kilograham/rp2040-doom` DEF CON 32 release | Implemented prototype |
+| Chip's Challenge | `/APPS/chips.DC32` plus `/APPS/chips-tworld.pak`; user-built `/APPS/chips.pak` for original levels | 207 | Tile World rules/rendering locked to the Win 3.1/MS rules path | Implemented |
+| Scorched Earth | `/APPS/scorch.DC32` plus `/APPS/scorch-xscorch.pak` | 208 | xscorch weapon tables/assets with badge terrain/AI/shop loop | Implemented |
+| Pipe Dream | `/APPS/pipe.DC32` plus `/APPS/pipe-pipedreamer.pak` | 209 | PipeDreamer logic/assets with JUCE replaced | Implemented |
+| Cave Story | `/APPS/cave.DC32`; user-built `/APPS/cave.pak` | 210 | NXEngine/doukutsu PXM/Stage.dat/PBM-compatible loader plus NXEngine sprite metadata renderer | In progress; full object/AI/TSC port pending |
+| Sokoban | `/APPS/sokoban.DC32` plus `/APPS/sokoban-xsokoban.pak` | 211 | XSokoban public-domain source/screens/pixmaps | Implemented |
+| Starfield | `/APPS/starfield.DC32` | 220 | Picoware-inspired local app | Implemented |
+| Spiro | `/APPS/spiro.DC32` | 221 | Picoware-inspired local app | Implemented |
+| Cube | `/APPS/cube.DC32` | 222 | Picoware-inspired local app | Implemented |
 
-## Compatibility Layer Rules
+## Faithful Period Ports
 
-- Standalone apps build as separate `.DC32` targets and dispatch by `DCAPP_RUNTIME_ID`.
-- Shared services are limited to DC32 framebuffer/canvas drawing, badge buttons, timing, random/state, and small drawing primitives.
-- Full-screen redraws are paced with the display frame counter and scanout-start wait used by emulator presenters.
-- Do not add Arduino, MicroPython, WiFi, Bluetooth, keyboard, heap, PSRAM, I2S, HDMI/HSTX, PS/2, USB host, or board-specific display/input APIs to the Picoware-derived app layer.
-- GPL-compatible vendoring is allowed only with proper notices. This first batch does not vendor Picoware source code.
+The earlier handmade period games were removed. IDs 207-211 are now occupied by source-derived or original-data-compatible ports. Cave Story freeware data and `CHIPS.DAT` are still user-provided and must not be redistributed.
 
-## rh1tech / FRANK Candidates
+| App | SD file | ID | Required basis | Data policy | Status |
+| --- | --- | ---: | --- | --- | --- |
+| Chip's Challenge | `/APPS/chips.DC32` plus `/APPS/chips-tworld.pak`; user-built `/APPS/chips.pak` | 207 | Tile World rules/rendering, Win 3.1/MS rules path only | User-provided `CHIPS.DAT`; redistributable Tile World assets packaged | Implemented |
+| Scorched Earth | `/APPS/scorch.DC32` plus `/APPS/scorch-xscorch.pak` | 208 | xscorch weapon tables/assets, terrain deformation, AI, shop, turn flow | Redistributable xscorch assets only | Implemented |
+| Pipe Dream | `/APPS/pipe.DC32` plus `/APPS/pipe-pipedreamer.pak` | 209 | PipeDreamer logic/assets with JUCE replaced | Redistributable PipeDreamer assets only | Implemented |
+| Cave Story | `/APPS/cave.DC32` plus user-built `/APPS/cave.pak` | 210 | NXEngine-evo/doukutsu-rs PXM, Stage.dat, PBM, backdrop, and sprite metadata renderer | User-built pack from Cave Story data; no bundled Cave data | In progress; replace remaining hand-written gameplay with NXEngine object/AI/TSC behavior |
+| Sokoban | `/APPS/sokoban.DC32` plus `/APPS/sokoban-xsokoban.pak` | 211 | XSokoban ANSI C logic, 90 levels, pixmap rendering | Redistributable XSokoban source/assets only | Implemented |
 
-Most FRANK ports target the same RP2350 family but appear to assume a stronger custom board profile than DC32: HDMI/HSTX video, PSRAM, PS/2 or USB host input, and I2S audio are common blockers. Treat repositories with undeclared GitHub license metadata as feasibility references until each repo license is inspected directly.
+## Port Runtime Requirements
 
-| Candidate | Source URL | License status | Likely blockers | RAM/flash risk | Status |
-| --- | --- | --- | --- | --- | --- |
-| frank-c64 | <https://github.com/rh1tech/frank-c64> | Inspect before vendoring | HDMI/HSTX video path, keyboard input, possible PSRAM | High | Later feasibility |
-| frank-video | <https://github.com/rh1tech/frank-video> | Inspect before vendoring | Video pipeline likely tied to HSTX/HDMI | Medium/high | Later feasibility |
-| frank-cabal | <https://github.com/rh1tech/frank-cabal> | Inspect before vendoring | Display/input/audio assumptions unknown; likely board-specific | Medium/high | Later feasibility |
-| SpeccyP | <https://github.com/rh1tech/SpeccyP> | Inspect before vendoring | Keyboard input, display timing, possible PSRAM | High | Later feasibility |
-| frank-doom | <https://github.com/rh1tech/frank-doom> | Inspect before vendoring | RAM, storage, input, audio, and display assumptions | Very high | Later feasibility |
-| frank-heretic | <https://github.com/rh1tech/frank-heretic> | Inspect before vendoring | RAM, storage, input, audio, and display assumptions | Very high | Later feasibility |
-| frank-idtech1 | <https://github.com/rh1tech/frank-idtech1> | Inspect before vendoring | Shared idtech base likely needs PSRAM/display/audio adaptation | Very high | Later feasibility |
-| frank-msx | <https://github.com/rh1tech/frank-msx> | Inspect before vendoring | Keyboard input, display path, possible PSRAM | High | Later feasibility |
-| frank-snes | <https://github.com/rh1tech/frank-snes> | Inspect before vendoring | CPU/RAM budget, audio, controller mapping, display | Very high | Later feasibility |
-| frank-wolf3d | <https://github.com/rh1tech/frank-wolf3d> | Inspect before vendoring | RAM/storage/input/audio/display assumptions | Very high | Later feasibility |
-| frank-quest | <https://github.com/rh1tech/frank-quest> | Inspect before vendoring | Engine/input/display assumptions unknown | Medium/high | Later feasibility |
-| frank-386 | <https://github.com/rh1tech/frank-386> | Inspect before vendoring | x86 emulation needs memory and keyboard/display model | Very high | Later feasibility |
-| frank-apple | <https://github.com/rh1tech/frank-apple> | Inspect before vendoring | Keyboard input, display timing, possible PSRAM | High | Later feasibility |
-| frank-duke3d | <https://github.com/rh1tech/frank-duke3d> | Inspect before vendoring | RAM/storage/input/audio/display assumptions | Very high | Later feasibility |
-| frank-genesis | <https://github.com/rh1tech/frank-genesis> | Inspect before vendoring | CPU/RAM budget, audio, controller mapping, display | Very high | Later feasibility |
+- Use `src/apps/port/` for shared scratch-heap allocation, FAT-backed pack reads, `/SAVE/<app>.sav` helpers, RGB332/paletted presentation, and center-button exit.
+- Missing required user data must show an in-app diagnostic naming the exact SD path, such as `/APPS/cave.pak` or `/APPS/chips.pak`.
+- Do not redistribute Cave Story freeware data, `CHIPS.DAT`, or proprietary original graphics with unclear licensing.
+- Music can be deferred. Buzzer/PWM SFX are acceptable when the original game used minimal PC speaker-style sound.
+
+## Host Tools
+
+- `python tools/build_cave_pack.py` prompts for the Cave Story install/data directory and output path. It accepts a loose `data/Stage.dat` when present, or extracts the original stage table from `Doukutsu.exe` and writes the generated `Stage.dat` entry into `cave.pak`.
+- `python tools/build_chips_pack.py` prompts for `CHIPS.DAT` or an extracted Win 3.1 folder and output path. When `CHIPS.EXE` is beside `CHIPS.DAT`, it extracts the original embedded Windows tile graphics automatically; explicit tile input still accepts Tile World-style sheets, regular-grid image sheets, or `DC32CHIPTIL` packs.
+- `tools/build_tworld_assets.py --source-root third_party/tworld --output-c <out.c> --output-h <out.h>`
+- `tools/build_xscorch_assets.py --source-root third_party/xscorch --output-c <out.c> --output-h <out.h>`
+- `python tools/build_period_assets.py` prompts/defaults to `third_party` and `build/apps`; flags remain available for automation.
 
 ## Acceptance Checklist
 
-- Firmware and all `.DC32` app binaries build.
-- `dcapp_static_test.py` validates each app id, filename, image size, CRC, RAM descriptors, and app scratch headroom.
-- `build_sd_zip_test.py` validates that `SD-apps.zip` includes every standalone app binary.
-- Static Picoware app checks confirm display pacing, Labyrinth reachability, and no heap, Arduino runtime, MicroPython, WiFi/Bluetooth, keyboard, or board-specific display/input APIs in the standalone Picoware-derived layer.
-- Image tests cover `.dci`, `.dca`, `.jpg`, `.jpeg`, and `.bmp`; music tests cover RTTTL, WAV, and non-advertised MP3 deferral.
-- Manual badge pass: every USB, Media, and Games category entry launches independently, exits cleanly back to its parent category, renders correctly, and existing file handlers still work.
+- `cmake --build build` produces all existing apps and any newly completed faithful period app.
+- DCAPP static tests cover header CRCs, RAM descriptors, small/large load regions, and package membership.
+- `SD-apps.zip` includes only accepted `.DC32` period apps plus redistributable packs and README entries for missing user data.
+- Each accepted port survives missing asset pack, level completion, reset, save write failure, and center-button exit.
+- Cave: load title/first map, scripted room transition, save/reload.
+- Chip's Challenge: parse `CHIPS.DAT`, complete/reset a level without crash, and render inventory with tile icons from the active tile pack.
+- Sokoban: validate all 90 levels, complete/reset/undo without corrupting state.
+- Pipe Dream: complete a level, spill/fail, use bombs, fast-forward.
+- Scorched Earth: complete a round, buy/fire multiple weapon classes, destroy terrain, AI turn transition.

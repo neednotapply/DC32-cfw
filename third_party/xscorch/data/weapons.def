@@ -1,0 +1,693 @@
+; $Header: /fridge/cvs/xscorch/data/weapons.def,v 1.28 2003/03/01 20:18:50 jacob Exp $
+;
+; weapons.def
+; This is the default xscorch weapons definition file.
+;
+
+NoWeapon = weapons_class {
+   ; DO NOT REMOVE THIS WEAPON
+   weaponName   = "No Weapon";
+   description  = "A great big empty void of nothingness."
+   armsLevel    = 0;
+   price        = 0;
+   bundle       = 0;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   angularWidth = 0.0;
+   useless      = true;
+   indirect     = false;
+   stateFlags   = "null";
+;   phoenixFlags = "";
+;   phoenixChild = "";
+};
+
+BabyMissile = weapons_class {
+   ; DO NOT REMOVE THIS WEAPON
+   weaponName   = "Baby Missile";
+   description  = "A small triple turret capable missile that tanks have in near infinite supply.";
+   armsLevel    = 0;
+   price        = 0;
+   bundle       = 1;
+   radius       = 20;
+   force        = 400;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "triple";
+};
+
+Missile = weapons_class {
+   weaponName   = "Missile";
+   description  = "A fairly large and inexpensive triple turret capable conventional missile.";
+   armsLevel    = 0;
+   price        = 1875;
+   bundle       = 5;
+   radius       = 40;
+   force        = 800;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "triple";
+};
+
+BabyNuke = weapons_class {
+   weaponName   = "Baby Nuke";
+   description  = "A missile with a miniature tactical nuclear warhead.";
+   armsLevel    = 2;
+   price        = 10000;
+   bundle       = 3;
+   radius       = 80;
+   force        = 1600;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "plasma";
+};
+
+Nuke = weapons_class {
+   weaponName   = "Nuke";
+   description  = "A missile with a tactical nuclear warhead.";
+   armsLevel    = 3;
+   price        = 12000;
+   bundle       = 1;
+   radius       = 150;
+   force        = 3000;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "plasma";
+};
+
+LeapFrog = weapons_class {
+   weaponName   = "Leap Frog";
+   description  = "When this missile detonates the first two times, it shoots out a new one.";
+   armsLevel    = 2;
+   price        = 10000;
+   bundle       = 2;
+   radius       = 60;
+   force        = 1200;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 2;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "chain, at_land";
+   phoenixChild = "Baby Nuke";
+};
+
+FunkyBomb = weapons_class {
+   weaponName   = "Funky Bomb";
+   description  = "The funky bomb is a very unpredictable cluster bomb.";
+   armsLevel    = 4;
+   price        = 7000;
+   bundle       = 2;
+   radius       = 60;
+   force        = 1200;
+   liquid       = 0;
+   scatter      = 9;
+   children     = 12;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "plasma";
+   phoenixFlags = "spider, at_land";
+   phoenixChild = "Missile";
+};
+
+MIRV = weapons_class {
+   weaponName   = "MIRV";
+   description  = "Multiple Independantly targetable Re-entry Vehicle.";
+   armsLevel    = 1;
+   price        = 10000;
+   bundle       = 3;
+   radius       = 40;
+   force        = 800;
+   liquid       = 0;
+   scatter      = 3;
+   children     = 5;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "Missile";
+};
+
+BMMChild = weapons_class {
+   weaponName   = "BMM Child";
+   description  = "[ this weapon exists only as an intermediate form ]";
+   armsLevel    = 4;
+   price        = 0;
+   bundle       = 0;
+   radius       = 50;
+   force        = 1000;
+   liquid       = 0;
+   scatter      = 5;
+   children     = 5;
+   useless      = false;
+   indirect     = true;
+   phoenixFlags = "scatter, at_rand";
+   phoenixChild = "Missile";
+};
+
+BlackMarketMIRV = weapons_class {
+   weaponName   = "Black Market MIRV";
+   description  = "A very unpredictable MIRV style bomb.";
+   armsLevel    = 4;
+   price        = 15000;
+   bundle       = 3;
+   radius       = 100;
+   force        = 2000;
+   liquid       = 0;
+   scatter      = 3;
+   children     = 3;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "plasma";
+   phoenixFlags = "scatter, at_rand";
+   phoenixChild = "BMM Child";
+};
+
+DeathsHead = weapons_class {
+   weaponName   = "Death's Head";
+   description  = "A very large MIRV with nine nuclear warheads!";
+   armsLevel    = 4;
+   price        = 20000;
+   bundle       = 1;
+   radius       = 80;
+   force        = 1600;
+   liquid       = 0;
+   scatter      = 5;
+   children     = 9;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "Baby Nuke";
+};
+
+Annihilator = weapons_class {
+   weaponName   = "Annihilator";
+   description  = "A missile with a huge tactical nuclear warhead.";
+   armsLevel    = 4;
+   price        = 24000;
+   bundle       = 1;
+   radius       = 200;
+   force        = 4000;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "plasma";
+};
+
+; This weapon is a debugging weapon only.
+; If you really want to use it, enable the
+; developer arms level (arms level = 5) by
+; editing your ~/.xscorch/config file.
+TheChaos = weapons_class {
+   weaponName   = "The Chaos";
+   description  = "`And the beast shall come forth surrounded by a roiling cloud of vengence...'";
+   armsLevel    = 5;
+   price        = 5000000;
+   bundle       = 1;
+   radius       = 200;
+   force        = 4000;
+   liquid       = 0;
+   scatter      = 15;
+   children     = 15;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "Death's Head";
+};
+
+; Don't even _think_ about enabling this one...
+; Keep it around though, will delete once done
+; with testing, it illustrates an important
+; problem in interleave mode.
+TheChaos2 = weapons_class {
+   weaponName   = "The Chaos^2";
+   description  = "We are in the final days. My time is come! Glory glory! What do you think? 5.1?";
+                  ; --  The Master, ``Prophecy Girl''
+   armsLevel    = 6;
+   price        = 9999999;
+   bundle       = 1;
+   radius       = 200;
+   force        = 4000;
+   liquid       = 0;
+   scatter      = 15;
+   children     = 15;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "The Chaos";
+};
+
+Napalm = weapons_class {
+   weaponName   = "Napalm";
+   description  = "A small globe filled with jellied gasoline.";
+   armsLevel    = 2;
+   price        = 10000;
+   bundle       = 10;
+   radius       = 13;
+   force        = 60;
+   liquid       = 256;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "liquid";
+};
+
+HotNapalm = weapons_class {
+   weaponName   = "Hot Napalm";
+   description  = "A large globe filled with jet fuel.";
+   armsLevel    = 3;
+   price        = 50000;
+   bundle       = 2;
+   radius       = 13;
+   force        = 160;
+   liquid       = 3072;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "liquid";
+};
+
+BlackRain = weapons_class {
+   weaponName   = "Black Rain";
+   description  = "Looking up, you see a flock of birds.  No wait!  Those aren't birds...";
+   armsLevel    = 4;
+   price        = 30000;
+   bundle       = 2;
+   radius       = 20;
+   force        = 500;
+   liquid       = 0;
+   scatter      = 7;
+   children     = 7;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "Napalm";
+};
+
+MrNapalm = weapons_class {
+   weaponName   = "Mr. Napalm";
+   description  = "You know, it's like Mr. Fusion... only...";
+   armsLevel    = 6;
+   price        = 3000000;
+   bundle       = 2;
+   radius       = 20;
+   force        = 500;
+   liquid       = 0;
+   scatter      = 15;
+   children     = 15;
+   useless      = false;
+   indirect     = false;
+   phoenixFlags = "scatter, at_apex";
+   phoenixChild = "Black Rain";
+};
+
+Tracer = weapons_class {
+   weaponName   = "Tracer";
+   description  = "A missile with no warhead.  Pretty useless.";
+   armsLevel    = 0;
+   price        = 10;
+   bundle       = 20;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = true;
+   indirect     = false;
+};
+
+SmokeTracer = weapons_class {
+   weaponName   = "Smoke Tracer";
+   description  = "A missile with no warhead that leaves a trail of smoke.";
+   armsLevel    = 0;
+   price        = 500;
+   bundle       = 10;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = true;
+   indirect     = false;
+   stateFlags   = "smoke";
+};
+
+ShieldSapper = weapons_class {
+   weaponName   = "Shield Sapper";
+   description  = "A missile with a warhead designed to drain shields it hits directly.";
+   armsLevel    = 3;
+   price        = 2500;
+   bundle       = 5;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "sapper";
+};
+
+RollerTest = weapons_class {
+   weaponName   = "Roller Tester";
+   description  = "A roller without a warhead, for testing only.";
+   armsLevel    = 6;
+   price        = 100;
+   bundle       = 10;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 1;
+   useless      = true;
+   indirect     = false;
+   stateFlags   = "roller";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Tracer";
+};
+
+BabyRoller = weapons_class {
+   weaponName   = "Baby Roller";
+   description  = "A weapon that rolls downhill and then detonates a small warhead.";
+   armsLevel    = 2;
+   price        = 5000;
+   bundle       = 10;
+   radius       = 20;
+   force        = 400;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 1;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "roller";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Baby Missile";
+};
+
+Roller = weapons_class {
+   weaponName   = "Roller";
+   description  = "A weapon that rolls downhill and then detonates a warhead.";
+   armsLevel    = 2;
+   price        = 6000;
+   bundle       = 5;
+   radius       = 40;
+   force        = 800;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 1;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "roller";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Missile";
+};
+
+HeavyRoller = weapons_class {
+   weaponName   = "Heavy Roller";
+   description  = "A weapon that rolls downhill and then detonates a large warhead.";
+   armsLevel    = 3;
+   price        = 6750;
+   bundle       = 2;
+   radius       = 90;
+   force        = 1800;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 1;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "roller";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Baby Nuke";
+};
+
+RiotCharge = weapons_class {
+   weaponName   = "Riot Charge";
+   description  = "Clears dirt from a small wedge-shaped area in front of the tank.";
+   armsLevel    = 2;
+   price        = 2000;
+   bundle       = 10;
+   radius       = 72;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   angularWidth = 60.0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "riot";
+   phoenixFlags = "detonate, at_tank";
+};
+
+RiotBlast = weapons_class {
+   weaponName   = "Riot Blast";
+   description  = "Clears dirt from a large wedge-shaped area in front of the tank.";
+   armsLevel    = 3;
+   price        = 5000;
+   bundle       = 5;
+   radius       = 120;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   angularWidth = 60.0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "riot";
+   phoenixFlags = "detonate, at_tank";
+};
+
+RiotBomb = weapons_class {
+   weaponName   = "Riot Bomb";
+   description  = "A bomb that clears dirt instead of damaging players.";
+   armsLevel    = 3;
+   price        = 5000;
+   bundle       = 5;
+   radius       = 60;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "riot";
+};
+
+HeavyRiotBomb = weapons_class {
+   weaponName   = "Heavy Riot Bomb";
+   description  = "A bomb that clears lots of dirt instead of damaging players.";
+   armsLevel    = 3;
+   price        = 4750;
+   bundle       = 2;
+   radius       = 90;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "riot";
+};
+
+BabyDigger = weapons_class {
+;  weaponName   = "Baby Digger";
+   weaponName   = "!Baby Digger";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 0;
+   armsLevel    = 5;
+   price        = 3000;
+   bundle       = 10;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "digger";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Tracer";
+};
+
+Digger = weapons_class {
+;  weaponName   = "Digger";
+   weaponName   = "!Digger";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 0;
+   armsLevel    = 5;
+   price        = 2500;
+   bundle       = 5;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "digger";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Tracer";
+};
+
+HeavyDigger = weapons_class {
+;  weaponName   = "Heavy Digger";
+   weaponName   = "!Heavy Digger";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 1;
+   armsLevel    = 5;
+   price        = 6750;
+   bundle       = 2;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "digger";
+   phoenixFlags = "convert, at_land";
+   phoenixChild = "Tracer";
+};
+
+BabySandhog = weapons_class {
+;  weaponName   = "Baby Sandhog";
+   weaponName   = "!Baby Sandhog";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 0;
+   armsLevel    = 5;
+   price        = 10000;
+   bundle       = 10;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = true;
+   indirect     = false;
+};
+
+Sandhog = weapons_class {
+;  weaponName   = "Sandhog";
+   weaponName   = "!Sandhog";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 0;
+   armsLevel    = 5;
+   price        = 16750;
+   bundle       = 5;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = true;
+   indirect     = false;
+};
+
+HeavySandhog = weapons_class {
+;  weaponName   = "Heavy Sandhog";
+   weaponName   = "!Heavy Sandhog";
+
+; This weapon is currently not supported.
+; requires underground digging capability, partially written.
+;  armsLevel    = 1;
+   armsLevel    = 5;
+   price        = 25000;
+   bundle       = 2;
+   radius       = 0;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = true;
+   indirect     = false;
+};
+
+DirtClod = weapons_class {
+   weaponName   = "Dirt Clod";
+   description  = "Drop a small chunk of dirt on someone.";
+   armsLevel    = 0;
+   price        = 5000;
+   bundle       = 10;
+   radius       = 40;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "dirt";
+};
+
+DirtBall = weapons_class {
+   weaponName   = "Dirt Ball";
+   description  = "Drop a chunk of dirt on someone.";
+   armsLevel    = 0;
+   price        = 5000;
+   bundle       = 5;
+   radius       = 70;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "dirt";
+};
+
+TonOfDirt = weapons_class {
+   weaponName   = "Ton of Dirt";
+   description  = "Drop a large chunk of dirt on someone.";
+   armsLevel    = 1;
+   price        = 6750;
+   bundle       = 2;
+   radius       = 140;
+   force        = 0;
+   liquid       = 0;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "dirt";
+};
+
+LiquidDirt = weapons_class {
+   weaponName   = "Liquid Dirt";
+   description  = "Drop a bunch of mud on someone.";
+   armsLevel    = 2;
+   price        = 5000;
+   bundle       = 10;
+   radius       = 13;
+   force        = 0;
+   liquid       = 384;
+   scatter      = 0;
+   children     = 0;
+   useless      = false;
+   indirect     = false;
+   stateFlags   = "dirt, liquid";
+};

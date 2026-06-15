@@ -63,7 +63,19 @@ def main() -> int:
             (apps / name).write_bytes(f"{name}\n".encode("ascii"))
         fake_doom_whx = tmp_path / "doom1.whx"
         fake_doom_whx.write_bytes(b"IWHX-test")
+        fake_chips_tworld_pak = tmp_path / "chips-tworld.pak"
+        fake_chips_tworld_pak.write_bytes(b"DC32TWORLD-test")
+        fake_pipedreamer_pak = tmp_path / "pipe-pipedreamer.pak"
+        fake_pipedreamer_pak.write_bytes(b"DC32PIPEPK-test")
+        fake_xscorch_pak = tmp_path / "scorch-xscorch.pak"
+        fake_xscorch_pak.write_bytes(b"DC32SCORCH-test")
+        fake_sokoban_pak = tmp_path / "sokoban-xsokoban.pak"
+        fake_sokoban_pak.write_bytes(b"DC32XSOKO-test")
         builder.APP_DATA_FILES["APPS/doom1.whx"] = fake_doom_whx
+        builder.APP_DATA_FILES["APPS/chips-tworld.pak"] = fake_chips_tworld_pak
+        builder.APP_DATA_FILES["APPS/pipe-pipedreamer.pak"] = fake_pipedreamer_pak
+        builder.APP_DATA_FILES["APPS/scorch-xscorch.pak"] = fake_xscorch_pak
+        builder.APP_DATA_FILES["APPS/sokoban-xsokoban.pak"] = fake_sokoban_pak
         for genre in builder.ARDUBOY_GENRE_DIRS:
             (repo / genre).mkdir(parents=True)
 
@@ -94,13 +106,28 @@ def main() -> int:
         app_hashes = builder.copy_app_binaries(apps, stage)
         app_files = sorted(path.name for path in (stage / "APPS").iterdir() if path.is_file())
         expected_hash_files = sorted((*builder.APP_BINARIES, *builder.APP_DATA_FILES))
-        expect("All app binaries and app data are copied to /APPS", app_files == sorted((*builder.APP_BINARIES, "doom1.whx")))
+        expected_app_data = tuple(Path(name).name for name in builder.APP_DATA_FILES)
+        expect(
+            "All app binaries, app data, and period README are copied to /APPS",
+            app_files == sorted((*builder.APP_BINARIES, *expected_app_data, "README-period-ports.txt")),
+        )
         expect("DOOM WHX is copied to /APPS", (stage / "APPS" / "doom1.whx").is_file())
+        expect("Tile World pack is copied to /APPS", (stage / "APPS" / "chips-tworld.pak").is_file())
+        expect("xscorch pack is copied to /APPS", (stage / "APPS" / "scorch-xscorch.pak").is_file())
+        expect("PipeDreamer pack is copied to /APPS", (stage / "APPS" / "pipe-pipedreamer.pak").is_file())
+        expect("XSokoban pack is copied to /APPS", (stage / "APPS" / "sokoban-xsokoban.pak").is_file())
+        expect("Period port README is copied to /APPS", (stage / "APPS" / "README-period-ports.txt").is_file())
         expect("DOOM data is not copied to /ROMS/DOOM", not (stage / "ROMS" / "DOOM").exists())
         expect("App hashes are recorded", sorted(app_hashes) == expected_hash_files)
         manifest = builder.app_source_manifest(app_hashes)
         expect("App hashes appear in app manifest", manifest["sources"]["apps"]["files"] == app_hashes)
         expect("DOOM app source metadata is present", manifest["sources"]["doom"]["sd_path"] == "APPS/")
+        expect("Period port metadata is present", manifest["sources"]["period_ports"]["sd_path"] == "APPS/")
+        expect("Chip's Challenge accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["chips"] == 207)
+        expect("Scorched Earth accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["scorch"] == 208)
+        expect("Pipe Dream accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["pipe"] == 209)
+        expect("Cave Story accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["cave"] == 210)
+        expect("Sokoban accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["sokoban"] == 211)
         builder.write_app_sources(stage, app_hashes)
         apps_zip = tmp_path / "SD-apps.zip"
         builder.build_zip(stage, apps_zip)
@@ -110,6 +137,12 @@ def main() -> int:
         expect("SD-apps.zip contains SOURCES.md", "SOURCES.md" in names)
         expect("SD-apps.zip contains /APPS binaries", all(f"APPS/{name}" in names for name in builder.APP_BINARIES))
         expect("SD-apps.zip contains DOOM WHX", "APPS/doom1.whx" in names)
+        expect("SD-apps.zip contains Tile World pack", "APPS/chips-tworld.pak" in names)
+        expect("SD-apps.zip contains xscorch pack", "APPS/scorch-xscorch.pak" in names)
+        expect("SD-apps.zip contains PipeDreamer pack", "APPS/pipe-pipedreamer.pak" in names)
+        expect("SD-apps.zip contains XSokoban pack", "APPS/sokoban-xsokoban.pak" in names)
+        expect("SD-apps.zip contains period port README", "APPS/README-period-ports.txt" in names)
+        expect("SD-apps.zip omits proprietary Cave data", "APPS/cave.pak" not in names and "APPS/cave.dat" not in names)
         expect("SD-apps.zip excludes /ROMS/DOOM", not any(name.startswith("ROMS/DOOM/") for name in names))
         expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in expected_hash_files))
 

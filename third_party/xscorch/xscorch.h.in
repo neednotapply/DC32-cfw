@@ -1,0 +1,157 @@
+/* $Header: /fridge/cvs/xscorch/xscorch.h.in,v 1.36 2011-08-01 00:01:39 jacob Exp $ */
+/*
+
+   xscorch - xscorch.h        Copyright(c) 2000-2004 Justin David Smith
+                              Copyright(c) 2000-2004 Jacob Luna Lundberg
+   justins(at)chaos2.org      http://chaos2.org/
+   jacob(at)gnifty.net        http://www.gnifty.net/
+
+   Main header file for xscorch
+
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, version 2 of the License ONLY.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   General Public License for more details.
+
+   You should have received a copy of the GNU General Public License along
+   with this program; if not, write to the Free Software Foundation, Inc.,
+   51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+
+*/
+#ifndef __xscorch_h_included
+#define __xscorch_h_included
+
+
+/* Include files */
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#ifdef HAVE_CONFIG_H
+#  include <config.h>
+#endif /* HAVE_CONFIG_H */
+
+
+/* Pick up libj definitions */
+#include <libj/libj.h>
+
+
+/* Time inclusion */
+#if TIME_WITH_SYS_TIME
+#  include <sys/time.h>
+#  include <time.h>
+#else
+#  if HAVE_SYS_TIME_H
+#    include <sys/time.h>
+#  else
+#    include <time.h>
+#  endif
+#endif
+
+
+/*** Profile SUBSYSTEM ***/
+#define  SC_PROFILE_BEGIN(desc)     {  struct timeval profile_timer1, profile_timer2; \
+                                       long profile_sec, profile_usec; \
+                                       const char *profile_desc = (desc); \
+                                       gettimeofday(&profile_timer1, NULL);
+#define  SC_PROFILE_END                gettimeofday(&profile_timer2, NULL); \
+                                       profile_usec = profile_timer2.tv_usec - profile_timer1.tv_usec; \
+                                       profile_sec  = profile_timer2.tv_sec  - profile_timer1.tv_sec;  \
+                                       while(profile_usec < 0) profile_usec += 1000000, profile_sec--; \
+                                       printf("%s: %ld.%06ld\n", profile_desc, profile_sec, profile_usec); }
+
+
+/* Debugging constants */
+#define __debugging_macros    0
+#if __debugging_macros
+#define  SC_DEBUG_PRINTF(args...)      { printf(args); fflush(stdout); }
+#define  SC_DEBUG_HEADING()            SC_DEBUG_PRINTF("%s(%d): %s:  ", __FILE__, __LINE__, __PRETTY_FUNCTION__)
+#define  SC_DEBUG_MSG(fmt, args...)    { SC_DEBUG_HEADING(); SC_DEBUG_PRINTF(fmt "\n", args); }
+#define  SC_DEBUG_ENTER(fmt, args...)  { SC_DEBUG_HEADING(); SC_DEBUG_PRINTF("enter " fmt "\n", args); }
+#define  SC_DEBUG_ENTER_()             SC_DEBUG_ENTER("%s", "")
+#define  SC_DEBUG_EXIT(fmt, args...)   { SC_DEBUG_HEADING(); SC_DEBUG_PRINTF("exit " fmt "\n", args); }
+#define  SC_DEBUG_EXIT_()              SC_DEBUG_EXIT("%s", "")
+#endif /* __debugging_macros */
+
+
+/* Check for definition of M_PI */
+#ifndef M_PI
+   #define  M_PI                 3.14159265358979323846
+#endif /* M_PI defined? */
+#ifndef M_SQRT2
+   #define  M_SQRT2              1.41421356237309504880
+#endif /* M_SQRT2 defined? */
+
+
+/* Other useful generic macros */
+#ifndef SQR
+   #define  SQR(a)               ((a) * (a))
+#endif /* SQR defined? */
+#ifndef DIST
+   #define  DIST(a,b)            (sqrt(SQR(a) + SQR(b)))
+#endif /* DIST defined? */
+#ifndef SGN
+   #define  SGN(a)               ((a) < 0 ? -1 : 1)
+#endif /* SGN defined? */
+
+/* This is a function that divides two ints and rounds to the nearest int. */
+#ifndef INT_ROUND_DIV
+   #define  INT_ROUND_DIV(a,b)   ((a)/(b) + (((a)%(b)) << 1) / (b))
+#endif /* INT_ROUND_DIV defined? */
+
+
+/* Configure-defined flags */
+#define  USE_SOUND               @MIKMOD@             /* Enable sound support? */
+#define  USE_NETWORK             @NETWORK@            /* Enable network support? */
+#define  USE_READLINE            @READLINE@           /* Use the readline library? */
+#define  GTK_ENABLED             @ANYGTK@             /* Enable *any* GTK support? */
+#define  GTK12_ENABLED           @GTK12@              /* Enable GTK 1.2 support? */
+#define  GTK20_ENABLED           @GTK20@              /* Enable GTK 2.0 support? */
+#define  GNOME_ENABLED           @GNOME@              /* Enable GNOME support? */
+
+
+/* Filenames, paths */
+#define  SC_FILENAME_LENGTH      0x1000               /* Max. length for a filename. */
+#define  SC_FONT_LENGTH          0x1000               /* Max. length for a font. */
+#define  SC_GLOBAL_DIR           "@datadir@/xscorch/" /* Global information directory */
+#define  SC_LOCAL_CONFIG_DIR     ".xscorch"           /* Config in home directory */
+#define  SC_LOCAL_CONFIGURATION  "config"             /* Local config file */
+#define  SC_SOUND_DIR            "sounds"             /* Sound subdirectory */
+#define  SC_IMAGE_DIR            "images"             /* Image subdirectory */
+#define  SC_ACCESSORY_FILE       "accessories.def"    /* Data file supplying accessory defs */
+#define  SC_TANK_PROFILE_FILE    "profiles.def"       /* Data file supplying tank profiles */
+#define  SC_SCORING_FILE         "scorings.def"       /* Data file supplying scoring defs */
+#define  SC_WEAPON_FILE          "weapons.def"        /* Data file supplying weapon defs */
+
+
+/* Player and round limits -- these are universal enough that
+   they really ought to be at the toplevel include file.  */
+#define  SC_MAX_PLAYERS          10       /* Total number of players allowed. */
+#define  SC_MAX_ROUNDS           1000     /* Total number of rounds allowed. */
+
+
+/* General field definitions */
+#define  SC_DEF_FIELD_WIDTH      800      /* Width of field in pixels */
+#define  SC_DEF_FIELD_HEIGHT     600      /* Height of field in pixels */
+#define  SC_DEF_MAX_HEIGHT       550      /* Maximum initial height of ground */
+
+#define  SC_MIN_FIELD_WIDTH      320      /* Minimum Width of field in pixels */
+#define  SC_MIN_FIELD_HEIGHT     240      /* Minimum Height of field in pixels */
+#define  SC_MAX_FIELD_WIDTH      1024     /* Maximum Width of field in pixels */
+#define  SC_MAX_FIELD_HEIGHT     768      /* Maximum Height of field in pixels */
+
+
+/* Miscellaneous */
+#define  SC_SLEEP_TIME           5        /* Timer sleep time (in msec) */
+#define  SC_TIME_ETERNITY        10       /* Units are subjective */
+                                          /* (eh, too much xscorch coding lately) */
+
+/* STFU automake */
+#define  SC_DATAROOTDIR		@datarootdir@
+
+
+#endif /* __xscorch_h_included */

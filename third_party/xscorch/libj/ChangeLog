@@ -1,0 +1,66 @@
+$Header: /fridge/cvs/xscorch/libj/ChangeLog,v 1.32 2009-02-24 05:14:21 jacob Exp $
+
+
+4.1.1:   Avoid defining "unused" as a keyword.  It conflicts with other
+         packages (like the cairo font lib) who use it in their headers.
+         Where the "unused" keyword was used, now use "__libj_unused".
+4.1.0:   Fix gcc non-null warnings on stra(); stra() is now a function
+         entry point and has a stra_const() sibling.  Update libtool
+         scripts (necessary because otherwise the .so extension goes
+         missing on current debian).
+4.0.16:  Fixes to m4 scripts.
+4.0.15:  New configure option:  --enable-warn-error.
+4.0.14:  License restricted to version 2 ONLY.
+         Fix libtool issues.
+4.0.13:  Reworking -Winline flag.
+4.0.12:  Migration to autoconf 2.50.
+4.0.11:  configure structural changes.
+4.0.10:  Setup libj to support embedded builds.
+         Added strblenn.
+         Added strsimilar.
+         Added sbprintf_concat.
+         Cleaned up code for build with GCC 3.2
+         Removed inline assembly.
+         Minor optimization of string comparisons and copy.
+         Corrected an error in strconcat.
+         Significant extensions of jreg interface:
+            Added mechanism to set values in bulk on a class.
+            Added prelude to "default values" mechanism.
+            Added macros to simplify data structure initialization.
+         Build jreg and jstr with -pedantic -std=c99 -W to clean up some
+            bogus code (signed/unsigned mixups and varadic macros).
+4.0.9:   Added support for debian packaging.
+4.0.8:   Made jconio optional.
+4.0.7:   Minor revision to escapeCGI
+4.0.6:   Added escapeCGI, escapeCGIa functions.
+         Corrected a bug in strclonea which permits a segfault condition
+         when input string is null.
+4.0.5:   Unclear where the 4.0.4 boundary ended, so I'm upping release
+4.0.4:   Fixed bug in mutator macros for jstra that did not update the
+         length of the resulting string.  Also exported the strsetlena()
+         function since external code which modifies a stringa buffer
+         needs this.
+4.0.3:   Bugfixes to build system
+         Minor bugfixes to jstr(a) when libc string turned off
+4.0.2:   Added runtime configure script and macros for other apps
+         Added CVS headers to jmem, jstr, jstra, jlink
+4.0.1:   Added strdelinsa() functions.
+         Added strcopynb() functions.
+         Fixed comparator error in bintree_string_lessthan()
+4.0.0:   Structural overhaul of libjstr.  This initiates a major
+         API revision, therefore the major number had to increase.
+         The API may change over the next few patchlevels so it
+         is not recommended to port many apps over to 4.x yet.
+            *  Revamped all of jstr, and updated other libraries
+               using jstr calls.
+            *  Added strreplace() functions.
+            *  Added test suite for jstr.
+            *  Revamped some of jstra (particularly parts tied
+               to jstr).  Added strreplacea() and sprintfa(),
+               also strreplacea_list().
+            *  Added strinserta() and strdeletea() functions
+               to jstra.
+3.0.6:   Added the bintree pair functions
+3.0.5:   Added a few helper functions for bintree utilities
+3.0.4:   Added hardcoded allocation "chunks" in jstra
+3.0.3:   First revision

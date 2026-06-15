@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import binascii
 import hashlib
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -14,6 +15,8 @@ from pathlib import Path
 DCAPP_MAGIC = 0x50414344
 DCAPP_ABI_VERSION = 2
 DCAPP_HEADER_SIZE = 256
+DCAPP_CONTRACT_MAGIC = 0x43444332
+DCAPP_CONTRACT_HASH_WORDS = 4
 
 SYMBOL_NAMES = {
     "__data_data",
@@ -38,9 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--runtime-id", required=True, type=parse_int)
+    parser.add_argument("--flags", type=parse_int, default=0)
     parser.add_argument("--load-addr", required=True, type=parse_int)
     parser.add_argument("--app-ram-start", required=True, type=parse_int)
     parser.add_argument("--app-ram-size", required=True, type=parse_int)
+    parser.add_argument("--contract-header", required=True, type=Path)
     return parser.parse_args()
 
 
@@ -79,9 +84,21 @@ def optional_thumb_offset(symbols: dict[str, int], name: str, load_addr: int) ->
     return (symbols[name] - load_addr) | 1
 
 
+def read_contract_words(path: Path) -> list[int]:
+    text = path.read_text(encoding="ascii")
+    match = re.search(r"^#define\s+DCAPP_BUILD_CONTRACT_WORDS\s+(.+)$", text, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"{path} does not define DCAPP_BUILD_CONTRACT_WORDS")
+    words = [int(part.rstrip("uU"), 0) for part in match.group(1).split(",")]
+    if len(words) != DCAPP_CONTRACT_HASH_WORDS:
+        raise RuntimeError(f"{path} has {len(words)} contract words, expected {DCAPP_CONTRACT_HASH_WORDS}")
+    return words
+
+
 def main() -> int:
     args = parse_args()
     symbols = read_symbols(args.nm, args.elf)
+    contract_words = read_contract_words(args.contract_header)
     raw = bytearray(args.raw.read_bytes())
     if len(raw) < DCAPP_HEADER_SIZE:
         raise RuntimeError(f"{args.raw} is smaller than the DCAPP header")
@@ -97,13 +114,17 @@ def main() -> int:
     build_id = hashlib.sha256(payload).digest()
     crc32 = binascii.crc32(payload) & 0xFFFFFFFF
 
+    reserved = [0] * 39
+    reserved[0] = DCAPP_CONTRACT_MAGIC
+    reserved[1 : 1 + DCAPP_CONTRACT_HASH_WORDS] = contract_words
+
     header = struct.pack(
         "<IHH" + "I" * 14 + "32sI" + "I" * 39,
         DCAPP_MAGIC,
         DCAPP_HEADER_SIZE,
         DCAPP_ABI_VERSION,
         args.runtime_id,
-        0,
+        args.flags,
         args.load_addr,
         image_size,
         data_load_offset,
@@ -118,7 +139,7 @@ def main() -> int:
         args.app_ram_size,
         build_id,
         crc32,
-        *([0] * 39),
+        *reserved,
     )
     if len(header) != DCAPP_HEADER_SIZE:
         raise RuntimeError(f"internal header size error: {len(header)}")

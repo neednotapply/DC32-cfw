@@ -13,9 +13,44 @@ set(SIMAVR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/simavr")
 set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
 set(DCAPP_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp.lkr")
+set(DCAPP_LARGE_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp_large.lkr")
 set(DCAPP_CACHE_START 0x10080000)
+set(DCAPP_LARGE_LOAD_START 0x10100000)
 set(DCAPP_RAM_START 0x2005F000)
 set(DCAPP_RAM_SIZE 0x00014000)
+set(DCAPP_BUILD_CONTRACT "${CMAKE_CURRENT_BINARY_DIR}/dcapp_build_contract.h")
+
+file(GLOB_RECURSE DCAPP_BUILD_CONTRACT_INPUTS CONFIGURE_DEPENDS
+    "${SRC_DIR}/*.c"
+    "${SRC_DIR}/*.cpp"
+    "${SRC_DIR}/*.h"
+    "${SRC_DIR}/*.S"
+    "${SRC_DIR}/*.lkr"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/*.cmake"
+    "${TINYUSB_DIR}/src/*.c"
+    "${TINYUSB_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/*.h"
+)
+list(FILTER DCAPP_BUILD_CONTRACT_INPUTS EXCLUDE REGEX "[/\\\\]src[/\\\\]apps[/\\\\]")
+list(APPEND DCAPP_BUILD_CONTRACT_INPUTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_build_contract.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_host_symbols.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_dcapp.py"
+)
+add_custom_command(
+    OUTPUT ${DCAPP_BUILD_CONTRACT}
+    DEPENDS ${DCAPP_BUILD_CONTRACT_INPUTS}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_build_contract.py
+        --root ${CMAKE_CURRENT_SOURCE_DIR}
+        --output ${DCAPP_BUILD_CONTRACT}
+        ${DCAPP_BUILD_CONTRACT_INPUTS}
+    VERBATIM
+)
+add_custom_target(dcapp_build_contract DEPENDS ${DCAPP_BUILD_CONTRACT})
 
 set(GB_RUNTIME_SOURCES
     ${SRC_DIR}/gb.c
@@ -135,6 +170,7 @@ add_executable(${APP}
 )
 
 target_include_directories(${APP} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
     ${SRC_DIR}
     ${SRC_DIR}/tinyusb_compat
     ${SRC_DIR}/inc_RP2350
@@ -150,6 +186,7 @@ target_include_directories(${APP} PRIVATE
     ${TINYUSB_DIR}/src
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
+add_dependencies(${APP} dcapp_build_contract)
 
 target_compile_definitions(${APP} PRIVATE
     EMBEDDED
@@ -369,11 +406,21 @@ get_target_property(DC32_FIRMWARE_COMPILE_DEFINITIONS ${APP} COMPILE_DEFINITIONS
 get_target_property(DC32_FIRMWARE_COMPILE_OPTIONS ${APP} COMPILE_OPTIONS)
 
 function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
+    cmake_parse_arguments(DCAPP "LARGE_XIP" "" "" ${ARGN})
+    if(DCAPP_LARGE_XIP)
+        set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LARGE_LINKER_SCRIPT}")
+        set(DCAPP_TARGET_LOAD_ADDR "${DCAPP_LARGE_LOAD_START}")
+        set(DCAPP_TARGET_FLAGS 1)
+    else()
+        set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LINKER_SCRIPT}")
+        set(DCAPP_TARGET_LOAD_ADDR "${DCAPP_CACHE_START}")
+        set(DCAPP_TARGET_FLAGS 0)
+    endif()
     set(RAW_FILE "${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.raw")
     set(DCAPP_FILE "${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.DC32")
 
-    add_executable(${TARGET_NAME} ${ARGN} ${SRC_DIR}/syscalls.c)
-    add_dependencies(${TARGET_NAME} dcapp_host_symbols)
+    add_executable(${TARGET_NAME} ${DCAPP_UNPARSED_ARGUMENTS} ${SRC_DIR}/syscalls.c)
+    add_dependencies(${TARGET_NAME} dcapp_host_symbols dcapp_build_contract)
     target_include_directories(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_INCLUDE_DIRS})
     target_compile_definitions(${TARGET_NAME} PRIVATE
         ${DC32_FIRMWARE_COMPILE_DEFINITIONS}
@@ -390,7 +437,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
         -Wl,--gc-sections
         -Wl,--undefined=dcAppAbort
         -Wl,--undefined=dcAppRefreshDisplayOptions
-        -Wl,-T${DCAPP_LINKER_SCRIPT}
+        -Wl,-T${DCAPP_TARGET_LINKER_SCRIPT}
         -Wl,-T${DCAPP_HOST_SYMBOLS}
         -mthumb
         -mcpu=cortex-m33
@@ -401,7 +448,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
 
     add_custom_command(
         OUTPUT ${DCAPP_FILE}
-        DEPENDS ${TARGET_NAME}
+        DEPENDS ${TARGET_NAME} ${DCAPP_BUILD_CONTRACT}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
         COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.dcapp
         COMMAND ${CMAKE_OBJCOPY} -O binary
@@ -413,9 +460,11 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
             --raw ${RAW_FILE}
             --output ${DCAPP_FILE}
             --runtime-id ${RUNTIME_ID}
-            --load-addr ${DCAPP_CACHE_START}
+            --load-addr ${DCAPP_TARGET_LOAD_ADDR}
+            --flags ${DCAPP_TARGET_FLAGS}
             --app-ram-start ${DCAPP_RAM_START}
             --app-ram-size ${DCAPP_RAM_SIZE}
+            --contract-header ${DCAPP_BUILD_CONTRACT}
         COMMAND ${CMAKE_SIZE} -A $<TARGET_FILE:${TARGET_NAME}>
         VERBATIM
     )
@@ -480,6 +529,202 @@ add_dcapp(dcapp_gamepad gamepad 105
 set(PICOWARE_APP_SOURCES
     ${SRC_DIR}/apps/picoware_app.c
     ${SRC_DIR}/apps/picoware_ports.c
+)
+
+set(TWORLD_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tworld")
+set(TWORLD_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/tworld")
+set(TWORLD_ASSET_C "${TWORLD_ASSET_DIR}/tworld_assets.c")
+set(TWORLD_ASSET_H "${TWORLD_ASSET_DIR}/tworld_assets.h")
+set(TWORLD_TILE_FILES "${TWORLD_SOURCE_DIR}/res/tiles.bmp")
+add_custom_command(
+    OUTPUT ${TWORLD_ASSET_C} ${TWORLD_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_tworld_assets.py
+        ${TWORLD_TILE_FILES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TWORLD_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_tworld_assets.py
+        --source-root ${TWORLD_SOURCE_DIR}
+        --output-c ${TWORLD_ASSET_C}
+        --output-h ${TWORLD_ASSET_H}
+    VERBATIM
+)
+add_custom_target(tworld_assets DEPENDS ${TWORLD_ASSET_C} ${TWORLD_ASSET_H})
+
+set(TWORLD_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/chips-tworld.pak")
+add_custom_command(
+    OUTPUT ${TWORLD_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        ${TWORLD_TILE_FILES}
+        ${TWORLD_SOURCE_DIR}/intro.dat
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        --source-root ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        --output-dir ${CMAKE_CURRENT_BINARY_DIR}/apps
+        --only tworld
+    VERBATIM
+)
+add_custom_target(dcapp_chips_assets ALL DEPENDS ${TWORLD_PAK})
+
+set(TWORLD_CORE_SOURCES
+    ${TWORLD_SOURCE_DIR}/encoding.c
+    ${TWORLD_SOURCE_DIR}/mslogic.c
+    ${TWORLD_SOURCE_DIR}/play.c
+    ${TWORLD_SOURCE_DIR}/random.c
+)
+
+set(CHIPS_APP_SOURCES
+    ${SRC_DIR}/apps/chips/chips_app.c
+    ${SRC_DIR}/apps/chips/chips_port.c
+    ${SRC_DIR}/apps/chips/chips_tworld_glue.c
+    ${SRC_DIR}/apps/chips/chips_tworld_solution.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${TWORLD_CORE_SOURCES}
+    ${TWORLD_ASSET_C}
+)
+
+set(PIPEDREAMER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/PipeDreamer")
+set(PIPEDREAMER_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/pipe-pipedreamer.pak")
+add_custom_command(
+    OUTPUT ${PIPEDREAMER_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        ${PIPEDREAMER_SOURCE_DIR}/Source/Board.cpp
+        ${PIPEDREAMER_SOURCE_DIR}/Source/Queue.cpp
+        ${PIPEDREAMER_SOURCE_DIR}/Source/TilePiece.cpp
+        ${PIPEDREAMER_SOURCE_DIR}/Resources/Images/PipeDreamerCanvas.png
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        --source-root ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        --output-dir ${CMAKE_CURRENT_BINARY_DIR}/apps
+        --only pipedreamer
+    VERBATIM
+)
+add_custom_target(dcapp_pipe_assets ALL DEPENDS ${PIPEDREAMER_PAK})
+
+set(PIPEDREAMER_CORE_SOURCES
+    ${PIPEDREAMER_SOURCE_DIR}/Source/Board.cpp
+    ${PIPEDREAMER_SOURCE_DIR}/Source/Queue.cpp
+    ${PIPEDREAMER_SOURCE_DIR}/Source/Randomizer.cpp
+    ${PIPEDREAMER_SOURCE_DIR}/Source/TilePiece.cpp
+)
+
+set(PIPE_APP_SOURCES
+    ${SRC_DIR}/apps/pipe/pipe_app.cpp
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${PIPEDREAMER_CORE_SOURCES}
+)
+
+set(XSCORCH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xscorch")
+set(XSCORCH_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/xscorch")
+set(XSCORCH_ASSET_C "${XSCORCH_ASSET_DIR}/xscorch_assets.c")
+set(XSCORCH_ASSET_H "${XSCORCH_ASSET_DIR}/xscorch_assets.h")
+add_custom_command(
+    OUTPUT ${XSCORCH_ASSET_C} ${XSCORCH_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_xscorch_assets.py
+        ${XSCORCH_SOURCE_DIR}/data/weapons.def
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${XSCORCH_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_xscorch_assets.py
+        --source-root ${XSCORCH_SOURCE_DIR}
+        --output-c ${XSCORCH_ASSET_C}
+        --output-h ${XSCORCH_ASSET_H}
+    VERBATIM
+)
+add_custom_target(xscorch_assets DEPENDS ${XSCORCH_ASSET_C} ${XSCORCH_ASSET_H})
+
+set(XSCORCH_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/scorch-xscorch.pak")
+add_custom_command(
+    OUTPUT ${XSCORCH_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        ${XSCORCH_SOURCE_DIR}/data/weapons.def
+        ${XSCORCH_SOURCE_DIR}/data/accessories.def
+        ${XSCORCH_SOURCE_DIR}/img/xscorch-icon.xpm
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        --source-root ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        --output-dir ${CMAKE_CURRENT_BINARY_DIR}/apps
+        --only xscorch
+    VERBATIM
+)
+add_custom_target(dcapp_scorch_assets ALL DEPENDS ${XSCORCH_PAK})
+
+set(SCORCH_APP_SOURCES
+    ${SRC_DIR}/apps/scorch/scorch_app.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${XSCORCH_ASSET_C}
+)
+
+set(CAVE_NXENGINE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nxengine-evo")
+set(CAVE_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cave")
+set(CAVE_ASSET_C "${CAVE_ASSET_DIR}/cave_assets.c")
+set(CAVE_ASSET_H "${CAVE_ASSET_DIR}/cave_assets.h")
+add_custom_command(
+    OUTPUT ${CAVE_ASSET_C} ${CAVE_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_cave_assets.py
+        ${CAVE_NXENGINE_SOURCE_DIR}/data/sprites.sif
+        ${CAVE_NXENGINE_SOURCE_DIR}/src/autogen/sprites.h
+        ${CAVE_NXENGINE_SOURCE_DIR}/src/autogen/AssignSprites.cpp
+        ${CAVE_NXENGINE_SOURCE_DIR}/src/object.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CAVE_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_cave_assets.py
+        --nxengine-root ${CAVE_NXENGINE_SOURCE_DIR}
+        --output-c ${CAVE_ASSET_C}
+        --output-h ${CAVE_ASSET_H}
+    VERBATIM
+)
+add_custom_target(cave_assets DEPENDS ${CAVE_ASSET_C} ${CAVE_ASSET_H})
+
+set(CAVE_APP_SOURCES
+    ${SRC_DIR}/apps/cave/cave_app.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${CAVE_ASSET_C}
+)
+
+set(XSOKOBAN_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xsokoban")
+set(XSOKOBAN_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/xsokoban")
+set(XSOKOBAN_ASSET_C "${XSOKOBAN_ASSET_DIR}/xsokoban_assets.c")
+set(XSOKOBAN_ASSET_H "${XSOKOBAN_ASSET_DIR}/xsokoban_assets.h")
+file(GLOB XSOKOBAN_SCREEN_FILES CONFIGURE_DEPENDS "${XSOKOBAN_SOURCE_DIR}/screens/screen.*")
+file(GLOB XSOKOBAN_TILE_FILES CONFIGURE_DEPENDS "${XSOKOBAN_SOURCE_DIR}/bitmaps/20/*.xpm")
+add_custom_command(
+    OUTPUT ${XSOKOBAN_ASSET_C} ${XSOKOBAN_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_xsokoban_assets.py
+        ${XSOKOBAN_SCREEN_FILES}
+        ${XSOKOBAN_TILE_FILES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${XSOKOBAN_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_xsokoban_assets.py
+        --source-root ${XSOKOBAN_SOURCE_DIR}
+        --output-c ${XSOKOBAN_ASSET_C}
+        --output-h ${XSOKOBAN_ASSET_H}
+    VERBATIM
+)
+add_custom_target(xsokoban_assets DEPENDS ${XSOKOBAN_ASSET_C} ${XSOKOBAN_ASSET_H})
+
+set(XSOKOBAN_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/sokoban-xsokoban.pak")
+add_custom_command(
+    OUTPUT ${XSOKOBAN_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        ${XSOKOBAN_SCREEN_FILES}
+        ${XSOKOBAN_TILE_FILES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_period_assets.py
+        --source-root ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        --output-dir ${CMAKE_CURRENT_BINARY_DIR}/apps
+        --only xsokoban
+    VERBATIM
+)
+add_custom_target(dcapp_sokoban_assets ALL DEPENDS ${XSOKOBAN_PAK})
+
+set(SOKOBAN_APP_SOURCES
+    ${SRC_DIR}/apps/sokoban/sokoban_app.c
+    ${SRC_DIR}/apps/sokoban/sokoban_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${XSOKOBAN_ASSET_C}
 )
 
 set(RP2040_DOOM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rp2040-doom")
@@ -906,6 +1151,108 @@ add_dcapp(dcapp_labyrinth labyrinth 204
 
 add_dcapp(dcapp_trex trex 205
     ${PICOWARE_APP_SOURCES}
+)
+
+add_dcapp(dcapp_chips chips 207 LARGE_XIP
+    ${CHIPS_APP_SOURCES}
+)
+
+add_dependencies(dcapp_chips tworld_assets)
+add_dependencies(dcapp_chips_dcapp dcapp_chips_assets)
+
+target_include_directories(dcapp_chips BEFORE PRIVATE
+    ${TWORLD_ASSET_DIR}
+    ${TWORLD_SOURCE_DIR}
+    ${SRC_DIR}/apps/chips
+    ${SRC_DIR}/apps/port
+)
+
+target_compile_definitions(dcapp_chips PRIVATE
+    DC32_CHIPS_MS_ONLY=1
+    malloc=dc32PortMalloc
+    calloc=dc32PortCalloc
+    realloc=dc32PortRealloc
+    free=dc32PortFree
+    time=chipsTworldTime
+)
+
+target_compile_options(dcapp_chips PRIVATE
+    -UTICKS_PER_SECOND
+    -Wno-error
+    -Wno-format-truncation
+    -Wno-implicit-fallthrough
+    -Wno-old-style-definition
+    -Wno-missing-prototypes
+    -Wno-strict-prototypes
+    -Wno-sign-compare
+    -Wno-type-limits
+    -Wno-unused-value
+)
+
+add_dcapp(dcapp_scorch scorch 208 LARGE_XIP
+    ${SCORCH_APP_SOURCES}
+)
+
+add_dependencies(dcapp_scorch xscorch_assets)
+add_dependencies(dcapp_scorch_dcapp dcapp_scorch_assets)
+
+target_include_directories(dcapp_scorch BEFORE PRIVATE
+    ${XSCORCH_ASSET_DIR}
+    ${SRC_DIR}/apps/scorch
+    ${SRC_DIR}/apps/port
+)
+
+target_compile_options(dcapp_scorch PRIVATE
+    -Wno-error
+    -Wno-format-truncation
+)
+
+add_dcapp(dcapp_cave cave 210 LARGE_XIP
+    ${CAVE_APP_SOURCES}
+)
+
+add_dependencies(dcapp_cave cave_assets)
+
+target_include_directories(dcapp_cave BEFORE PRIVATE
+    ${CAVE_ASSET_DIR}
+    ${SRC_DIR}/apps/cave
+    ${SRC_DIR}/apps/port
+)
+
+target_compile_options(dcapp_cave PRIVATE
+    -Wno-error
+    -Wno-format-truncation
+)
+
+add_dcapp(dcapp_pipe pipe 209 LARGE_XIP
+    ${PIPE_APP_SOURCES}
+)
+
+add_dependencies(dcapp_pipe_dcapp dcapp_pipe_assets)
+
+target_include_directories(dcapp_pipe BEFORE PRIVATE
+    ${PIPEDREAMER_SOURCE_DIR}/Source
+    ${SRC_DIR}/apps/pipe
+    ${SRC_DIR}/apps/port
+)
+
+target_compile_options(dcapp_pipe PRIVATE
+    -Wno-error
+    $<$<COMPILE_LANGUAGE:CXX>:-frtti>
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
+)
+
+add_dcapp(dcapp_sokoban sokoban 211
+    ${SOKOBAN_APP_SOURCES}
+)
+
+add_dependencies(dcapp_sokoban xsokoban_assets)
+add_dependencies(dcapp_sokoban_dcapp dcapp_sokoban_assets)
+
+target_include_directories(dcapp_sokoban BEFORE PRIVATE
+    ${XSOKOBAN_ASSET_DIR}
+    ${SRC_DIR}/apps/sokoban
+    ${SRC_DIR}/apps/port
 )
 
 add_dcapp(dcapp_starfield starfield 220

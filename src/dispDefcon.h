@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 //these dimensions are unrotateable - they are hardware dimensions
 
 #define HARDWARE_WIDTH		240	//hardware
@@ -40,5 +44,8 @@ void dispSetContrast(uint_fast8_t val);
 //frame
 extern const uint8_t lcdFrame[];
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif

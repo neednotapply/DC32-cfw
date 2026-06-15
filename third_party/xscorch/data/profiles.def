@@ -1,0 +1,52 @@
+; $Header: /fridge/cvs/xscorch/data/profiles.def,v 1.4 2003/02/28 12:13:25 jacob Exp $
+;
+; profiles.def
+; This is the default xscorch tank profile definition file.
+;
+
+Standard = tank_profile_class {
+   radius      =  9;
+   turretRadius=  13;
+   shelfSize   =  5;
+   mobile      =  true;
+
+   row03    =  "       xxxxx       ";
+   row04    =  "     xxxxxxxxx     ";
+   row05    =  "    xxxxxxxxxxx    ";
+   row06    =  "   xxx       xxx   ";
+   row07    =  "  xxxxxxxxxxxxxxx  ";
+   row08    =  " x   x       x   x ";
+   row09    =  "  xxxxxxxxxxxxxxx  ";
+};
+
+DoubleTrack = tank_profile_class {
+   radius      =  9;
+   turretRadius=  13;
+   shelfSize   =  4;
+   efficiency  =  115;
+   hardness    =  90;
+   mobile      =  true;
+
+   row03    =  "      xxxxxxx      ";
+   row04    =  "    xxxxxxxxxxx    ";
+   row05    =  "   xxxxxxxxxxxxx   ";
+   row06    =  " x     xxxxx     x ";
+   row07    =  "  xxxxx     xxxxx  ";
+   row08    =  " x     x   x     x ";
+   row09    =  "  xxxxx     xxxxx  ";
+};
+
+Fortification = tank_profile_class {
+   radius      =  9;
+   turretRadius=  13;
+   shelfSize   =  6;
+   hardness    =  125;
+   mobile      =  false;
+
+   row04    =  "        xxx        ";
+   row05    =  "      xxxxxxx      ";
+   row06    =  "     xxxxxxxxx     ";
+   row07    =  "     xxxxxxxxx     ";
+   row08    =  "    xxxxxxxxxxx    ";
+   row09    =  "xxxxxxxxxxxxxxxxxxx";
+};

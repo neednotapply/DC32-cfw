@@ -1,0 +1,565 @@
+xscorch(6)                                                          xscorch(6)
+
+
+
+NNAAMMEE
+       xscorch - Annihilate enemy tanks using overpowered guns.
+
+SSYYNNOOPPSSIISS
+       xxssccoorrcchh
+
+       xxssccoorrcchh _[_o_p_t_i_o_n_s_]
+
+       xxssccoorrcchh ----hheellpp
+
+DDEESSCCRRIIPPTTIIOONN
+       Xscorch is a clone of the classic DOS game, "Scorched Earth". The basic
+       goal is to annihilate enemy tanks using overpowered guns :). Basically,
+       you  buy  weapons,  you target the enemy by adjusting the angle of your
+       turret and firing power, and you hope to destroy their tank before they
+       destroy yours.
+
+GGAAMMEEPPLLAAYY
+       First, fiddle with the options in the main menu.  There are a number of
+       options which are described below, which may make the  game  easier  or
+       harder.   The  default options make for a reasonable level of gameplay.
+       Most of the game configuration is controlled from the  user  interface,
+       although  there  are  a  few  command-line  options which are mentioned
+       below.  Once you are ready to begin a new game, you might want to  _S_a_v_e
+       _O_p_t_i_o_n_s  to  save your configuration, then select _B_e_g_i_n _G_a_m_e to start a
+       new game.
+
+       Gameplay is divided up into several rounds.  Each round consists of two
+       parts:   the  _I_n_v_e_n_t_o_r_y  phase  and the _B_a_t_t_l_e phase.  In the Inventory
+       phase, you can buy weapons to shoot at your opponents, and  accessories
+       to help defend your tank.  See the Inventory section below for informa-
+       tion on the weapons and accessories you may buy.  In the Battle  phase,
+       you  setup  defenses,  choose a weapon, aim and fire at your opponents.
+       See the section on Battle below, for more information.
+
+IINNVVEENNTTOORRYY
+       The player has the option to buy weapons and accessories  to  make  the
+       game  more  interesting.   Weapons are just that: an assortment of mis-
+       siles, including ICBM-like warheads, napalm, lasers, and  a  number  of
+       custom  weapons to bring down specific defenses.  Accessories are meth-
+       ods to make gameplay easier for the player and increase their chance of
+       survival,  with  guidance  systems, shields, fuel, batteries, and other
+       odds-and-ends.
+
+       At the beginning of a round, each player is given an opportunity to buy
+       or  sell weapons and accessories.  Each player may have up to 99 of any
+       item in their inventory.  A few weapons have an  infinite  supply  (for
+       example, Baby Missiles) - these weapons cannot be purchased.
+
+       Weapons  and  accessories are sold in bundles; the price for the bundle
+       is displayed in the inventory, and you must buy  items  as  a  complete
+       bundle.  The exception to this is when a player attempts to buy more of
+       an item than their inventory can hold; in this case, the bundle will be
+       broken  and  the  weapons are sold on an individual basis, with a small
+       markup applied.
+
+       Weapons and accessories may also be sold  from  a  player's  inventory.
+       Again, items are generally sold as a bundle.  The player will receive a
+       reduced amount of money for the sale - hey, the middleman has  to  make
+       money somewhere :)
+
+       In  the Inventory screen, two panels are displayed, listing the weapons
+       and accessories that are available.  The _T_a_b key  will  switch  between
+       the  various  panes.   _U_p _A_r_r_o_w and _D_o_w_n _A_r_r_o_w will allow the player to
+       scroll through the list of items, _R_i_g_h_t _A_r_r_o_w will buy  a  bundle,  and
+       _L_e_f_t _A_r_r_o_w will sell a bundle of the currently highlighted item.
+
+       For each item, the _n_a_m_e, _b_u_n_d_l_e _s_i_z_e/_t_o_t_a_l _p_r_i_c_e, and _c_u_r_r_e_n_t _i_n_v_e_n_t_o_r_y
+       are displayed.
+
+       Items which can neither be bought or sold will appear darkened.  If the
+       player  has  maxed their inventory for that item, or they cannot afford
+       to purchase the item, or the item has a  higher  _a_r_m_s  _l_e_v_e_l  than  the
+       player  is allowed, then the item cannot be purchased.  Items which can
+       be bought will appear with an arrow pointing to the  right,  and  items
+       which can be sold will appear with an arrow pointing to the left.
+
+       The items that are available are listed in the next two sections.
+
+WWEEAAPPOONNSS LLIISSTT
+       This list will be added once the weapons list is reasonably stable.
+
+AACCCCEESSSSOORRIIEESS LLIISSTT
+       This list will be added once the accessories list is reasonably stable.
+
+BBAATTTTLLEE
+       This overview is sadly, incomplete.
+
+TTAANNKK CCOONNTTRROOLLSS
+       _L_e_f_t, _R_i_g_h_t
+              Change  the  turret angle.  This will adjust the turret angle in
+              increments of 5 degrees.   For  finer  control,  hold  _S_h_i_f_t  to
+              adjust the angle in increments of 1 degree.
+
+       _U_p, _D_o_w_n
+              Change  the  firing power, in the range of 0 to 1000.  This will
+              adjust the firing power in increments of 20.  For finer control,
+              hold _S_h_i_f_t to adjust the firing power in increments of 1.
+
+       _T_a_b    Select the next weapon available in your inventory.
+
+       _S_h_i_f_t_+_T_a_b
+              Select the previous weapon available in your inventory.
+
+       _B, _b   Activate  a  battery.  A single battery can restore 5% of damage
+              done to your tank, and  therefore  restore  the  maximum  firing
+              power  by  5%  when you are damaged.  You must have a battery to
+              discharge in your inventory to excercise this option.
+
+       _E, _e   Activate or energize the currently selected shields.
+
+       _F, _f   Activate your fuel tanks.  A window will be displayed,  indicat-
+              ing  the amount of fuel you have available.  As long as you have
+              fuel, you may use the _L_e_f_t and _R_i_g_h_t arrows to move one unit  to
+              the  left  or  right, respectively.  In general, you cannot move
+              your tank up a steep hill.  Immobile tanks will not be  able  to
+              excercise this option.
+
+       _R, _r   Force a redraw of the screen.
+
+       _S, _s   Toggle  the  currently selected shields.  The currently selected
+              shields are the shields which will be used  when  you  Energize.
+              Shields  are classified by a power number with a type suffix:  _M
+              for magnetic shielding, _F for force shielding, and  _S  for  your
+              standard, run-of-the-mill shields.  If no shields are available,
+              _0_S is displayed.
+
+       _T, _t   Toggle contact triggers on/off.  This is only meaningful if  you
+              actually  _h_a_v_e some contact triggers of course, and when tunnel-
+              ing is enabled.  Weapons that are fired after  this  point  will
+              have contact triggers equipped (until you run out).
+
+       _0 - _9  Display information about a particular player.  _1 gives informa-
+              tion about Player 1, and _0 gives information about Player 10.
+
+       _E_n_t_e_r  Accept your orders.
+
+       _C_t_r_l_+_Y Bring up the System Menu (this can also  be  accessed  from  the
+              menus).   You can control certain graphics options from the sys-
+              tem menu, clear the screen of smoke trails, and end a round pre-
+              maturely.
+
+       _C_t_r_l_+_Z Pauses the game.
+
+       _C_t_r_l_+_R Resign from the game.  This will end the game for everyone.  You
+              will be asked to confirm the resignation.
+
+SSYYSSTTEEMM MMEENNUU
+       The system menu gives you some control over the game  while  it  is  in
+       progress.   In  this menu, you will have options to change how the game
+       is displayed (e.g.  the _G_r_a_p_h_i_c_s _F_a_s_t  option  described  below).   You
+       also have access to a few useful commands, described below.
+
+       MMaassss KKiillll
+              Kills  everyone still alive in the round.  No player gets credit
+              for the kills, and none are considered a suicide.   This  option
+              is useful if all human players have already been eliminated from
+              the game, but the AI players are making no  progress  whatsoever
+              in  annihilating each other.  This option ends the current round
+              only.
+
+       EErraassee SSmmookkee
+              If you have used smoke tracers or have _T_r_a_c_e _P_a_t_h_s enabled, then
+              this option will clear all smoke trails from the sky.
+
+       RReettrreeaatt
+              N/A
+
+       RReessiiggnn GGaammee
+              Resigns  from  the current round and all remaining rounds.  This
+              option ends the entire game, and will take you back to the intro
+              screen.
+
+       SSoouunndd SSeettuupp
+              Takes you to the _S_o_u_n_d _O_p_t_i_o_n_s window.
+
+AAII PPLLAAYYEERRSS
+       HHuummaann  The  humans believe they are the superior mind.  The AI's rather
+              disagree with that sentiment.  Keep this in mind  when  you  are
+              wondering  why  9  AI's would want to simultaneously target your
+              tank...
+
+       MMoorroonn  This AI fires at random.  Of all the AI's, this one has  by  far
+              the  highest  suicide  rate.  An alternate name is ``Cannon Fod-
+              der''.
+
+       SShhooootteerr
+              This AI goes for targets it has a line-of-sight to.  It's not  a
+              great player otherwise.  This AI buys weapons that have the best
+              economical yield, but during the game  it  will  select  weapons
+              which have the highest yield.
+
+       SSpprreeaaddeerr
+              This  AI  is  similar  to  the  Shooter,  except a Spreader buys
+              weapons with the highest yield, without regard for the price.
+
+       CChhoooosseerr
+              This AI chooses a victim.  Once chosen, the victim  is  attacked
+              until  they  are dead, or the Chooser loses the ability to reach
+              the victim. This AI does not need line-of-sight, but fortunately
+              it cannot compensate for wind.
+
+       CCaallccuullaatteerr
+              This  AI is like Chooser, except a Calculater can compensate for
+              the wind.  These guys are fairly deadly in a  fight;  they  also
+              tend to allocate large budgets to defense and offense.
+
+       AAnnnniihhiillaatteerr
+              This  AI goes for weapons that will cause as much damage as pos-
+              sible, without much regard  for  individual  victims.   This  AI
+              prefers  spread  weapons to the more focused, precision weapons.
+              A few Annihilaters can clear the  terrain  easily.   These  AI's
+              don't  worry  about  defenses  too much.  With their destructive
+              tendency, they won't survive long anyway - but neither will any-
+              one else.
+
+       IInnssaanniittyy
+              No one knows what this AI thinks...
+
+       UUnnkknnoowwnn
+              This  selects  one of the above AI's at random, but you will not
+              be informed which AI was selected.
+
+CCOONNFFIIGGUURRAATTIIOONN OOPPTTIIOONNSS
+       _P_l_a_y_e_r_s_/_R_o_u_n_d_s:
+
+       NNuummbbeerr ooff PPllaayyeerrss (integer, 2-10)
+              Set the number of players participating in the game.
+
+       NNuummbbeerr ooff RRoouunnddss (integer, >= 1)
+              Set the number of rounds to play for this game.
+
+       AAII TTyyppee (list)
+              Select the AI type.  Human players are ``Human''; the  remaining
+              AI's are documented above.
+
+       PPllaayyeerr NNaammee (string)
+              Give a unique name for each player.
+
+       TTaannkk SSttyyllee (list)
+              Select the type/shape of the tank, for each player.
+
+       _E_c_o_n_o_m_i_c_s:
+
+       IInntteerreesstt RRaattee (float, 0-0.30)
+              Interest rate for savings, compounded once per round.
+
+       DDyynnaammiicc IInntteerreesstt (toggle)
+              If enabled, interest rates will change during the game.
+
+       IInniittiiaall CCaasshh (integer, 0-1000000)
+              Amount of money each player should start with.
+
+       AAIIss CCaann BBuuyy (toggle)
+              If  enabled, computers are permitted to buy items.  The AI's are
+              very uninteresting if this option is turned off.
+
+       AAIIss BBuuyy AAggggrreessssiivveellyy (toggle)
+              If the previous option is enabled, the AI's will buy items  con-
+              servatively.   With  this  option, the AI's will allocate larger
+              budgets and buy bigger items early in the game.
+
+       FFrreeee MMaarrkkeett (toggle)
+              N/A
+
+       SSccoorriinngg (list)
+              Specify how  scoring  works,  selecting  from  Basic,  Standard,
+              Greedy,  or  possibly other methods defined in the configuration
+              file:
+                   _B_a_s_i_c    Players only receive money for kills and survival.
+                   _S_t_a_n_d_a_r_d Players receive less money for kills and survival,
+                            but  they  will also receive money for damaging an
+                            opponent.
+                   _G_r_e_e_d_y   Players are paid as in Standard scoring, but  with
+                            bonuses  for  unused  inventory  at the end of the
+                            round.
+
+       TThhee LLootttteerryy (toggle)
+              If the lottery is enabled, there will be a random drawing at the
+              start of each round.  A random player will receive a bundle of a
+              random weapon for free as the lottery award.  This  is  a  great
+              way  to inject a little extra life into AIs who are usually con-
+              servative buyers.  Plus it's always great fun  when  you  get  a
+              free Annihilator...
+
+       _P_h_y_s_i_c_s:
+
+       AAiirr VViissccoossiittyy (float)
+              N/A
+
+       GGrraavviittyy (float, 0-10)
+              Specify  the  gravity, in pixels per cycle squared (one cycle is
+              roughly 50 milliseconds).
+
+       GGrroouunndd DDaammppiinngg (float, 0-10)
+              Specify the ground damping, used in tunnelling calculations.
+
+       MMaaxxiimmuumm WWiinndd SSppeeeedd (float, 0-10)
+              Specify the maximum wind speed, in  pixels  per  cycle  squared.
+              The  actual wind velocity is initialised once per round, to some
+              value in (-_m_a_x, _m_a_x).
+
+       WWiinndd iiss DDyynnaammiicc (toggle)
+              Normally the wind remains constant through a round.  If this  is
+              enabled, the wind will change once per turn.
+
+       SSuussppeenndd DDiirrtt (percentage)
+              N/A
+
+       TTaannkkss FFaallll (percentage)
+              N/A
+
+       BBoorrddeerrss EExxtteenndd (integer, >= 0)
+              This  specifies  how  far  off-screen weapons should be tracked,
+              when you are playing with no walls.  When this  value  is  zero,
+              weapons  will  disappear as soon as they leave the screen in the
+              horizontal direction, even if wind would have brought them  back
+              on-screen.
+
+       WWaallllss AArree (list)
+              Specify  how weapons behave when they hit a boundary.  Note, the
+              ground is always ``concrete'' -- this specifies  how  the  sides
+              and ceiling behave:
+                   _N_o_n_e       The sides and ceiling are open.
+                   _C_o_n_c_r_e_t_e   All sides are solid.  Weapons hitting any bound-
+                              ary will explode.
+                   _P_a_d_d_e_d     Weapons  hitting  the  sides  and  ceiling  will
+                              bounce off, although at a reduced velocity.
+                   _R_u_b_b_e_r     Weapons  hitting the boundary will bounce off at
+                              exactly the same velocity.
+                   _S_p_r_i_n_g_y    Weapons hitting the  boundary  will  bounce  off
+                              with an additional ``kick'' to the velocity.
+                   _W_r_a_p_a_r_o_u_n_d The ceiling is open.  Weapons going off one side
+                              will reappear on the opposite side.   Explosions
+                              will  also  wrap around the screen if they deto-
+                              nate near an edge.
+                   _R_a_n_d_o_m     One of the above types of walls are selected  at
+                              random.
+
+       _L_a_n_d_s_c_a_p_e:
+
+       SSkkyy (list)
+              Specify the background sky.
+
+       HHoossttiillee EEnnvviirroonnmmeenntt (toggle)
+              N/A
+
+       LLaanndd GGeenneerraattoorr (list)
+              Specify the generator to use to create the land.
+
+       BBuummppiinneessss (percentage)
+              Specify the noise on the generated landscape.
+
+       _W_e_a_p_o_n_s:
+
+       AArrmmss LLeevveell (integer, 0-4)
+              Specify  the maximum arms level for the game.  Only weapons with
+              this arms level or lower may be purchased by any  player,  under
+              normal circumstances.
+
+       BBoommbb IIccoonn SSiizzee (integer, 0-4)
+              Specify  the  size  of the bomb icons, while they are traversing
+              their path in the sky.  This does not affect the size of  explo-
+              sions, or the size of the smoke paths (if _t_r_a_c_e _p_a_t_h_s is on).
+
+       TTuunnnneelliinngg (toggle)
+              If  set,  weapons  are  allowed  to tunnel through land.  If you
+              enable this, you will want to buy contact triggers if you want a
+              particular  weapon to always detonate on impact (instead of tun-
+              neling through land).
+
+       SSccaalliinngg (float)
+              Scale the size of explosions by this value.   If  playing  on  a
+              very large or very small playing field, you might want to adjust
+              this value.
+
+       TTrraaccee PPaatthhss (toggle)
+              If enabled, all weapons leave a smoke trail to reveal their tra-
+              jectory.  If this option is off, you can still use _S_m_o_k_e _T_r_a_c_e_r_s
+              to determine the path a weapon will take.
+
+       UUsseelleessss IItteemmss (toggle)
+              Some weapons are not  useful  given  the  current  configuration
+              (e.g.   contact  triggers  are  irrelevant  if tunneling is dis-
+              abled).  If this option is enabled, then weapons which will have
+              no effect are not listed in the inventory screens.
+
+       _G_r_a_p_h_i_c_s:
+
+       SSccrreeeenn WWiiddtthh (integer)
+              Set the width of the playing field, in pixels.
+
+       SSccrreeeenn HHeeiigghhtt (integer)
+              Set the height of the playing field, in pixels.
+
+       DDiitthheerriinngg (toggle)
+              If  enabled,  the land and sky gradients will be dithered.  This
+              option is particularly useful on 16-bit displays, where the gra-
+              dient  is  very  noticeable otherwise.  This does slow down land
+              generation somewhat.
+
+       AAnniimmaattiioonn (toggle)
+              If enabled, explosions and other effects will be animated.  This
+              option can also be controlled from the _S_y_s_t_e_m _M_e_n_u.
+
+       GGrraapphhiiccss AArree FFaasstt (toggle)
+              If  enabled,  all graphics are always as fast as possible.  This
+              option can also be controlled from the _S_y_s_t_e_m _M_e_n_u.
+
+       CCoommppuutteerrss AArree FFaasstt (toggle)
+              If enabled, graphics are fast when there only  computer  players
+              are  alive.   This option can also be controlled from the _S_y_s_t_e_m
+              _M_e_n_u.
+
+       _G_a_m_e_p_l_a_y _O_p_t_i_o_n_s:
+
+       MMooddee (list)
+              Determines if all players will fire at  once  (_S_y_n_c_h_r_o_n_o_u_s),  or
+              whether each player will fire independently (_S_e_q_u_e_n_t_i_a_l).
+
+       TTeeaammss (list)
+              N/A
+
+       OOrrddeerr (list)
+              Determines the player order.
+
+       TTaallkk MMooddee (list)
+              Determines who is allowed to talk.
+
+       TTaallkk PPrroobbaabbiilliittyy (percentage)
+              Determines the likelihood that a player will speak at the end of
+              a turn.
+
+       EExxtteennddeedd SSttaattuuss (toggle)
+              If set, the  status  bar  will  contain  an  additional  row  of
+              extended information during the game (things such as trigger and
+              battery inventories, life, wind).
+
+       TToooollttiippss (toggle)
+              If set, tooltips will be displayed where available.   A  restart
+              is required to change the value of this option.
+
+       _A_I _C_o_n_t_r_o_l_l_e_r:
+
+       HHuummaann TTaarrggeett PPrraaccttiiccee (toggle)
+              AI's  will always prefer human targets to AI targets (except for
+              AI's that fire at random).  When playing against 9  Calculators,
+              this can make your day pretty lousy.
+
+       AAllllooww OOffffsseett TTaarrggeettttiinngg (toggle)
+              Generally,  when a weapon hits a shield it does less damage than
+              an explosion detonating right outside the shield  (weapons  hit-
+              ting the shield do not have a chance to detonate).  This changes
+              the AI targetting behaviour so they will deliberately  aim  out-
+              side the shield, if their intended victim has raised shields.
+
+       AAllwwaayyss OOffffsseett (toggle)
+              If  the  above  option  is set, this option will force the AI to
+              always offset  its  targetting  as  if  the  player  had  raised
+              shields.   This  allows the AI to compensate for cases where the
+              player may simply not have had their turn yet to raise  shields.
+              The  downside is the AI will never attempt to score a direct hit
+              with this option enabled.
+
+       EEnnaabbllee SSccaann RReeffiinneemmeenntt (toggle)
+              If set, harder AIs are allowed to refine their  trajectories  by
+              computing  trajectories  that take into account player shielding
+              effect and various other factors they do not normally  consider.
+              This  option  could  slow  down gameplay a bit but makes the AIs
+              much more difficult.
+
+       NNoo BBuuddggeett CCoonnssttrraaiinnttss (toggle)
+              AI's will spend as much money as they  can,  disregarding  their
+              budget preferences.
+
+       _S_o_u_n_d _S_e_t_u_p:
+
+       EEnnaabbllee SSoouunndd (toggle)
+              When set, music and sound effects will be played.
+
+       UUssee HHQQ MMiixxeerr (toggle)
+              When set, mikmod's high-quality mixer will be used.
+
+CCOOMMMMAANNDD--LLIINNEE OOPPTTIIOONNSS
+       ----hheellpp Display a brief synopsis of the command-line options available.
+
+       ----iinnssaanniittyy
+              This is insanity, Max!  Or what if it's genius?
+
+       ----yyiieellddss
+              Display weapon yields, and economical yields.
+
+       ----ggeeoommeettrryy==_wxx_h
+              Specify  an  initial window geometry for xscorch, where _w is the
+              width and _h is the height of the playing field.  Useful for dis-
+              plays  less  than  around  800x600 resolution.  Note this option
+              overrides the settings in the config file, but you can save  the
+              new  options  to  your  config file so you don't have to specify
+              this every time.  You may also use --gg.
+
+       ----ccoonnffiigg==_f_i_l_e
+              Load an alternate user config file, in _f_i_l_e.
+
+       ----ssoouunndd
+              Enable music and sound effects.  You may also use --SS.
+
+       ----nnoossoouunndd
+              Disable music and sound effects.  You may also use --ss.
+
+       ----hhqqmmiixxeerr
+              Enable use of the high-quality mixer, if sound is enabled.  This
+              may use a lot of CPU power on older machines.
+
+       ----nnoohhqqmmiixxeerr
+              Disable use of the high-quality mixer, if sound is enabled.
+
+       ----nnaammee Set  the  name  of  your player, if you are initiating a network
+              game.  By default, your user name is used.
+
+       ----ppoorrtt Set the port number to use in a network game.   This  option  is
+              only  relevant  if  you  also specify ----cclliieenntt or ----sseerrvveerr.  The
+              default is dependent on the protocol number, but is  some  large
+              port number.
+
+       ----cclliieenntt==_s_e_r_v_e_r
+              Start  xscorch  in  client  mode,  and  connect to _s_e_r_v_e_r (which
+              should already be running).  If ----nnaammee and ----ppoorrtt are not speci-
+              fied, reasonable defaults are used.
+
+       ----sseerrvveerr
+              Start  xscorch in server mode, and wait for connections from the
+              clients.  ----nnaammee may be used in conjunction to specify the  name
+              of this player.
+
+NNEETTWWOORRKK MMOODDEE
+       This is very unstable right now, and therefore is not documented.
+
+FFIILLEESS
+       ~~//..xxssccoorrcchh//ccoonnffiigg
+              User's default configuration for xscorch.
+
+       ttaannkkpprrooffiilleess
+              Profile bitmaps for the tanks, usually stored in the local share
+              directory.
+
+SSEEEE AALLSSOO
+       The xscorch home page  at  <http://www.xscorch.org/>.   There  is  also
+       additional documentation in the source distribution.
+
+AAUUTTHHOORRSS
+       xscorch  was  written by Justin David Smith <justins(at)chaos2.org> and
+       Jacob Luna Lundberg <jacob(at)gnifty.net>.  (Please do not  list  these
+       e-mail  addresses  on webpages, or list them in other packages, without
+       contacting us first.)
+
+       This manual page written by Justin David Smith <justins(at)chaos2.org>.
+       Copyright(c) 2001,2000 Justin David Smith.
+
+
+
+Justin David Smith                 May 2001                         xscorch(6)

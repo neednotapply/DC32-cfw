@@ -7,9 +7,9 @@ The original firmware was created by Dmitry Grinberg (DmitryGR), whose broader w
 ## Current functionality
 
 - **Tool shell and recovery** - Boots to `DC32-cfw`, shows a Main Menu, and uses boot guard state to recover to the menu after a reset or hard fault inside a tool. Crash recovery can show the failed mode plus fault registers.
-- **Main Menu** - Provides File Browser, Universal IR, USB, Media, Games, Settings, and Power Off entries. USB groups USB Storage, USB Keyboard, BadUSB, Autoclicker, and USB Gamepad. Media groups Music, Image Viewer, Starfield, Spiro, and Cube. Games groups Emulation, Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, and T-Rex Runner.
+- **Main Menu** - Provides File Browser, Universal IR, USB, Media, Games, Settings, and Power Off entries. USB groups USB Storage, USB Keyboard, BadUSB, Autoclicker, and USB Gamepad. Media groups Music, Image Viewer, Starfield, Spiro, and Cube. Games groups Emulation, Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, DOOM shareware, Chip's Challenge, Scorched Earth, Pipe Dream, Cave Story, and Sokoban.
 - **SD-card file browser** - Browses folders, hides dot/hidden entries, sorts directories before files, and opens supported files with the matching tool. Registered file types are `.gb`, `.gbc`, `.nes`, `.hex`, `.arduboy`, `.ir`, `.badusb`, `.rtttl`, `.txt`, `.wav`, `.dci`, `.dca`, `.jpg`, `.jpeg`, and `.bmp`.
-- **Categorized app menus** - Launches resident tools and standalone `/APPS/*.DC32` apps from USB, Media, and Games categories. Standalone SD apps include Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube.
+- **Categorized app menus** - Launches resident tools and standalone `/APPS/*.DC32` apps from USB, Media, and Games categories. Standalone SD apps include Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, DOOM shareware, Chip's Challenge, Scorched Earth, Pipe Dream, Cave Story, Sokoban, Starfield, Spiro, and Cube.
 - **Image Viewer** - Opens badge-native `.dci` stills and `.dca` animations plus direct `.jpg`, `.jpeg`, and uncompressed `.bmp` still images from `/IMAGES` or the browser.
 - **Game Boy and Game Boy Color emulation** - Runs uGB on badge hardware, including cartridge metadata parsing, mapper support, optional GBC behavior, flash-backed save state, SD save import/export, display speed selection, rotation, and optional upscaling.
 - **NES emulation** - Loads `.nes` files from SD, validates iNES headers, supports mappers 0, 1, 2, 3, 4, and 7, detects NTSC/PAL/Dendy timing, supports 8 KiB save RAM, and uses the same game menu, save, speed, rotation, and upscaling settings path as the Game Boy runtime.
@@ -54,7 +54,7 @@ The firmware can browse the full card, but the menu tools look in these conventi
 | ---- | ------- |
 | `/ROMS` | Game picker root, conventionally split into `/ROMS/AB`, `/ROMS/GB`, `/ROMS/GBC`, and `/ROMS/NES`. |
 | `/SAVE` | Imported/exported save RAM files for the selected game, named `<rom base>.sav`. |
-| `/APPS` | SD-loaded app binaries built by this repo, including emulators, tools, `doom.DC32` plus `doom1.whx`, and standalone apps such as Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube. |
+| `/APPS` | SD-loaded app binaries built by this repo, including emulators, tools, `doom.DC32` plus `doom1.whx`, `chips.DC32` plus `chips-tworld.pak`, `scorch.DC32` plus `scorch-xscorch.pak`, `pipe.DC32` plus `pipe-pipedreamer.pak`, `cave.DC32` plus user-built `cave.pak`, `sokoban.DC32` plus `sokoban-xsokoban.pak`, and standalone apps such as Pong, Tetris, Arkanoid, Flappy Bird, Labyrinth, T-Rex Runner, Starfield, Spiro, and Cube. |
 | `/IR` | Universal IR files from Momentum Firmware's universal remote assets, plus optional legacy `POWER.IR`. |
 | `/BADUSB` | BadUSB script picker for `.txt` and `.badusb` files. |
 | `/MUSIC` | Music picker for `.rtttl`, RTTTL `.txt`, and PCM `.wav` files. Large generated music folders are split into alphabetic range subfolders so the badge can list them reliably. |
@@ -95,13 +95,24 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `third_party/simavr/` | Vendored simavr core and SSD1306 virtual display pieces kept for the experimental simavr Arduboy runtime. |
 | `src/dispDefcon.c` | LCD driver, framebuffer, PIO program loading, DMA management, brightness, and framerate handling. |
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
-| `src/dcApp.c`, `src/dcAppDraw.c`, `src/apps/` | Resident SD app loader, shared SD app drawing helpers, and app entry wrappers for emulators, tools, and standalone apps. |
+| `src/dcApp.c`, `src/dcAppDraw.c`, `src/apps/` | Resident SD app loader, shared SD app drawing helpers, and app entry wrappers for emulators, tools, and standalone apps. The loader supports both small app-cache `.DC32` images and flagged large-XIP app images staged at `QSPI_ROM_START`. |
+| `src/apps/port/` | Shared support for faithful source-derived ports: scratch heap, RGB332/paletted renderer bridge, FAT pack reads, save helpers, and center-button exit handling. |
+| `src/apps/chips/` | Tile World-derived Chip's Challenge port locked to the Win 3.1/MS rules path, generated Tile World tile rendering, optional original tile-pack loading, `/APPS/chips.pak` user data loading, reset, saves, and clean center exit. |
+| `src/apps/scorch/` | xscorch-derived Scorched Earth port with generated xscorch weapon tables, terrain deformation, AI turns, shop buys, saves, and clean center exit. |
+| `src/apps/pipe/` | PipeDreamer-derived Pipe Dream port with queue, ooze source/meter, bombs, score carryover, fast-forward, saves, and clean center exit. |
+| `src/apps/cave/` | Cave Story data-compatible loader/renderer using user-built `/APPS/cave.pak`, NXEngine/doukutsu PXM/Stage.dat formats, PBM tilesets, stage transitions, saves, and clean center exit. |
+| `src/apps/sokoban/` | XSokoban-derived badge port with the 90 public-domain screens, move/push counts, undo/reset, saves, and pixmap-style rendering generated from vendored XSokoban assets. |
 | `src/badUsb.c`, `src/usb*.c` | Shared TinyUSB device setup, USB Mass Storage, keyboard/mouse/media/gamepad HID, XUSB-style Xbox 360 gamepad, and the SD-loaded BadUSB interpreter. |
 | `src/irRemote.c`, `src/pioIrdaSIR.c` | SD-loaded IR transmitter support and badge IRDA setup. |
 | `src/rtttlPlayer.c`, `src/wavPlayer.c`, `src/audioPwm.c` | SD-loaded RTTTL/WAV parsing/playback and resident PWM tone/PCM audio output. |
 | `src/badgeLeds.c`, `src/pioWS2812.c` | WS2812 LED rendering and PIO driver. |
 | `src/settings.c`, `src/bootGuard.c`, `src/toolWorkspace.c` | Persistent settings, tool crash/reset recovery, and shared workspace allocation. |
 | `tools/bin_to_uf2.py` | Converts the raw binary image to the RP2350 UF2 update file. |
+| `tools/build_cave_pack.py` | Interactive packer for a user-supplied Cave Story freeware data directory; writes the `/APPS/cave.pak` payload without redistributing Cave Story data. |
+| `tools/build_chips_pack.py` | Interactive packer for user-provided Win 3.1 `CHIPS.DAT` plus `CHIPS.EXE` embedded tile graphics; also accepts explicit Tile World-style, regular-grid, or `DC32CHIPTIL` graphics; writes `/APPS/chips.pak`. |
+| `tools/build_period_assets.py` | Interactive/defaulted builder for redistributable period-port `.pak` files from checked-out upstream source trees when licensing permits redistribution. |
+| `tools/build_tworld_assets.py` | Converts the vendored Tile World tile bitmap into compact badge RGB332 tiles. |
+| `tools/build_xscorch_assets.py` | Converts vendored xscorch `weapons.def` into the compact badge Scorched Earth weapon table. |
 | `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages `SD-assets.zip` and `SD-apps.zip`. |
 | `tools/fatfs_regression_test.c` | Host-side FAT filesystem regression helper. |
 | `src/Makefile` | Legacy/developer make flow; the root CMake build is the current supported build path. |
@@ -168,6 +179,8 @@ Adjust the programmer command, permissions, or path for your setup.
 - Hardware-specific GPIO assignments live in `src/pinoutRp2350defcon.h`; platform constants and display dimensions live in `src/platform_defs.h` and `src/dispDefcon.h`.
 - QSPI layout is defined in `src/memMap.h`: settings, selected-game metadata, save RAM copy, and the loaded ROM occupy fixed flash regions.
 - Game ROM size is capped by `QSPI_ROM_SIZE_MAX` and save RAM by `QSPI_RAM_SIZE_MAX`.
+- Large source-derived SD apps can opt into `DCAPP_IMAGE_FLAG_LARGE_XIP`, link at `QSPI_ROM_START`, and use up to `QSPI_ROM_SIZE_MAX`. Existing small `.DC32` apps keep the 256 KiB app-cache contract.
+- Chip's Challenge, Scorched Earth, Pipe Dream, Cave Story, and Sokoban now ship as source-derived/data-compatible ports. Cave Story freeware data and `CHIPS.DAT` remain user-provided and are not redistributed.
 - The NES runtime intentionally enables only mappers 0, 1, 2, 3, 4, and 7 in `src/nes/InfoNES_Mapper.cpp`.
 - Arduboy support defaults to an Ardens-derived runtime for classic ATmega32u4 `.hex` games. The runtime keeps the corrected landscape presenter, throttles EEPROM mirroring, polls the center-menu path inside long emulation batches, and disables Arduboy audio work entirely for v1.
 - The ProjectABE-inspired hybrid compatibility runtime and the older Arduous/simavr-derived runtime are kept as experimental build options. Configure with `-DARDUBOY_HYBRID_EXPERIMENTAL=ON` or `-DARDUBOY_SIMAVR_EXPERIMENTAL=ON` to build one of them instead of the default Ardens path.

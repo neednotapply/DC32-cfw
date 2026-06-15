@@ -13,6 +13,12 @@ extern "C" {
 #define DCAPP_MAGIC             0x50414344u
 #define DCAPP_ABI_VERSION       2u
 #define DCAPP_HEADER_SIZE       256u
+#define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
+#define DCAPP_CONTRACT_MAGIC    0x43444332u
+#define DCAPP_CONTRACT_RESERVED_INDEX 0u
+#define DCAPP_CONTRACT_HASH_RESERVED_INDEX 1u
+#define DCAPP_CONTRACT_HASH_WORDS 4u
+#define DCAPP_CONTRACT_RESERVED_WORDS (1u + DCAPP_CONTRACT_HASH_WORDS)
 
 enum DcAppId {
 	DcAppIdGameGb = GameRuntimeGb,
@@ -31,6 +37,11 @@ enum DcAppId {
 	DcAppIdLabyrinth = 204,
 	DcAppIdTrex = 205,
 	DcAppIdDoom = 206,
+	DcAppIdChips = 207,
+	DcAppIdScorch = 208,
+	DcAppIdPipe = 209,
+	DcAppIdCave = 210,
+	DcAppIdSokoban = 211,
 	DcAppIdStarfield = 220,
 	DcAppIdSpiro = 221,
 	DcAppIdCube = 222,

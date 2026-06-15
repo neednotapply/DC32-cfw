@@ -1,0 +1,96 @@
+$Header: /fridge/cvs/xscorch/doc/NETWORK,v 1.4 2004/03/25 16:04:58 jacob Exp $
+
+
+NETWORK file for XScorch.  
+Copyright(c) 2000-2004 Justin David Smith
+Copyright(c) 2004 Jacob Luna Lundberg.
+
+
+This document agrees with version 0.2.0.
+
+
+
+HOW TO USE NETWORK PLAY
+
+   Because network play is unstable and incomplete, it is not enabled by
+   default.  You cannot play a full, ``normal'' game of xscorch in network
+   mode, and there are several easy ways to get the game horribly out of
+   sync with network mode.  But if you want to try what is there currently,
+   configure xscorch with 
+
+      ./configure --enable-network
+
+   This will build a binary with network support.  Once you have that, you
+   can enable network mode in one of two ways:
+
+   1) xscorch --server --name=<playername>  
+         Creates a new server with one client.
+      xscorch --client=<servername> --name=<playername> 
+         Creates a new client and connects it to an already-running server.
+
+      The main disadvantage is you cannot configure the game this way;
+      the game will be setup using the ~/.xscorch/config file where the
+      server is run (or defaults if the file is not found).
+
+   2) From the Network menu:
+      ``Create Server'' will turn the xscorch session into a new server.
+      ``Connect as Client'' will connect to an already-running server.
+      ``Disconnect'' will close any client connection and shutdown any
+         server.
+
+      You cannot configure the game once the server has been started; so
+      you might want to go through the options first.
+
+   In either case, a message is printed to the standard output of the 
+   server whenever a player joins the game.  You can only join until 
+   the server player has selected ``Begin Game''.  
+
+
+
+CURRENT STATUS OF NETWORK PLAY
+
+   The network code that is currently present in the game is under heavy
+   development; currently, we have loose game synchronization (although
+   there is no error checking, and no attempt to realign clients if they
+   get out of alignment).
+
+   We need to be sending more data over about the other players; in 
+   particular there is no attempt to verify that damage is all dealt
+   correctly on each client, since most simulation is done on the client.
+   Some state describing the players is sent between the clients every
+   turn, and if an error is detected, the appropriate messages are 
+   printed to standard output.  No attempt is made to correct the 
+   problem, at this time.
+
+   The game may appear to lock up locally while it is waiting for other
+   players to end their turn, etc.  Messages are displayed in the status
+   bar whenever this happens; a more elegant solution will be implemented
+   soon.  There may also be an option to impose timeouts on each turn.
+
+
+
+KNOWN PROBLEMS/MISSING FEATURES
+
+    * Server ought to be able to change config options, this will be
+      fixed once synchronization issues are resolved.
+    * Chat can send and receive, but chat window textfield is not 
+      updated with messages that are received.
+    * Watch out for messages that random values are out of alignment.
+      The game has basically gone to hell if this ever happens.
+    * Recovery if a client drops off, is pathetic right now.
+    * Recovery on misalignment is coming along...
+    * Winnings not correct in network mode.  The current cash values are
+      correct, but the winnings calculation does not take into account
+      inventory purchases.
+    + While config data is sent out when a new client, it is _not_ when
+      options are changed on the server -> misalignment.  FIXED (?)
+    + AI's cannot currently join a network game.  FIXED (?)
+
+
+
+REPORTING ERRORS
+
+   It is useful to me if you log the entire game session; so redirect
+   the stdout and stderr of the xscorch server and any client that is
+   connected.  If you encounter an error, mail me the logs and I'll try
+   to reconstruct whatever happened.

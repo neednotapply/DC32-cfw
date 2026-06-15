@@ -1,0 +1,94 @@
+$Header: /fridge/cvs/xscorch/README,v 1.13 2011-08-01 00:31:46 jacob Exp $
+
+
+xscorch  -  A Scorched Earth clone
+Code copyright(c) 2000-2004 Justin David Smith
+Code copyright(c) 2000-2011 Jacob Luna Lundberg
+
+
+This document agrees with version 0.2.21.
+
+
+Please note that most of this code is licensed under version 2 of the GNU
+General Public License ONLY, the version that is included with this source
+distribution.  NO later version of the General Public License is valid for
+the full xscorch distribution.
+
+
+
+Notes on current status
+------------------------
+
+PLEASE SEE THE NOTES BEFORE REPORTING A BUG:  The doc/NOTES file in the
+source distribution for the more technical details about what needs to be
+done.  The manual page contains general gameplay information.  Note, there
+are two versions of the manual page installed -- the documents installed
+to the share/ directory are used by the Help menu in the game.
+
+Before sending in a request for feature X, check the TODO file and the
+doc/NOTES file first to see if we are already planning on implementing it.
+If you're bored and want to contribute to the project, check out these
+files to see what needs to be implemented :)
+
+
+
+Requirements
+-------------
+
+The following libraries are required:
+   GTK+ 2.20 or better (http://www.gtk.org./)
+
+These libraries are optional:
+   MikMod 3.1.9 or better (http://mikmod.darkorb.net./)
+
+
+
+Quick installation
+-------------------
+
+./configure --help   to see options
+./configure
+make
+make install
+
+Run xscorch --help for brief instructions.
+
+See ChangeLog for list of changes made since the project's initial release.
+See the file TODO has the long list of stuff yet to exist.
+See the AUTHORS file for a complete list of contributors.
+
+
+
+Building without GCC
+---------------------
+
+If you are building with the native compiler for your operating system, you
+may need to do some tweaking.  In particular, you will probably want to run
+configure as   env CFLAGS=" " ./configure   to keep the project from trying
+to use GNU-specific warnings that may or may not be available on your system.
+
+
+
+Documentation
+--------------
+
+Some documentation on implementation, and about things that still need work,
+is present in the doc/ directory of the source distribution.  A manpage is
+also provided.
+
+Please note, that _two_ versions of the man page will be installed. One is a
+"standard" manpage, while the other is a text document which is used for the
+on-line game help.  You may remove the latter document, but the Help menu
+will no longer function.
+
+
+
+Contact Information
+--------------------
+
+There's a mailing list, at xscorch (a) xscorch.org.  You can subscribe to
+the list by sending a mail message to xscorch-request (a) xscorch.org, with
+the word ``subscribe'' in the message body.
+
+See the AUTHORS file for the complete list of contributors and e-mail
+addresses.

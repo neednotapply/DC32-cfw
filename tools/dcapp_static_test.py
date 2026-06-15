@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import binascii
+import re
 import subprocess
 import struct
 from pathlib import Path
@@ -15,6 +16,9 @@ HEADER_SIZE = 256
 MAGIC = 0x50414344
 ABI = 2
 LOAD_ADDR = 0x10080000
+DCAPP_IMAGE_FLAG_LARGE_XIP = 0x00000001
+DCAPP_CONTRACT_MAGIC = 0x43444332
+DCAPP_CONTRACT_HASH_WORDS = 4
 APP_RAM_START = 0x2005F000
 APP_RAM_SIZE = 0x14000
 APP_RAM_END = APP_RAM_START + APP_RAM_SIZE
@@ -55,10 +59,17 @@ APPS = {
     "labyrinth.DC32": 204,
     "trex.DC32": 205,
     "doom.DC32": 206,
+    "chips.DC32": 207,
+    "scorch.DC32": 208,
+    "pipe.DC32": 209,
+    "cave.DC32": 210,
+    "sokoban.DC32": 211,
     "starfield.DC32": 220,
     "spiro.DC32": 221,
     "cube.DC32": 222,
 }
+RESERVED_PERIOD_IDS = {}
+LARGE_XIP_APPS = {"chips.DC32", "scorch.DC32", "pipe.DC32", "cave.DC32"}
 GAME_APPS = {"gb.DC32", "nes.DC32", "arduboy.DC32"}
 PICOWARE_APPS = {
     "pong.DC32",
@@ -71,8 +82,6 @@ PICOWARE_APPS = {
     "spiro.DC32",
     "cube.DC32",
 }
-
-
 def expect(name: str, condition: bool) -> None:
     if not condition:
         raise SystemExit(f"FAIL: {name}")
@@ -109,6 +118,16 @@ def active_vram_size(scratch_size: int) -> int:
 
 def ranges_overlap(start_a: int, size_a: int, start_b: int, size_b: int) -> bool:
     return start_a < start_b + size_b and start_b < start_a + size_a
+
+
+def build_contract_words() -> tuple[int, ...]:
+    path = ROOT / "build" / "dcapp_build_contract.h"
+    expect("DCAPP build contract header exists", path.is_file())
+    match = re.search(r"^#define\s+DCAPP_BUILD_CONTRACT_WORDS\s+(.+)$", path.read_text(encoding="ascii"), re.MULTILINE)
+    expect("DCAPP build contract words are generated", match is not None)
+    words = tuple(int(part.rstrip("uU"), 0) for part in match.group(1).split(","))
+    expect("DCAPP build contract word count", len(words) == DCAPP_CONTRACT_HASH_WORDS)
+    return words
 
 
 def doom_symbol_address(symbol: str) -> int:
@@ -252,22 +271,29 @@ def check_loader_source() -> None:
     doom_sound = (ROOT / "src" / "apps" / "doom" / "doom_dc32_sound.c").read_text(encoding="utf-8")
     run_start = text.find("static enum DcAppResult dcAppRunLoadedById")
     run_entry = text.find("ret = entry(&mHostApi, args)", run_start)
-    run_sync = text.find("dcAppPrvSyncExecutableCache();", run_start)
+    run_sync = text.find("dcAppPrvSyncExecutableImage(&mLoadedHeader);", run_start)
     verify_start = text.find("if (!dcAppPrvVerifyCachedImage(&hdr, runtime))")
-    verify_sync = text.find("dcAppPrvSyncExecutableCache();", verify_start)
+    verify_sync = text.find("dcAppPrvSyncExecutableImage(&hdr);", verify_start)
     flash_write_start = qspi_c.find("flashWrite")
     xip_mode_restore = qspi_c.find("flashPrvEnterXipMode();", flash_write_start)
     flash_write_sync = qspi_c.find("flashSyncExecutableRange(xipAddr, largerSize);", flash_write_start)
 
     expect("loader checks magic/header", "hdr->magic != DCAPP_MAGIC" in text and "hdr->headerSize != DCAPP_HEADER_SIZE" in text)
     expect("loader checks ABI version", "hdr->abiVersion != DCAPP_ABI_VERSION" in text)
-    expect("loader checks image overflow", "hdr->imageSize > QSPI_APP_CACHE_SIZE" in text)
+    expect("loader checks DCAPP build contract", "dcAppPrvHeaderHasCurrentBuildContract" in text and "DCAPP_CONTRACT_MAGIC" in text)
+    expect("loader reports stale SD apps clearly", "does not match this firmware" in text and "Update /APPS" in text)
+    expect("loader checks image overflow", "hdr->imageSize > imageLimit" in text)
+    expect("loader rejects unknown image flags", "hdr->flags & ~DCAPP_IMAGE_FLAG_LARGE_XIP" in text)
+    expect("loader defines large XIP flag", "DCAPP_IMAGE_FLAG_LARGE_XIP" in (ROOT / "src" / "dcApp.h").read_text(encoding="utf-8"))
+    expect("loader validates large XIP load region", "hdr->loadAddr != QSPI_ROM_START" in text and "QSPI_ROM_SIZE_MAX" in text)
+    expect("loader validates small app cache region", "hdr->loadAddr != QSPI_APP_CACHE_START" in text and "QSPI_APP_CACHE_SIZE" in text)
     expect("loader checks CRC", "crc != hdr.crc32" in text)
     expect("loader has cache-hit skip", "dcAppPrvCachedBuildMatches" in text and "buildId" in text)
-    expect("loader erases stale cached image span", "dcAppPrvCachedEraseSpan" in text and "QSPI_APP_CACHE_SIZE" in text)
+    expect("loader erases stale cached image span", "dcAppPrvCachedEraseSpan" in text and "imageLimit" in text)
     expect("loader verifies flash image after write", "dcAppPrvVerifyCachedImage" in text and "App flash verify failed" in text)
-    expect("loader verifies app cache through uncached XIP", "dcAppPrvCachedHeader" in text and "flashUncachedPtr(QSPI_APP_CACHE_START" in text)
-    expect("loader syncs full app cache for execution", "flashSyncExecutableRange(QSPI_APP_CACHE_START, QSPI_APP_CACHE_SIZE)" in text)
+    expect("loader verifies app cache through uncached XIP", "dcAppPrvCachedHeaderAt" in text and "flashUncachedPtr(loadAddr)" in text)
+    expect("loader writes to declared load address", "flashWrite(hdr.loadAddr + pos" in text and "flashWrite(hdr.loadAddr, eraseSize" in text)
+    expect("loader syncs executable image region", "dcAppPrvSyncExecutableImage" in text and "flashSyncExecutableRange(hdr->loadAddr, imageLimit)" in text)
     expect("loader syncs rewritten image after verify", verify_sync != -1)
     expect("loader syncs app cache before app entry", run_sync != -1 and run_entry != -1 and run_sync < run_entry)
     expect("loader clears active app context before load and run", text.count("dcAppPrvClearActiveAppContext();") >= 3)
@@ -281,10 +307,37 @@ def check_loader_source() -> None:
     expect("app abort callback is linker-rooted", "-Wl,--undefined=dcAppAbort" in cmake)
     expect("app refresh callback is linker-rooted", "-Wl,--undefined=dcAppRefreshDisplayOptions" in cmake)
     expect("apps relink when host symbols change", "LINK_DEPENDS ${DCAPP_HOST_SYMBOLS}" in cmake)
+    expect("large DCAPP linker exists", (ROOT / "src" / "linker_dcapp_large.lkr").read_text(encoding="utf-8").count("0x10100000") >= 1)
+    expect("CMake can stamp large XIP DCAPPs", "LARGE_XIP" in cmake and "--flags ${DCAPP_TARGET_FLAGS}" in cmake and "DCAPP_LARGE_LINKER_SCRIPT" in cmake)
+    make_dcapp = (ROOT / "tools" / "make_dcapp.py").read_text(encoding="utf-8")
+    expect("make_dcapp stamps flags", "parser.add_argument(\"--flags\"" in make_dcapp and "args.flags" in make_dcapp)
+    expect("make_dcapp stamps build contract", "--contract-header" in make_dcapp and "DCAPP_CONTRACT_MAGIC" in make_dcapp)
+    expect("CMake generates DCAPP build contract", "gen_dcapp_build_contract.py" in cmake and "dcapp_build_contract" in cmake)
     for filename, runtime in APPS.items():
         output = filename.removesuffix(".DC32")
         expect(f"{filename} has CMake dcapp target", f" {output} {runtime}" in cmake)
         expect(f"{filename} is in SD apps package", f'"{filename}"' in cmake or f'"{filename}"' in sd_zip)
+    dcapp_h = (ROOT / "src" / "dcApp.h").read_text(encoding="utf-8")
+    ui_c = (ROOT / "src" / "ui.c").read_text(encoding="utf-8")
+    for symbol, app_id in RESERVED_PERIOD_IDS.items():
+        expect(f"{symbol} is assigned", f"{symbol} = {app_id}" in dcapp_h)
+    for filename in ():
+        expect(f"{filename} is not built", filename.removesuffix(".DC32") not in cmake)
+        expect(f"{filename} is not packaged", f'"{filename}"' not in sd_zip)
+    expect("Cave fake data is not packaged", "cave.dat" not in sd_zip and "CAVE_DATA_SOURCE" not in sd_zip)
+    expect("Period port README is packaged", "README-period-ports.txt" in sd_zip)
+    for label in ():
+        expect(f"{label} is not menu-enabled before faithful port", label not in ui_c)
+    expect("Chip's Challenge faithful port is menu-enabled", '"Chip\'s Challenge"' in ui_c and '"chips.DC32"' in sd_zip)
+    expect("Chip's Challenge Tile World pack is packaged", '"APPS/chips-tworld.pak"' in sd_zip and "CHIPS_TWORLD_PACK_SOURCE" in sd_zip)
+    expect("Scorched Earth faithful port is menu-enabled", '"Scorched Earth"' in ui_c and '"scorch.DC32"' in sd_zip)
+    expect("Scorched Earth xscorch pack is packaged", '"APPS/scorch-xscorch.pak"' in sd_zip and "XSCORCH_PACK_SOURCE" in sd_zip)
+    expect("Pipe Dream faithful port is menu-enabled", '"Pipe Dream"' in ui_c and '"pipe.DC32"' in sd_zip)
+    expect("Pipe Dream PipeDreamer pack is packaged", '"APPS/pipe-pipedreamer.pak"' in sd_zip and "PIPEDREAMER_PACK_SOURCE" in sd_zip)
+    expect("Cave Story faithful port is menu-enabled", '"Cave Story"' in ui_c and '"cave.DC32"' in sd_zip)
+    expect("Cave Story user data is not packaged", '"APPS/cave.pak"' not in sd_zip and "cave.dat" not in sd_zip)
+    expect("Sokoban faithful port is menu-enabled", '"Sokoban"' in ui_c and '"sokoban.DC32"' in sd_zip)
+    expect("Sokoban XSokoban pack is packaged", '"APPS/sokoban-xsokoban.pak"' in sd_zip and "XSOKOBAN_PACK_SOURCE" in sd_zip)
     expect("DOOM WHX is packaged under APPS", '"APPS/doom1.whx"' in sd_zip and "rp2040-doom" in sd_zip)
     expect("DOOM shareware label is explicit", '"DOOM (shareware)"' in text and '"DOOM (shareware)"' in (ROOT / "src" / "ui.c").read_text(encoding="utf-8"))
     expect("DOOM converter is not packaged", "doom_whx_convert" not in sd_zip and "ROMS/DOOM" not in sd_zip)
@@ -327,6 +380,7 @@ def check_loader_source() -> None:
 
 def check_artifacts() -> None:
     apps_dir = ROOT / "build" / "apps"
+    contract_words = build_contract_words()
 
     expect("app artifacts directory exists", apps_dir.is_dir())
     for name, runtime in APPS.items():
@@ -337,6 +391,7 @@ def check_artifacts() -> None:
         fields = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
         magic, header_size, abi = fields[:3]
         runtime_id = fields[3]
+        flags = fields[4]
         load_addr = fields[5]
         image_size = fields[6]
         data_load_offset = fields[7]
@@ -350,15 +405,24 @@ def check_artifacts() -> None:
         app_ram_start = fields[15]
         app_ram_size = fields[16]
         crc32 = fields[18]
+        reserved = fields[19:]
         scratch_start, scratch_size = active_scratch(data_addr, data_size, bss_addr, bss_size)
 
         expect(f"{name} magic", magic == MAGIC)
         expect(f"{name} header size", header_size == HEADER_SIZE)
         expect(f"{name} ABI", abi == ABI)
         expect(f"{name} runtime", runtime_id == runtime)
-        expect(f"{name} load addr", load_addr == LOAD_ADDR)
+        if name in LARGE_XIP_APPS:
+            expect(f"{name} flags", flags == DCAPP_IMAGE_FLAG_LARGE_XIP)
+            expect(f"{name} load addr", load_addr == QSPI_ROM_START)
+            expect(f"{name} image fits large XIP region", image_size <= QSPI_ROM_SIZE_MAX)
+        else:
+            expect(f"{name} flags", flags == 0)
+            expect(f"{name} load addr", load_addr == LOAD_ADDR)
+            expect(f"{name} image fits app cache", image_size <= QSPI_APP_CACHE_SIZE)
         expect(f"{name} image size", image_size == len(data))
-        expect(f"{name} image fits app cache", image_size <= QSPI_APP_CACHE_SIZE)
+        expect(f"{name} build contract magic", reserved[0] == DCAPP_CONTRACT_MAGIC)
+        expect(f"{name} build contract words", tuple(reserved[1 : 1 + DCAPP_CONTRACT_HASH_WORDS]) == contract_words)
         expect(f"{name} entry offset", HEADER_SIZE <= (entry_offset & ~1) < image_size)
         expect(f"{name} app RAM descriptor", app_ram_start == APP_RAM_START and app_ram_size == APP_RAM_SIZE)
         expect(f"{name} data RAM range", range_in_app_ram(data_addr, data_size))
@@ -378,6 +442,16 @@ def check_artifacts() -> None:
         if name in PICOWARE_APPS:
             expect(f"{name} Picoware app active WRAM scratch", active_wram_size(scratch_size) >= PICOWARE_APP_SCRATCH_MIN)
             expect(f"{name} abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "sokoban.DC32":
+            expect("Sokoban abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "chips.DC32":
+            expect("Chip's Challenge abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "scorch.DC32":
+            expect("Scorched Earth abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "pipe.DC32":
+            expect("Pipe Dream abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "cave.DC32":
+            expect("Cave Story abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         expect(f"{name} CRC", (binascii.crc32(data[HEADER_SIZE:]) & 0xFFFFFFFF) == crc32)
 
 

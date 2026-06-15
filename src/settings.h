@@ -34,6 +34,25 @@ enum AutoclickerButton {
 	AutoclickerButtonNumButtons,
 };
 
+enum GameBoyPalette {
+	GameBoyPaletteGray,
+	GameBoyPaletteBrown,
+	GameBoyPaletteRed,
+	GameBoyPaletteDarkBrown,
+	GameBoyPaletteBlue,
+	GameBoyPaletteDarkBlue,
+	GameBoyPalettePaleYellow,
+	GameBoyPaletteOrange,
+	GameBoyPaletteYellow,
+	GameBoyPaletteGreen,
+	GameBoyPaletteDarkGreen,
+	GameBoyPaletteReverse,
+	GameBoyPaletteOriginalGb,
+	GameBoyPalettePocket,
+	GameBoyPaletteLight,
+	GameBoyPaletteNumPalettes,
+};
+
 struct Settings {
 	uint8_t actLikeGBC	:	1;
 	uint8_t speed		:	2;
@@ -61,6 +80,7 @@ struct Settings {
 	char badUsbProduct[32];
 	uint8_t autoclickerButton	:	2;
 	uint8_t autoclickerCps		:	6;
+	uint8_t gbPalette;
 };
 
 

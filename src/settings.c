@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			15
+#define SETTINGS_CUR_VER			16
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
@@ -95,6 +95,8 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->autoclickerButton = AutoclickerButtonLeft;
 	if (settings->autoclickerCps < SETTINGS_AUTOCLICKER_MIN_CPS || settings->autoclickerCps > SETTINGS_AUTOCLICKER_MAX_CPS)
 		settings->autoclickerCps = 5;
+	if (settings->gbPalette >= GameBoyPaletteNumPalettes)
+		settings->gbPalette = GameBoyPaletteGray;
 }
 
 void settingsGet(struct Settings *settings)
@@ -197,6 +199,10 @@ void settingsGet(struct Settings *settings)
 			strcpy(settings->badUsbProduct, "DC32 BadUSB");
 			settings->autoclickerButton = AutoclickerButtonLeft;
 			settings->autoclickerCps = 5;
+			//fallthrough
+
+		case 15:			//add Game Boy palette selection
+			settings->gbPalette = GameBoyPaletteGray;
 			//fallthrough
 
 		//other cases here, in increasing order

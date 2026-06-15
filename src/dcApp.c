@@ -4,6 +4,7 @@
 #include <string.h>
 #include "dcapp_build_contract.h"
 #include "audioPwm.h"
+#include "badgeLeds.h"
 #include "dispDefcon.h"
 #include "fatfs.h"
 #include "memMap.h"
@@ -72,6 +73,7 @@ static const struct DcAppHostApi mHostApi = {
 	.flushSave = uiFlushCurrentSaveToCard,
 	.flashWrite = flashWrite,
 	.abortActive = dcAppAbortActive,
+	.ledsTick = badgeLedsTick,
 };
 
 static uint32_t dcAppPrvAlignUp(uint32_t val, uint32_t align)

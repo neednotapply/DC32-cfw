@@ -2420,14 +2420,33 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 
 	while (1) {
 
-		int_fast8_t numOptions = 0, doneOption, cgbOption, upscaleOption, speedOption;
+		int_fast8_t numOptions = 0, doneOption, cgbOption, paletteOption, upscaleOption, speedOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speedNames[][8] = DISP_SPEED_NAMES;
 		static const uint8_t speedSettings[] = DISP_SPEED_SETTINGS;
+		static const char paletteNames[GameBoyPaletteNumPalettes][7] = {
+			[GameBoyPaletteGray] = "Gray",
+			[GameBoyPaletteBrown] = "Brown",
+			[GameBoyPaletteRed] = "Red",
+			[GameBoyPaletteDarkBrown] = "DkBrn",
+			[GameBoyPaletteBlue] = "Blue",
+			[GameBoyPaletteDarkBlue] = "DkBlue",
+			[GameBoyPalettePaleYellow] = "PaleY",
+			[GameBoyPaletteOrange] = "Orange",
+			[GameBoyPaletteYellow] = "Yellow",
+			[GameBoyPaletteGreen] = "Green",
+			[GameBoyPaletteDarkGreen] = "DkGrn",
+			[GameBoyPaletteReverse] = "Rev",
+			[GameBoyPaletteOriginalGb] = "OrigGB",
+			[GameBoyPalettePocket] = "Pocket",
+			[GameBoyPaletteLight] = "Light",
+		};
 		uint_fast8_t numSpeeds = sizeof(speedSettings) / sizeof(*speedSettings);
 
 		if (settings->speed >= numSpeeds)
 			settings->speed = 1;
+		if (settings->gbPalette >= GameBoyPaletteNumPalettes)
+			settings->gbPalette = GameBoyPaletteGray;
 
 		uiPrvReset(cnv, false);
 
@@ -2440,6 +2459,12 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 10, "COLOR:", -1);
 		cnv->foreColor = 15;
 		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 111, settings->actLikeGBC ? "YES       " : "NO       ", -1);
+
+		paletteOption = numOptions++;
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, paletteOption), 10, "PALETTE:", -1);
+		cnv->foreColor = 15;
+		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, paletteOption), 95, cnv->w - 95, paletteNames[settings->gbPalette]);
 
 		upscaleOption = numOptions++;
 		cnv->foreColor = 11;
@@ -2482,6 +2507,15 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 		if (selOption == upscaleOption) {
 
 			settings->upscale = !settings->upscale;
+		}
+
+		if (selOption == paletteOption) {
+
+			restartCurGame = true;
+			if (button == KEY_BIT_LEFT)
+				settings->gbPalette = settings->gbPalette ? settings->gbPalette - 1 : GameBoyPaletteNumPalettes - 1;
+			else
+				settings->gbPalette = (settings->gbPalette + 1) % GameBoyPaletteNumPalettes;
 		}
 
 		if (selOption == cgbOption) {
@@ -3571,6 +3605,7 @@ bool uiSaveSavestate(void)
 		bool forceReinitUsed;
 		bool retryAttempted;
 		bool manualRequest;
+		bool nothingToExport;
 		struct SdLastError sdError;
 	};
 
@@ -4318,7 +4353,10 @@ static bool uiPrvPrepareSaveExportResult(bool force, struct SaveExportResult *re
 
 	uiPrvSaveExportResultInit(result);
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
+	{
+		result->nothingToExport = true;
 		return false;
+	}
 
 	result->forceRequested = force;
 	result->bytesExpected = selection.saveRamSize;
@@ -4596,6 +4634,12 @@ static void uiPrvSaveExportShowSuccess(struct Canvas *cnv, const struct SaveExpo
 	if (!showSuccess)
 		return;
 
+	if (result->nothingToExport) {
+		if (result->manualRequest)
+			uiAlert(cnv, "This game has no battery save to export.", DialogTypeOk);
+		return;
+	}
+
 	if (result->saveName[0])
 		(void)sprintf(msg, "Save written to /SAVE/%s", result->saveName);
 	else
@@ -4616,6 +4660,7 @@ static bool uiPrvExportCurrentSavestateWithOptions(struct Canvas *cnv, bool forc
 		return false;
 	}
 
+	result.manualRequest = force;
 	uiPrvSaveExportShowSuccess(cnv, &result, showSuccess, msg);
 	return true;
 }
@@ -4639,6 +4684,7 @@ static bool uiPrvExportCurrentSavestateToMountedCardWithOptions(struct Canvas *c
 		return false;
 	}
 
+	result.manualRequest = force;
 	uiPrvSaveExportShowSuccess(cnv, &result, showSuccess, msg);
 	return true;
 }
@@ -4837,11 +4883,15 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		return !*str;
 	}
 
-	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, uint32_t *bytesReadP, uint32_t fileSize, bool *truncatedP)
+	static bool uiPrvIrCancelRequested(void);
+
+	static bool uiPrvReadLine(struct FatfsFil *fil, char *buf, uint32_t bufSz, uint32_t *bytesReadP, uint32_t fileSize, bool *truncatedP, bool *cancelledP)
 	{
 		uint32_t pos = 0;
 
 		*truncatedP = false;
+		if (cancelledP)
+			*cancelledP = false;
 		if (!bufSz)
 			return false;
 
@@ -4849,6 +4899,11 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			char ch;
 			uint32_t numRead;
 
+			if (bytesReadP && !(*bytesReadP & 0xff) && uiPrvIrCancelRequested()) {
+				if (cancelledP)
+					*cancelledP = true;
+				return false;
+			}
 			if (!fatfsFileRead(fil, &ch, 1, &numRead))
 				return false;
 
@@ -5333,11 +5388,13 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static bool uiPrvIrReadLineStat(struct FatfsFil *fil, char *line, struct IrBlastStats *stats)
 	{
-		bool truncated;
+		bool truncated, cancelled;
 
 		if (!stats->fileSize)
 			stats->fileSize = fatfsFileGetSize(fil);
-		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &stats->bytesRead, stats->fileSize, &truncated)) {
+		if (!uiPrvReadLine(fil, line, IR_LINE_BUF_SZ, &stats->bytesRead, stats->fileSize, &truncated, &cancelled)) {
+			if (cancelled)
+				stats->cancelled = true;
 			if (truncated)
 				stats->lineTooLong = true;
 			return false;
@@ -6027,7 +6084,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		memset(&stats, 0, sizeof(stats));
 		irRemoteBegin();
 		irStarted = true;
-		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, "Universal IR Button Spam", 0);
+		ret = uiPrvIrBlastFlipper(cnv, fil, line, &stats, buttonName, buttonName && *buttonName ? buttonName : "IR Button", 0);
 
 	out_report:
 		if (irStarted)
@@ -6243,6 +6300,21 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	{
 		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt") ||
 			uiPrvStrEndsWithNoCase(fname, ".wav");
+	}
+
+	static bool uiPrvMusicBatteryOkToLaunch(struct Canvas *cnv)
+	{
+		struct BadgePowerStatus status;
+		bool haveStatus = badgePowerReadNow(&status);
+
+		if (!haveStatus)
+			haveStatus = badgePowerGetCached(&status);
+		if (haveStatus && status.valid && status.lowBatt && status.usbMv < UI_HEADER_USB_PRESENT_MV) {
+			audioPwmStop();
+			uiAlert(cnv, "Battery too low for Music.\nConnect USB or charge before playback.", DialogTypeOk);
+			return false;
+		}
+		return true;
 	}
 
 	struct MusicListCtx {
@@ -6620,6 +6692,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		struct FontGlyphInfo gi;
 
 		uiPrvSetHeaderTitle("Music");
+		if (!uiPrvMusicBatteryOkToLaunch(cnv))
+			return;
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
 		audioPwmSetVolume(settings.musicVolume);
@@ -7259,7 +7333,27 @@ enum UiUsbKeyboardAction {
 	UiUsbKeyboardActionReleaseAll,
 };
 
+enum UiUsbKeyboardCategory {
+	UiUsbKeyboardCategoryBasic,
+	UiUsbKeyboardCategoryNavigation,
+	UiUsbKeyboardCategoryEditing,
+	UiUsbKeyboardCategoryWindows,
+	UiUsbKeyboardCategoryLinux,
+	UiUsbKeyboardCategoryMac,
+	UiUsbKeyboardCategoryBrowser,
+	UiUsbKeyboardCategoryMedia,
+	UiUsbKeyboardCategoryPresentation,
+	UiUsbKeyboardCategoryFunction,
+	UiUsbKeyboardCategoryType,
+	UiUsbKeyboardCategoryNum,
+};
+
+struct UiUsbKeyboardCategoryInfo {
+	const char *label;
+};
+
 struct UiUsbKeyboardCommand {
+	enum UiUsbKeyboardCategory category;
 	const char *label;
 	enum UiUsbKeyboardAction action;
 	uint8_t mods;
@@ -7267,105 +7361,121 @@ struct UiUsbKeyboardCommand {
 	const char *text;
 };
 
+static const struct UiUsbKeyboardCategoryInfo mUsbKeyboardCategories[UiUsbKeyboardCategoryNum] = {
+	[UiUsbKeyboardCategoryBasic] = {"Basic Keys"},
+	[UiUsbKeyboardCategoryNavigation] = {"Navigation"},
+	[UiUsbKeyboardCategoryEditing] = {"Editing"},
+	[UiUsbKeyboardCategoryWindows] = {"Windows"},
+	[UiUsbKeyboardCategoryLinux] = {"Linux"},
+	[UiUsbKeyboardCategoryMac] = {"Mac"},
+	[UiUsbKeyboardCategoryBrowser] = {"Browser"},
+	[UiUsbKeyboardCategoryMedia] = {"Media / YouTube"},
+	[UiUsbKeyboardCategoryPresentation] = {"Presentation"},
+	[UiUsbKeyboardCategoryFunction] = {"Function Keys"},
+	[UiUsbKeyboardCategoryType] = {"Type/Test"},
+};
+
 static const struct UiUsbKeyboardCommand mUsbKeyboardCommands[] = {
-	{"Release all keys", UiUsbKeyboardActionReleaseAll, 0, 0, NULL},
-	{"Enter", UiUsbKeyboardActionKey, 0, 0x28, NULL},
-	{"Tab", UiUsbKeyboardActionKey, 0, 0x2b, NULL},
-	{"Esc", UiUsbKeyboardActionKey, 0, 0x29, NULL},
-	{"Backspace", UiUsbKeyboardActionKey, 0, 0x2a, NULL},
-	{"Delete", UiUsbKeyboardActionKey, 0, 0x4c, NULL},
-	{"Space", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
-	{"Menu / App key", UiUsbKeyboardActionKey, 0, 0x65, NULL},
+	{UiUsbKeyboardCategoryBasic, "Release all keys", UiUsbKeyboardActionReleaseAll, 0, 0, NULL},
+	{UiUsbKeyboardCategoryBasic, "Enter", UiUsbKeyboardActionKey, 0, 0x28, NULL},
+	{UiUsbKeyboardCategoryBasic, "Tab", UiUsbKeyboardActionKey, 0, 0x2b, NULL},
+	{UiUsbKeyboardCategoryBasic, "Esc", UiUsbKeyboardActionKey, 0, 0x29, NULL},
+	{UiUsbKeyboardCategoryBasic, "Backspace", UiUsbKeyboardActionKey, 0, 0x2a, NULL},
+	{UiUsbKeyboardCategoryBasic, "Delete", UiUsbKeyboardActionKey, 0, 0x4c, NULL},
+	{UiUsbKeyboardCategoryBasic, "Space", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
+	{UiUsbKeyboardCategoryBasic, "Menu / App key", UiUsbKeyboardActionKey, 0, 0x65, NULL},
 
-	{"Navigate: Up", UiUsbKeyboardActionKey, 0, 0x52, NULL},
-	{"Navigate: Down", UiUsbKeyboardActionKey, 0, 0x51, NULL},
-	{"Navigate: Left", UiUsbKeyboardActionKey, 0, 0x50, NULL},
-	{"Navigate: Right", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
-	{"Navigate: Home", UiUsbKeyboardActionKey, 0, 0x4a, NULL},
-	{"Navigate: End", UiUsbKeyboardActionKey, 0, 0x4d, NULL},
-	{"Navigate: Page Up", UiUsbKeyboardActionKey, 0, 0x4b, NULL},
-	{"Navigate: Page Down", UiUsbKeyboardActionKey, 0, 0x4e, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Up", UiUsbKeyboardActionKey, 0, 0x52, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Down", UiUsbKeyboardActionKey, 0, 0x51, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Left", UiUsbKeyboardActionKey, 0, 0x50, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Right", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Home", UiUsbKeyboardActionKey, 0, 0x4a, NULL},
+	{UiUsbKeyboardCategoryNavigation, "End", UiUsbKeyboardActionKey, 0, 0x4d, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Page Up", UiUsbKeyboardActionKey, 0, 0x4b, NULL},
+	{UiUsbKeyboardCategoryNavigation, "Page Down", UiUsbKeyboardActionKey, 0, 0x4e, NULL},
 
-	{"Edit: Copy (Ctrl+C)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x06, NULL},
-	{"Edit: Paste (Ctrl+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x19, NULL},
-	{"Edit: Cut (Ctrl+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1b, NULL},
-	{"Edit: Undo (Ctrl+Z)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1d, NULL},
-	{"Edit: Redo (Ctrl+Y)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1c, NULL},
-	{"Edit: Select All (Ctrl+A)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x04, NULL},
-	{"Edit: Find (Ctrl+F)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x09, NULL},
-	{"Edit: New (Ctrl+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x11, NULL},
-	{"Edit: Open (Ctrl+O)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x12, NULL},
-	{"Edit: Save (Ctrl+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x16, NULL},
-	{"Edit: Print (Ctrl+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x13, NULL},
-	{"Edit: Paste Plain (Ctrl+Shift+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x19, NULL},
+	{UiUsbKeyboardCategoryEditing, "Copy (Ctrl+C)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x06, NULL},
+	{UiUsbKeyboardCategoryEditing, "Paste (Ctrl+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x19, NULL},
+	{UiUsbKeyboardCategoryEditing, "Cut (Ctrl+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1b, NULL},
+	{UiUsbKeyboardCategoryEditing, "Undo (Ctrl+Z)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1d, NULL},
+	{UiUsbKeyboardCategoryEditing, "Redo (Ctrl+Y)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1c, NULL},
+	{UiUsbKeyboardCategoryEditing, "Select All (Ctrl+A)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x04, NULL},
+	{UiUsbKeyboardCategoryEditing, "Find (Ctrl+F)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x09, NULL},
+	{UiUsbKeyboardCategoryEditing, "New (Ctrl+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x11, NULL},
+	{UiUsbKeyboardCategoryEditing, "Open (Ctrl+O)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x12, NULL},
+	{UiUsbKeyboardCategoryEditing, "Save (Ctrl+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x16, NULL},
+	{UiUsbKeyboardCategoryEditing, "Print (Ctrl+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x13, NULL},
+	{UiUsbKeyboardCategoryEditing, "Paste Plain (Ctrl+Shift+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x19, NULL},
 
-	{"OS: Run (Win+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x15, NULL},
-	{"OS: Explorer (Win+E)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x08, NULL},
-	{"OS: Show Desktop (Win+D)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x07, NULL},
-	{"OS: Lock (Win+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0f, NULL},
-	{"OS: Search (Win+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x16, NULL},
-	{"OS: Settings (Win+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0c, NULL},
-	{"OS: Power User (Win+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x1b, NULL},
-	{"OS: Clipboard (Win+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x19, NULL},
-	{"OS: Emoji Panel (Win+.)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x37, NULL},
-	{"OS: Project Display (Win+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x13, NULL},
-	{"OS: Task Switch (Alt+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x2b, NULL},
-	{"OS: Task View (Win+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
-	{"OS: Task Manager (Ctrl+Shift+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x29, NULL},
-	{"OS: Close App (Alt+F4)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x3d, NULL},
-	{"OS: Ctrl+Alt+Del", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x4c, NULL},
-	{"OS: Snipping (Win+Shift+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LSHIFT, 0x16, NULL},
-	{"OS: Print Screen", UiUsbKeyboardActionKey, 0, 0x46, NULL},
-	{"OS: Active Screenshot (Alt+PrtSc)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x46, NULL},
-	{"OS: Reset Graphics (Win+Ctrl+Shift+B)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x05, NULL},
-	{"Linux: Terminal (Ctrl+Alt+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x17, NULL},
-	{"Linux: Lock (Ctrl+Alt+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x0f, NULL},
+	{UiUsbKeyboardCategoryWindows, "Run (Win+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x15, NULL},
+	{UiUsbKeyboardCategoryWindows, "Explorer (Win+E)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x08, NULL},
+	{UiUsbKeyboardCategoryWindows, "Show Desktop (Win+D)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x07, NULL},
+	{UiUsbKeyboardCategoryWindows, "Lock (Win+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0f, NULL},
+	{UiUsbKeyboardCategoryWindows, "Search (Win+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x16, NULL},
+	{UiUsbKeyboardCategoryWindows, "Settings (Win+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0c, NULL},
+	{UiUsbKeyboardCategoryWindows, "Power User (Win+X)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x1b, NULL},
+	{UiUsbKeyboardCategoryWindows, "Clipboard (Win+V)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x19, NULL},
+	{UiUsbKeyboardCategoryWindows, "Emoji Panel (Win+.)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x37, NULL},
+	{UiUsbKeyboardCategoryWindows, "Project Display (Win+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x13, NULL},
+	{UiUsbKeyboardCategoryWindows, "Task Switch (Alt+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x2b, NULL},
+	{UiUsbKeyboardCategoryWindows, "Task View (Win+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
+	{UiUsbKeyboardCategoryWindows, "Task Manager (Ctrl+Shift+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x29, NULL},
+	{UiUsbKeyboardCategoryWindows, "Close App (Alt+F4)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x3d, NULL},
+	{UiUsbKeyboardCategoryWindows, "Ctrl+Alt+Del", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x4c, NULL},
+	{UiUsbKeyboardCategoryWindows, "Snipping (Win+Shift+S)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LSHIFT, 0x16, NULL},
+	{UiUsbKeyboardCategoryWindows, "Print Screen", UiUsbKeyboardActionKey, 0, 0x46, NULL},
+	{UiUsbKeyboardCategoryWindows, "Active Screenshot (Alt+PrtSc)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x46, NULL},
+	{UiUsbKeyboardCategoryWindows, "Reset Graphics (Win+Ctrl+Shift+B)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x05, NULL},
 
-	{"Mac: Spotlight (Cmd+Space)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2c, NULL},
-	{"Mac: App Switch (Cmd+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
-	{"Mac: Force Quit (Cmd+Opt+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LALT, 0x29, NULL},
-	{"Mac: Hide App (Cmd+H)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0b, NULL},
-	{"Mac: Quit App (Cmd+Q)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x14, NULL},
+	{UiUsbKeyboardCategoryLinux, "Terminal (Ctrl+Alt+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x17, NULL},
+	{UiUsbKeyboardCategoryLinux, "Lock (Ctrl+Alt+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LALT, 0x0f, NULL},
 
-	{"Browser: Address Bar (Ctrl+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x0f, NULL},
-	{"Browser: New Tab (Ctrl+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x17, NULL},
-	{"Browser: Close Tab (Ctrl+W)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1a, NULL},
-	{"Browser: Reopen Tab (Ctrl+Shift+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x17, NULL},
-	{"Browser: Private Window (Ctrl+Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x11, NULL},
-	{"Browser: Refresh (Ctrl+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x15, NULL},
-	{"Browser: Full Screen (F11)", UiUsbKeyboardActionKey, 0, 0x44, NULL},
-	{"Browser: Back (Alt+Left)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x50, NULL},
-	{"Browser: Forward (Alt+Right)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x4f, NULL},
-	{"Browser: Next Tab (Ctrl+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2b, NULL},
-	{"Browser: Prev Tab (Ctrl+Shift+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x2b, NULL},
-	{"Browser: Zoom In (Ctrl+=)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2e, NULL},
-	{"Browser: Zoom Out (Ctrl+-)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2d, NULL},
-	{"Browser: Zoom Reset (Ctrl+0)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x27, NULL},
-	{"Browser: Dev Tools (Ctrl+Shift+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x0c, NULL},
+	{UiUsbKeyboardCategoryMac, "Spotlight (Cmd+Space)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2c, NULL},
+	{UiUsbKeyboardCategoryMac, "App Switch (Cmd+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x2b, NULL},
+	{UiUsbKeyboardCategoryMac, "Force Quit (Cmd+Opt+Esc)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI | USB_HID_MOD_LALT, 0x29, NULL},
+	{UiUsbKeyboardCategoryMac, "Hide App (Cmd+H)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x0b, NULL},
+	{UiUsbKeyboardCategoryMac, "Quit App (Cmd+Q)", UiUsbKeyboardActionKey, USB_HID_MOD_LGUI, 0x14, NULL},
 
-	{"Media: Play/Pause (Space)", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
-	{"Media: YouTube Play/Pause (K)", UiUsbKeyboardActionKey, 0, 0x0e, NULL},
-	{"Media: YouTube Mute (M)", UiUsbKeyboardActionKey, 0, 0x10, NULL},
-	{"Media: YouTube Fullscreen (F)", UiUsbKeyboardActionKey, 0, 0x09, NULL},
-	{"Media: YouTube Captions (C)", UiUsbKeyboardActionKey, 0, 0x06, NULL},
-	{"Media: YouTube Vol Up (Up)", UiUsbKeyboardActionKey, 0, 0x52, NULL},
-	{"Media: YouTube Vol Down (Down)", UiUsbKeyboardActionKey, 0, 0x51, NULL},
-	{"Media: YouTube Back 10s (J)", UiUsbKeyboardActionKey, 0, 0x0d, NULL},
-	{"Media: YouTube Forward 10s (L)", UiUsbKeyboardActionKey, 0, 0x0f, NULL},
-	{"Media: YouTube Previous (Shift+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x13, NULL},
-	{"Media: YouTube Next (Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x11, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Address Bar (Ctrl+L)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x0f, NULL},
+	{UiUsbKeyboardCategoryBrowser, "New Tab (Ctrl+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x17, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Close Tab (Ctrl+W)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x1a, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Reopen Tab (Ctrl+Shift+T)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x17, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Private Window (Ctrl+Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x11, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Refresh (Ctrl+R)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x15, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Full Screen (F11)", UiUsbKeyboardActionKey, 0, 0x44, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Back (Alt+Left)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x50, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Forward (Alt+Right)", UiUsbKeyboardActionKey, USB_HID_MOD_LALT, 0x4f, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Next Tab (Ctrl+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2b, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Prev Tab (Ctrl+Shift+Tab)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x2b, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Zoom In (Ctrl+=)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2e, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Zoom Out (Ctrl+-)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x2d, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Zoom Reset (Ctrl+0)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL, 0x27, NULL},
+	{UiUsbKeyboardCategoryBrowser, "Dev Tools (Ctrl+Shift+I)", UiUsbKeyboardActionKey, USB_HID_MOD_LCTRL | USB_HID_MOD_LSHIFT, 0x0c, NULL},
 
-	{"Presentation: Start (F5)", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
-	{"Presentation: Current Slide (Shift+F5)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x3e, NULL},
-	{"Presentation: Next", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
-	{"Presentation: Previous", UiUsbKeyboardActionKey, 0, 0x50, NULL},
-	{"Presentation: Black Screen (B)", UiUsbKeyboardActionKey, 0, 0x05, NULL},
+	{UiUsbKeyboardCategoryMedia, "Play/Pause (Space)", UiUsbKeyboardActionKey, 0, 0x2c, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Play/Pause (K)", UiUsbKeyboardActionKey, 0, 0x0e, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Mute (M)", UiUsbKeyboardActionKey, 0, 0x10, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Fullscreen (F)", UiUsbKeyboardActionKey, 0, 0x09, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Captions (C)", UiUsbKeyboardActionKey, 0, 0x06, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Vol Up (Up)", UiUsbKeyboardActionKey, 0, 0x52, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Vol Down (Down)", UiUsbKeyboardActionKey, 0, 0x51, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Back 10s (J)", UiUsbKeyboardActionKey, 0, 0x0d, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Forward 10s (L)", UiUsbKeyboardActionKey, 0, 0x0f, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Previous (Shift+P)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x13, NULL},
+	{UiUsbKeyboardCategoryMedia, "YouTube Next (Shift+N)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x11, NULL},
 
-	{"Function: F1 Help", UiUsbKeyboardActionKey, 0, 0x3a, NULL},
-	{"Function: F2 Rename", UiUsbKeyboardActionKey, 0, 0x3b, NULL},
-	{"Function: F5 Refresh", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
-	{"Function: F12 Dev Tools", UiUsbKeyboardActionKey, 0, 0x45, NULL},
-	{"Type: DC32 test line", UiUsbKeyboardActionString, 0, 0, "DC32 USB Keyboard\n"},
+	{UiUsbKeyboardCategoryPresentation, "Start (F5)", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
+	{UiUsbKeyboardCategoryPresentation, "Current Slide (Shift+F5)", UiUsbKeyboardActionKey, USB_HID_MOD_LSHIFT, 0x3e, NULL},
+	{UiUsbKeyboardCategoryPresentation, "Next", UiUsbKeyboardActionKey, 0, 0x4f, NULL},
+	{UiUsbKeyboardCategoryPresentation, "Previous", UiUsbKeyboardActionKey, 0, 0x50, NULL},
+	{UiUsbKeyboardCategoryPresentation, "Black Screen (B)", UiUsbKeyboardActionKey, 0, 0x05, NULL},
+
+	{UiUsbKeyboardCategoryFunction, "F1 Help", UiUsbKeyboardActionKey, 0, 0x3a, NULL},
+	{UiUsbKeyboardCategoryFunction, "F2 Rename", UiUsbKeyboardActionKey, 0, 0x3b, NULL},
+	{UiUsbKeyboardCategoryFunction, "F5 Refresh", UiUsbKeyboardActionKey, 0, 0x3e, NULL},
+	{UiUsbKeyboardCategoryFunction, "F12 Dev Tools", UiUsbKeyboardActionKey, 0, 0x45, NULL},
+
+	{UiUsbKeyboardCategoryType, "DC32 test line", UiUsbKeyboardActionString, 0, 0, "DC32 USB Keyboard\n"},
 };
 
 static bool uiPrvUsbKeyboardDelay(uint32_t msec)
@@ -7494,16 +7604,61 @@ static bool uiPrvUsbKeyboardSendString(const char *str)
 	return true;
 }
 
-static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selectedP, const char *status, uint32_t *choiceP)
+typedef const char *(*UiUsbKeyboardLabelF)(void *userData, uint32_t index);
+
+struct UiUsbKeyboardCommandListCtx {
+	enum UiUsbKeyboardCategory category;
+};
+
+static const char *uiPrvUsbKeyboardCategoryLabel(void *userData, uint32_t index)
 {
-	const uint32_t numCommands = sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands);
+	(void)userData;
+	return mUsbKeyboardCategories[index].label;
+}
+
+static uint32_t uiPrvUsbKeyboardCommandCount(enum UiUsbKeyboardCategory category)
+{
+	uint32_t i, count = 0;
+
+	for (i = 0; i < sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands); i++)
+		if (mUsbKeyboardCommands[i].category == category)
+			count++;
+	return count;
+}
+
+static uint32_t uiPrvUsbKeyboardCommandTableIndex(enum UiUsbKeyboardCategory category, uint32_t visibleIndex)
+{
+	uint32_t i;
+
+	for (i = 0; i < sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands); i++) {
+		if (mUsbKeyboardCommands[i].category != category)
+			continue;
+		if (!visibleIndex--)
+			return i;
+	}
+	return sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands);
+}
+
+static const char *uiPrvUsbKeyboardCommandLabel(void *userData, uint32_t index)
+{
+	struct UiUsbKeyboardCommandListCtx *ctx = (struct UiUsbKeyboardCommandListCtx*)userData;
+	uint32_t tableIndex = uiPrvUsbKeyboardCommandTableIndex(ctx->category, index);
+
+	if (tableIndex >= sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands))
+		return "";
+	return mUsbKeyboardCommands[tableIndex].label;
+}
+
+static bool uiPrvUsbKeyboardSelectList(struct Canvas *cnv, const char *title, const char *footer,
+	const char *status, uint32_t numItems, UiUsbKeyboardLabelF labelF, void *labelData, uint32_t *selectedP, uint32_t *choiceP)
+{
 	uint32_t selected = *selectedP, topItem, prevTopItem, prevSelOnscreenItem;
 	uint_fast8_t itemHeight = uiPrvMenuItemHeight(cnv), itemsOnscreen, listTop, itemLeft, footerRows;
 	struct FontGlyphInfo gi;
 
-	if (!numCommands)
+	if (!numItems)
 		return false;
-	if (selected >= numCommands)
+	if (selected >= numItems)
 		selected = 0;
 
 	itemLeft = fontGetGlyphInfo(&gi, cnv->font, MENU_SELECTION_CHAR) ? gi.width + 2 : 10;
@@ -7514,8 +7669,8 @@ static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selected
 		uiAlert(cnv, "Display area too small for USB Keyboard", DialogTypeOk);
 		return false;
 	}
-	if (itemsOnscreen > numCommands)
-		itemsOnscreen = numCommands;
+	if (itemsOnscreen > numItems)
+		itemsOnscreen = numItems;
 	topItem = selected >= itemsOnscreen ? selected + 1 - itemsOnscreen : 0;
 	prevTopItem = topItem + 1;
 	prevSelOnscreenItem = selected - topItem + 1;
@@ -7526,15 +7681,16 @@ static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selected
 		if (prevTopItem != topItem) {
 			uint_fast8_t scrollWidth;
 
-			uiPrvSetHeaderTitle("USB Keyboard");
+			uiPrvSetHeaderTitle(title);
 			uiPrvReset(cnv, false);
-			scrollWidth = numCommands > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numCommands, topItem, itemsOnscreen) : 0;
+			scrollWidth = numItems > itemsOnscreen ? uiPrvDrawScrollbar(cnv, listTop, numItems, topItem, itemsOnscreen) : 0;
 			cnv->foreColor = 12;
-			for (i = 0; i < itemsOnscreen && topItem + i < numCommands; i++)
-				uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, mUsbKeyboardCommands[topItem + i].label);
+			for (i = 0; i < itemsOnscreen && topItem + i < numItems; i++)
+				uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft,
+					labelF(labelData, topItem + i));
 			if (status)
 				uiPrvDrawTruncText(cnv, cnv->h - 2 * itemHeight, 10, cnv->w - 10, status);
-			uiPuts(cnv, cnv->h - itemHeight, 10, "A = Send   B = Quit", -1);
+			uiPuts(cnv, cnv->h - itemHeight, 10, footer, -1);
 			prevSelOnscreenItem = selectedOnscreenItem + 1;
 		}
 		prevTopItem = topItem;
@@ -7559,15 +7715,16 @@ static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selected
 				return true;
 
 			case KEY_BIT_B:
+				*selectedP = selected;
 				return false;
 
 			case KEY_BIT_DOWN:
-				if (selected + 1 < numCommands) {
+				if (selected + 1 < numItems) {
 					selected++;
 					if (selected >= topItem + itemsOnscreen) {
 						topItem++;
-						if (topItem + itemsOnscreen > numCommands)
-							topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+						if (topItem + itemsOnscreen > numItems)
+							topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
 					}
 				}
 				else if (!mUiKeyRepeated) {
@@ -7583,21 +7740,21 @@ static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selected
 						topItem = selected;
 				}
 				else if (!mUiKeyRepeated) {
-					selected = numCommands - 1;
-					topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+					selected = numItems - 1;
+					topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
 				}
 				break;
 
 			case KEY_BIT_RIGHT:
-				if (topItem + itemsOnscreen < numCommands) {
+				if (topItem + itemsOnscreen < numItems) {
 					uint32_t offset = selected - topItem;
 
 					topItem += itemsOnscreen;
-					if (topItem + itemsOnscreen > numCommands)
-						topItem = numCommands > itemsOnscreen ? numCommands - itemsOnscreen : 0;
+					if (topItem + itemsOnscreen > numItems)
+						topItem = numItems > itemsOnscreen ? numItems - itemsOnscreen : 0;
 					selected = topItem + offset;
-					if (selected >= numCommands)
-						selected = numCommands - 1;
+					if (selected >= numItems)
+						selected = numItems - 1;
 				}
 				break;
 
@@ -7607,12 +7764,36 @@ static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, uint32_t *selected
 
 					topItem = topItem > itemsOnscreen ? topItem - itemsOnscreen : 0;
 					selected = topItem + offset;
-					if (selected >= numCommands)
-						selected = numCommands - 1;
+					if (selected >= numItems)
+						selected = numItems - 1;
 				}
 				break;
 		}
 	}
+}
+
+static bool uiPrvUsbKeyboardSelectCategory(struct Canvas *cnv, uint32_t *selectedP, const char *status, enum UiUsbKeyboardCategory *categoryP)
+{
+	uint32_t choice;
+
+	if (!uiPrvUsbKeyboardSelectList(cnv, "USB Keyboard", "A = Open   B = Quit", status,
+		UiUsbKeyboardCategoryNum, uiPrvUsbKeyboardCategoryLabel, NULL, selectedP, &choice))
+		return false;
+	*categoryP = (enum UiUsbKeyboardCategory)choice;
+	return true;
+}
+
+static bool uiPrvUsbKeyboardSelectCommand(struct Canvas *cnv, enum UiUsbKeyboardCategory category,
+	uint32_t *selectedP, const char *status, uint32_t *choiceP)
+{
+	struct UiUsbKeyboardCommandListCtx ctx = {category};
+	uint32_t visibleChoice, numCommands = uiPrvUsbKeyboardCommandCount(category);
+
+	if (!uiPrvUsbKeyboardSelectList(cnv, mUsbKeyboardCategories[category].label, "A = Send   B = Back", status,
+		numCommands, uiPrvUsbKeyboardCommandLabel, &ctx, selectedP, &visibleChoice))
+		return false;
+	*choiceP = uiPrvUsbKeyboardCommandTableIndex(category, visibleChoice);
+	return *choiceP < sizeof(mUsbKeyboardCommands) / sizeof(*mUsbKeyboardCommands);
 }
 
 static bool uiPrvUsbKeyboardSendCommand(const struct UiUsbKeyboardCommand *cmd)
@@ -7633,7 +7814,8 @@ static bool uiPrvUsbKeyboardSendCommand(const struct UiUsbKeyboardCommand *cmd)
 
 static void uiPrvUsbKeyboardTool(struct Canvas *cnv)
 {
-	uint32_t selected = 0;
+	uint32_t selectedCategory = 0;
+	uint32_t selectedCommand[UiUsbKeyboardCategoryNum] = {0};
 	char lastStatus[96] = {0};
 	bool reportsEnabled = false;
 	struct UsbHidDeviceInfo info;
@@ -7663,20 +7845,27 @@ static void uiPrvUsbKeyboardTool(struct Canvas *cnv)
 	uiPrvWaitKeysReleased();
 
 	while (!uiPrvToolExitRequested()) {
-		uint32_t choice;
-		const struct UiUsbKeyboardCommand *cmd;
+		enum UiUsbKeyboardCategory category;
 
-		if (!uiPrvUsbKeyboardSelectCommand(cnv, &selected, lastStatus[0] ? lastStatus : NULL, &choice))
+		if (!uiPrvUsbKeyboardSelectCategory(cnv, &selectedCategory, lastStatus[0] ? lastStatus : NULL, &category))
 			break;
-		cmd = &mUsbKeyboardCommands[choice];
-		if (!uiPrvUsbKeyboardSendCommand(cmd)) {
-			if (!uiPrvToolExitRequested())
-				uiAlert(cnv, "USB Keyboard report failed", DialogTypeOk);
-			break;
+		while (!uiPrvToolExitRequested()) {
+			uint32_t choice;
+			const struct UiUsbKeyboardCommand *cmd;
+
+			if (!uiPrvUsbKeyboardSelectCommand(cnv, category, &selectedCommand[category], lastStatus[0] ? lastStatus : NULL, &choice))
+				break;
+			cmd = &mUsbKeyboardCommands[choice];
+			if (!uiPrvUsbKeyboardSendCommand(cmd)) {
+				if (!uiPrvToolExitRequested())
+					uiAlert(cnv, "USB Keyboard report failed", DialogTypeOk);
+				goto out;
+			}
+			(void)snprintf(lastStatus, sizeof(lastStatus), "Sent: %s/%s", mUsbKeyboardCategories[category].label, cmd->label);
 		}
-		(void)snprintf(lastStatus, sizeof(lastStatus), "Sent: %s", cmd->label);
 	}
 
+out:
 	if (reportsEnabled) {
 		usbHidReleaseAll();
 		usbHidSetReportsEnabled(false);
@@ -7780,7 +7969,7 @@ static void uiPrvAutoclickerDraw(struct Canvas *cnv, const struct Settings *sett
 	(void)sprintf(msg, "Clicks /s: %u", (unsigned)settings->autoclickerCps);
 	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
 	cnv->foreColor = 15;
-	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, running ? "A Stop  B Exit" : "A Start  B Exit", -1);
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, running ? "A/B Stop" : "A Start  B Exit", -1);
 }
 
 static bool uiPrvAutoclickerDelay(uint32_t msec)
@@ -7838,14 +8027,26 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 			uiPrvRequestToolExit();
 			break;
 		}
-		if (pressed & KEY_BIT_B)
-			break;
+		if (pressed & KEY_BIT_B) {
+			if (running) {
+				running = false;
+				nextClick = 0;
+				lastDraw = 0;
+				usbHidReleaseAll();
+			}
+			else
+				break;
+		}
 		if (!(keys & KEY_BIT_A) && now >= aRearmTicks)
 			aToggleArmed = true;
 		if ((pressed & KEY_BIT_A) && aToggleArmed) {
+			bool wasRunning = running;
+
 			running = !running;
 			nextClick = 0;
 			lastDraw = 0;
+			if (wasRunning && !running)
+				usbHidReleaseAll();
 			aToggleArmed = false;
 			aRearmTicks = now + AUTOCLICKER_A_LOCKOUT_TICKS;
 		}
@@ -8495,16 +8696,29 @@ static const char *uiPrvCurrentGameConsoleName(void)
 {
 	struct GameSelection selection;
 	struct Settings settings;
+	enum RomColorSupport colorSupport;
 
 	if (uiGetGameSelection(&selection)) {
 		if (selection.runtime == GameRuntimeNes)
 			return "NES";
 		if (selection.runtime == GameRuntimeArduboy)
 			return "ARDUBOY";
+		if (selection.runtime == GameRuntimeGb) {
+			if (!uiPrvHaveValidRom(NULL, &colorSupport, NULL))
+				return "GB";
+			if (colorSupport == RomColorRequired)
+				return "GBC";
+			if (colorSupport == RomColorEnhanced) {
+				settingsGet(&settings);
+				return settings.actLikeGBC ? "GBC" : "GB";
+			}
+			if (colorSupport == RomNoColor)
+				return "GB";
+			return "GB";
+		}
 	}
 
-	settingsGet(&settings);
-	return settings.actLikeGBC ? "GBC" : "GB";
+	return "GB";
 }
 
 static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *title, bool resume)
@@ -8669,13 +8883,12 @@ struct UiFileRef {
 enum UiBrowserOpenWithId {
 	UiBrowserOpenNone,
 	UiBrowserOpenCancelled,
-	UiBrowserOpenIrPowerSpam,
-	UiBrowserOpenIrMuteSpam,
 	UiBrowserOpenIrButtonSpam,
 	UiBrowserOpenBadUsb,
 	UiBrowserOpenMusic,
 	UiBrowserOpenGame,
 	UiBrowserOpenImage,
+	UiBrowserOpenDcApp,
 };
 
 static void uiPrvImageAlert(struct Canvas *cnv, enum ImageViewerResult result)
@@ -8929,10 +9142,6 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	if (uiPrvIrRemoteFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenIrButtonSpam;
 		labels[numOptions++] = "Universal IR";
-		ids[numOptions] = UiBrowserOpenIrPowerSpam;
-		labels[numOptions++] = "Power";
-		ids[numOptions] = UiBrowserOpenIrMuteSpam;
-		labels[numOptions++] = "Mute";
 	}
 	if (uiPrvStrEndsWithNoCase(ref->name, ".txt") || uiPrvStrEndsWithNoCase(ref->name, ".badusb")) {
 		ids[numOptions] = UiBrowserOpenBadUsb;
@@ -8949,6 +9158,10 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	if (uiPrvImageFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenImage;
 		labels[numOptions++] = "Image Viewer";
+	}
+	if (uiPrvStrEndsWithNoCase(ref->name, ".DC32")) {
+		ids[numOptions] = UiBrowserOpenDcApp;
+		labels[numOptions++] = "DC32 App";
 	}
 
 	if (!numOptions)
@@ -8973,6 +9186,50 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 static enum UiToolId uiPrvBrowserLaunchedToolReturn(enum UiToolId launchedTool)
 {
 	return uiPrvToolExitRequested() ? launchedTool : UiToolBrowser;
+}
+
+static const struct DcAppCatalogEntry *uiPrvBrowserFindDcApp(const struct UiFileRef *ref)
+{
+	char path[UI_PICK_FILE_PATH_BUF_SZ];
+	const struct DcAppCatalogEntry *entries;
+	uint_fast8_t count, i;
+
+	uiPrvCopyStr(path, sizeof(path), ref->parentPath && ref->parentPath[0] ? ref->parentPath : "/");
+	uiPrvAppendPathComponent(path, sizeof(path), ref->name);
+	entries = dcAppCatalogEntries(&count);
+	for (i = 0; i < count; i++)
+		if (!strsCaselesslyCompareUtf(path, entries[i].path, 0xffffffff))
+			return &entries[i];
+	return NULL;
+}
+
+static bool uiPrvBrowserDcAppIsRuntimeEngine(enum DcAppId appId)
+{
+	return appId == DcAppIdGameGb || appId == DcAppIdGameNes || appId == DcAppIdGameArduboy;
+}
+
+static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *entry)
+{
+	switch (entry->appId) {
+	case DcAppIdToolIr:
+		return UiToolIr;
+	case DcAppIdToolImage:
+		return UiToolImage;
+	case DcAppIdToolMusic:
+		return UiToolMusic;
+	case DcAppIdToolBadUsb:
+		return UiToolBadUsb;
+	case DcAppIdToolAutoclicker:
+		return UiToolAutoclicker;
+	case DcAppIdToolGamepad:
+		return UiToolGamepad;
+	case DcAppIdStarfield:
+	case DcAppIdSpiro:
+	case DcAppIdCube:
+		return UiToolMedia;
+	default:
+		return entry->launcherVisible ? UiToolGames : UiToolBrowser;
+	}
 }
 
 static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppToolAction action,
@@ -9013,16 +9270,6 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrButton, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
-	case UiBrowserOpenIrPowerSpam:
-		uiPrvSetHeaderTitle("Power");
-		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrPower, vol, &ref->locator, ref->name, ref->parentPath);
-		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
-
-	case UiBrowserOpenIrMuteSpam:
-		uiPrvSetHeaderTitle("Mute");
-		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrMute, vol, &ref->locator, ref->name, ref->parentPath);
-		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
-
 	case UiBrowserOpenBadUsb:
 		uiPrvSetHeaderTitle("BadUSB");
 		(void)uiPrvRunSdApp(cnv, DcAppIdToolBadUsb, DcAppToolActionBadUsbFile, vol, &ref->locator, ref->name, ref->parentPath);
@@ -9030,6 +9277,8 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 
 	case UiBrowserOpenMusic:
 		uiPrvSetHeaderTitle("Music");
+		if (!uiPrvMusicBatteryOkToLaunch(cnv))
+			return UiToolBrowser;
 		(void)uiPrvRunSdApp(cnv, DcAppIdToolMusic, DcAppToolActionMusicFile, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolMusic);
 
@@ -9043,6 +9292,27 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 	case UiBrowserOpenImage:
 		(void)uiPrvRunSdApp(cnv, DcAppIdToolImage, DcAppToolActionImageFile, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolImage);
+
+	case UiBrowserOpenDcApp:
+	{
+		const struct DcAppCatalogEntry *entry = uiPrvBrowserFindDcApp(ref);
+		enum UiToolId launchedTool;
+
+		if (!entry) {
+			uiAlert(cnv, "That .DC32 app is not registered.", DialogTypeOk);
+			return UiToolBrowser;
+		}
+		if (uiPrvBrowserDcAppIsRuntimeEngine(entry->appId)) {
+			uiAlert(cnv, "Open Emulation from Games to run ROMs.", DialogTypeOk);
+			return UiToolBrowser;
+		}
+		if (entry->appId == DcAppIdToolMusic && !uiPrvMusicBatteryOkToLaunch(cnv))
+			return UiToolBrowser;
+		launchedTool = uiPrvBrowserToolForDcApp(entry);
+		uiPrvSetHeaderTitle(entry->name);
+		(void)uiPrvRunSdApp(cnv, entry->appId, DcAppToolActionMain, vol, NULL, NULL, NULL);
+		return uiPrvBrowserLaunchedToolReturn(launchedTool);
+	}
 
 	case UiBrowserOpenNone:
 		uiAlert(cnv, "No tool is registered for that file type", DialogTypeOk);
@@ -9184,12 +9454,16 @@ int uiDcAppRunMusic(const struct DcAppHostApi *host, const struct DcAppRunArgs *
 	if (!args || !args->canvas)
 		return -1;
 	if (args->toolAction == DcAppToolActionMain) {
+		if (!uiPrvMusicBatteryOkToLaunch(args->canvas))
+			return 0;
 		uiPrvMusicPlayer(args->canvas);
 		return 0;
 	}
 	if (args->toolAction == DcAppToolActionMusicFile && args->vol && args->locator && args->name) {
 		struct Settings settings;
 
+		if (!uiPrvMusicBatteryOkToLaunch(args->canvas))
+			return 0;
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
 		(void)uiPrvPlayMusicLocator(args->canvas, args->vol, args->locator, args->name, &settings, NULL);
@@ -9362,7 +9636,7 @@ static enum UiGameAction uiPrvRunLoadedGame(struct Canvas *cnv, UiRunGameF runGa
 
 	#ifndef NO_SD_CARD
 		if (!mDeferredGameSelect && mLastGameMenuAction == UiGameActionSwitchTool) {
-			uiPrvExportCurrentSavestate(cnv, false);
+			uiPrvExportCurrentSavestateWithOptions(cnv, false, true);
 			uiPrvCartRamOwnerClear("switching away from game");
 		}
 
@@ -9465,8 +9739,6 @@ enum UiGameAction uiGameMenu(void)
 	const char *labels[5];
 	char name[ROM_NAME_LEN + 1];
 	char title[UI_GAME_TITLE_BUF_SZ];
-	struct GameSelection selection;
-	bool hasSaveRam = uiGetGameSelection(&selection) && selection.saveRamSize > 0;
 	bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
@@ -9483,7 +9755,7 @@ enum UiGameAction uiGameMenu(void)
 #ifndef NO_SD_CARD
 	labels[numOptions] = validRom ? "Select game" : "Load game";
 	optionIds[numOptions++] = GameMenuOptionSelect;
-	if (validRom && hasSaveRam) {
+	if (validRom) {
 		labels[numOptions] = "Save to SD";
 		optionIds[numOptions++] = GameMenuOptionSaveToSd;
 	}
@@ -9630,6 +9902,8 @@ static void uiPrvRunCategoryToolEntry(struct Canvas *cnv, enum UiToolId tool, Ui
 
 		case UiToolMusic:
 		#ifndef NO_SD_CARD
+			if (!uiPrvMusicBatteryOkToLaunch(cnv))
+				break;
 			uiPrvEnterTool(tool);
 			(void)uiPrvRunSdApp(cnv, DcAppIdToolMusic, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 			uiPrvExitTool(tool);

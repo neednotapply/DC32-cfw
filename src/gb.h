@@ -6,6 +6,7 @@
 
 void gbRun(bool presentAsCgb);	//will not return by itself, but can be aborted by gbAbort()
 void gbAbort(void);
+void gbSetDmgPalette(uint_fast8_t palette);
 
 
 #define LOG(...)		//pr(__VA_ARGS)

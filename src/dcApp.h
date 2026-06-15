@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define DCAPP_MAGIC             0x50414344u
-#define DCAPP_ABI_VERSION       2u
+#define DCAPP_ABI_VERSION       4u
 #define DCAPP_HEADER_SIZE       256u
 #define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
 #define DCAPP_CONTRACT_MAGIC    0x43444332u
@@ -89,6 +89,7 @@ struct DcAppRunArgs {
 	bool presentAsCgb;
 	bool upscale;
 	bool rotate;
+	uint8_t gbPalette;
 	uint32_t toolAction;
 	struct Canvas *canvas;
 	struct FatfsVol *vol;
@@ -110,6 +111,7 @@ struct DcAppHostApi {
 	bool (*flushSave)(bool force);
 	bool (*flashWrite)(uint32_t addr, uint32_t eraseSize, const void *src, uint32_t writeSize);
 	void (*abortActive)(void);
+	void (*ledsTick)(void);
 };
 
 typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);

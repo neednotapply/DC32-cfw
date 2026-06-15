@@ -26,6 +26,7 @@ int dcAppEntry(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
 	if (saveRamSize > args->saveRamSize)
 		return -1;
 	gbSetFrameDithering(1);
+	gbSetDmgPalette(args->gbPalette);
 	gbRun(args->presentAsCgb);
 	return 0;
 }

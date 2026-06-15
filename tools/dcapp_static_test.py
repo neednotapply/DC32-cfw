@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER_FMT = "<IHH" + "I" * 14 + "32sI" + "I" * 39
 HEADER_SIZE = 256
 MAGIC = 0x50414344
-ABI = 2
+ABI = 4
 LOAD_ADDR = 0x10080000
 DCAPP_IMAGE_FLAG_LARGE_XIP = 0x00000001
 DCAPP_CONTRACT_MAGIC = 0x43444332
@@ -261,6 +261,7 @@ def check_doom_whx() -> None:
 
 def check_loader_source() -> None:
     text = (ROOT / "src" / "dcApp.c").read_text(encoding="utf-8")
+    dcapp_h = (ROOT / "src" / "dcApp.h").read_text(encoding="utf-8")
     qspi_h = (ROOT / "src" / "qspi.h").read_text(encoding="utf-8")
     qspi_c = (ROOT / "src" / "qspi2350.c").read_text(encoding="utf-8")
     workspace = (ROOT / "src" / "toolWorkspace.c").read_text(encoding="utf-8")
@@ -280,6 +281,7 @@ def check_loader_source() -> None:
 
     expect("loader checks magic/header", "hdr->magic != DCAPP_MAGIC" in text and "hdr->headerSize != DCAPP_HEADER_SIZE" in text)
     expect("loader checks ABI version", "hdr->abiVersion != DCAPP_ABI_VERSION" in text)
+    expect("loader exposes LED tick host callback", ".ledsTick = badgeLedsTick" in text and "void (*ledsTick)(void)" in dcapp_h)
     expect("loader checks DCAPP build contract", "dcAppPrvHeaderHasCurrentBuildContract" in text and "DCAPP_CONTRACT_MAGIC" in text)
     expect("loader reports stale SD apps clearly", "does not match this firmware" in text and "Update /APPS" in text)
     expect("loader checks image overflow", "hdr->imageSize > imageLimit" in text)
@@ -317,7 +319,6 @@ def check_loader_source() -> None:
         output = filename.removesuffix(".DC32")
         expect(f"{filename} has CMake dcapp target", f" {output} {runtime}" in cmake)
         expect(f"{filename} is in SD apps package", f'"{filename}"' in cmake or f'"{filename}"' in sd_zip)
-    dcapp_h = (ROOT / "src" / "dcApp.h").read_text(encoding="utf-8")
     ui_c = (ROOT / "src" / "ui.c").read_text(encoding="utf-8")
     for symbol, app_id in RESERVED_PERIOD_IDS.items():
         expect(f"{symbol} is assigned", f"{symbol} = {app_id}" in dcapp_h)

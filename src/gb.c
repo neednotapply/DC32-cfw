@@ -11,6 +11,7 @@
 #include "printf.h"
 #include "gbCore.h"
 #include "gb.h"
+#include "settings.h"
 
 #pragma GCC optimize ("Ofast")
 
@@ -22,12 +23,103 @@ CachedDmgPal dmgFgPals[2];
 
 
 static uint32_t divOfst;
+static uint8_t mDmgPalette = GameBoyPaletteGray;
 
 extern bool doubleSpeed;
+
+enum GbDmgPalettePlane {
+	GbDmgPaletteBg,
+	GbDmgPaletteObj0,
+	GbDmgPaletteObj1,
+	GbDmgPaletteNumPlanes,
+};
+
+static const uint16_t mGbDmgPaletteColors[GameBoyPaletteNumPalettes][GbDmgPaletteNumPlanes][4] = {
+	[GameBoyPaletteGray] = {
+		{0xFFDF, 0xAD55, 0x528A, 0x0000},
+		{0xFFDF, 0xAD55, 0x528A, 0x0000},
+		{0xFFDF, 0xAD55, 0x528A, 0x0000},
+	},
+	[GameBoyPaletteBrown] = { // $12, Up
+		{0xFFFF, 0xFD6C, 0x8180, 0x0000},
+		{0x0000, 0xFD6C, 0x8180, 0x0000},
+		{0x0000, 0xFD6C, 0x8180, 0x0000},
+	},
+	[GameBoyPaletteRed] = { // $B0, Up + A
+		{0xFFFF, 0xFC30, 0x91C7, 0x0000},
+		{0x0000, 0x7FE6, 0x0400, 0x0000},
+		{0x0000, 0x6533, 0x001F, 0x0000},
+	},
+	[GameBoyPaletteDarkBrown] = { // $79, Up + B
+		{0xFF38, 0xCCF0, 0x8345, 0x5981},
+		{0x0000, 0xFD6C, 0x8180, 0x0000},
+		{0x0000, 0xFD6C, 0x8180, 0x0000},
+	},
+	[GameBoyPaletteBlue] = { // $88, Left
+		{0xFFFF, 0x6533, 0x001F, 0x0000},
+		{0x0000, 0xFC30, 0x8180, 0x0000},
+		{0x0000, 0x7FE6, 0x0400, 0x0000},
+	},
+	[GameBoyPaletteDarkBlue] = { // $AD, Left + A
+		{0xFFFF, 0x8C7B, 0x5291, 0x0000},
+		{0x0000, 0xFC30, 0x91C7, 0x0000},
+		{0x0000, 0xFD6C, 0x8180, 0x0000},
+	},
+	[GameBoyPalettePaleYellow] = { // $17, Down
+		{0xFFF4, 0xFCB2, 0x94BF, 0x0000},
+		{0x0000, 0xFCB2, 0x94BF, 0x0000},
+		{0x0000, 0xFCB2, 0x94BF, 0x0000},
+	},
+	[GameBoyPaletteOrange] = { // $07, Down + A
+		{0xFFFF, 0xFFE0, 0xF800, 0x0000},
+		{0x0000, 0xFFE0, 0xF800, 0x0000},
+		{0x0000, 0xFFE0, 0xF800, 0x0000},
+	},
+	[GameBoyPaletteYellow] = { // $BA, Down + B
+		{0xFFFF, 0xFFE0, 0x7A40, 0x0000},
+		{0x0000, 0x6533, 0x001F, 0x0000},
+		{0x0000, 0x7FE6, 0x0400, 0x0000},
+	},
+	[GameBoyPaletteGreen] = { // $05, Right
+		{0xFFFF, 0x57E0, 0xFA00, 0x0000},
+		{0x0000, 0x57E0, 0xFA00, 0x0000},
+		{0x0000, 0x57E0, 0xFA00, 0x0000},
+	},
+	[GameBoyPaletteDarkGreen] = { // $7C, Right + A
+		{0xFFFF, 0x7FE6, 0x0318, 0x0000},
+		{0x0000, 0xFC30, 0x91C7, 0x0000},
+		{0x0000, 0xFC30, 0x91C7, 0x0000},
+	},
+	[GameBoyPaletteReverse] = { // $13, Right + B
+		{0x0000, 0x0430, 0xFEE0, 0xFFFF},
+		{0xFFDF, 0x0430, 0xFEE0, 0xFFFF},
+		{0xFFFF, 0x0430, 0xFEE0, 0xFFFF},
+	},
+	[GameBoyPaletteOriginalGb] = {
+		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
+		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
+		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
+	},
+	[GameBoyPalettePocket] = {
+		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
+		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
+		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
+	},
+	[GameBoyPaletteLight] = {
+		{0x05B0, 0x04CE, 0x0349, 0x0267},
+		{0x05B0, 0x04CE, 0x0349, 0x0267},
+		{0x05B0, 0x04CE, 0x0349, 0x0267},
+	},
+};
 
 void gbIoInit(void)
 {
 	divOfst = 0;
+}
+
+void gbSetDmgPalette(uint_fast8_t palette)
+{
+	mDmgPalette = palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteGray;
 }
 
 uint8_t gbIoRead(uint16_t addr)
@@ -151,14 +243,15 @@ static void gbPrvRecalcCgbPal(CachedCgbPal dstPal, const uint8_t *srcPal, uint_f
 	dstPal[0][idx] = ourCol;	//a sleight of hand
 }
 
-static void gbPrvRecalcDmgPal(CachedDmgPal dst, uint_fast8_t regVal, uint_fast16_t flagFor0thElement)
+static void gbPrvRecalcDmgPal(CachedDmgPal dst, uint_fast8_t regVal, uint_fast16_t flagFor0thElement,
+	uint_fast8_t plane)
 {
-	static const uint16_t grayToColor[] = {0xFFDF, 0xAD55, 0x528A, 0x0000};
+	const uint16_t *colors = mGbDmgPaletteColors[mDmgPalette][plane];
 	
-	dst[0] = grayToColor[(regVal >> 0) & 3] | flagFor0thElement;
-	dst[1] = grayToColor[(regVal >> 2) & 3];
-	dst[2] = grayToColor[(regVal >> 4) & 3];
-	dst[3] = grayToColor[(regVal >> 6) & 3];
+	dst[0] = colors[(regVal >> 0) & 3] | flagFor0thElement;
+	dst[1] = colors[(regVal >> 2) & 3];
+	dst[2] = colors[(regVal >> 4) & 3];
+	dst[3] = colors[(regVal >> 6) & 3];
 }
 
 bool gbIoWrite(uint16_t addr, uint8_t val)
@@ -183,15 +276,15 @@ bool gbIoWrite(uint16_t addr, uint8_t val)
 	switch(addr){
 		
 		case 0x47:	//BG color clut
-			gbPrvRecalcDmgPal(dmgBgPal, val, BG_FLAG_UNDER_OBJS);
+			gbPrvRecalcDmgPal(dmgBgPal, val, BG_FLAG_UNDER_OBJS, GbDmgPaletteBg);
 			goto write_complete;
 		
 		case 0x48:	//OBJ[0] color clut
-			gbPrvRecalcDmgPal(dmgFgPals[0], val, 0);
+			gbPrvRecalcDmgPal(dmgFgPals[0], val, 0, GbDmgPaletteObj0);
 			goto write_complete;
 		
 		case 0x49:	//OBJ[1] color clut
-			gbPrvRecalcDmgPal(dmgFgPals[1], val, 0);
+			gbPrvRecalcDmgPal(dmgFgPals[1], val, 0, GbDmgPaletteObj1);
 			goto write_complete;
 		
 		case 0x02:	//SERIAL control reg
@@ -540,4 +633,3 @@ void report(struct state* state, uint32_t a, uint32_t pc, uint32_t sp, uint32_t 
 	
 	while(1);
 }
-

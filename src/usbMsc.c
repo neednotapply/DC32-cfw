@@ -7,7 +7,7 @@
 #define USB_MSC_VID		0x1209
 #define USB_MSC_PID		0xdc33
 #define USB_MSC_NORMAL_SD_SPEED	500000
-#define USB_MSC_FAST_SD_SPEED	2000000
+#define USB_MSC_FAST_SD_SPEED	12500000
 
 static bool mStarted, mWritable, mEjected, mSpeedLimited;
 static uint32_t mBlockCount;

@@ -171,6 +171,8 @@ bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)
 	if (!ctx)
 		return false;
 	dispPrvFrameCtrWait();
+	if (ctx->host && ctx->host->ledsTick)
+		ctx->host->ledsTick();
 	dispPrvWaitForScanoutStart();
 	dcAppDrawPresent(ctx);
 	ctx->keys = ctx->host && ctx->host->uiKeysRaw ? ctx->host->uiKeysRaw() : uiGetUiKeysRaw();

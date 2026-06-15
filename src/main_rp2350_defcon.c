@@ -806,6 +806,15 @@ static bool __attribute__((noinline)) shouldActAsCgb(void)
         return settings.actLikeGBC;
 }
 
+static uint8_t __attribute__((noinline)) desiredGbPalette(void)
+{
+        struct Settings settings;
+
+        settingsGet(&settings);
+
+        return settings.gbPalette;
+}
+
 static bool __attribute__((noinline)) shouldUpscale(void)
 {
         struct Settings settings;
@@ -859,6 +868,7 @@ static void runSelectedGameTool(void *userData)
                                 .saveRam = CART_RAM_ADDR_IN_RAM,
                                 .saveRamSize = selection.saveRamSize,
                                 .presentAsCgb = shouldActAsCgb(),
+                                .gbPalette = desiredGbPalette(),
                                 .upscale = false,
                                 .rotate = false,
                         };

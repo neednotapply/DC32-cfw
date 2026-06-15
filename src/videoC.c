@@ -79,6 +79,7 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 			
 			uint_fast16_t tiles = ((hram[0x40] & 0x10) ? 0x8000 : 0x8800) - VRAM_BASE;
 			uint_fast8_t er, ec, tIdx, nTiles, tileBasedCol, winStartX;
+			uint_fast8_t bgUnderObjsMask = (presentsAsCgb && !(hram[0x40] & 1)) ? BG_FLAG_UNDER_OBJS : 0;
 			uint_fast8_t addend = (hram[0x40] & 0x10) ? 0x00: 0x80;
 			uint_fast16_t map, mapRow;
 			uint8_t *bgToOamPrioDst;
@@ -120,7 +121,7 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 					uint_fast8_t idx = ((uint16_t)((tileData & 0x8080) * 0x81)) >> 14;
 					
 					*dst++ = pal[idx];
-					*bgToOamPrioDst++ = tileProp;	//we care for top bit only
+					*bgToOamPrioDst++ = (tileProp & 0x80) | bgUnderObjsMask | (idx ? 0 : BG_FLAG_UNDER_OBJS);
 				}
 			}
 	
@@ -159,7 +160,7 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 						uint_fast8_t idx = ((uint16_t)((tileData & 0x8080) * 0x81)) >> 14;
 						
 						*dst++ = pal[idx];
-						*bgToOamPrioDst++ |= tileProp;			//we care for top bit only
+						*bgToOamPrioDst++ = (tileProp & 0x80) | bgUnderObjsMask | (idx ? 0 : BG_FLAG_UNDER_OBJS);
 					}
 				}
 			}
@@ -168,8 +169,8 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 			
 			//background/window are off - erase the screen and mark as background color, it also has no attributes
 			for (i = 0; i < 160; i++) {
-				scr[i] = 0xffff | BG_FLAG_UNDER_OBJS;	//white and under objects
-				bgToOamPrio[i] = 0;
+				scr[i] = 0xffff;
+				bgToOamPrio[i] = BG_FLAG_UNDER_OBJS;
 			}
 		}
 	
@@ -291,17 +292,13 @@ void __attribute__((noinline)) gbDrawDisp(uint8_t *restrict hram, uint8_t lineNu
 					*/
 					if (idx) {
 						
-						if ((dst[i] & BG_FLAG_UNDER_OBJS) || !((sA | bgToOamPrioPtr[i]) >> 7))
+						if ((bgToOamPrioPtr[i] & BG_FLAG_UNDER_OBJS) || !((sA | bgToOamPrioPtr[i]) >> 7))
 							dst[i] = pal[idx];
 					}
 				}
 			}
 		}
 	
-		//clear marker bit (though we could keep it, it is just an lsb)
-	//	for (i = 0; i < 160; i++)
-	//		scr[i] &=~ BG_FLAG_UNDER_OBJS;
-		
 		gbDrawLine(lineNum, scr);
 	}
 }

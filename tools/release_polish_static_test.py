@@ -37,8 +37,10 @@ def function_body(text: str, name: str) -> str:
 def main() -> int:
     ui = read("src/ui.c")
     gb = read("src/gb.c")
+    gbc = read("src/gbC.c")
     gb_h = read("src/gb.h")
     gb_app = read("src/apps/gb_app.c")
+    video_c = read("src/videoC.c")
     dcapp_h = read("src/dcApp.h")
     dcapp_c = read("src/dcApp.c")
     dcapp_draw = read("src/dcAppDraw.c")
@@ -67,6 +69,7 @@ def main() -> int:
     game_settings = function_body(ui, "uiPrvGameSettings")
     dmg_palette = function_body(gb, "gbPrvRecalcDmgPal")
     set_dmg_palette = function_body(gb, "gbSetDmgPalette")
+    gb_run = function_body(gbc, "gbRun")
 
     expect(".ir Open With only offers Universal IR", '"Universal IR"' in open_with and '"Power"' not in open_with and '"Mute"' not in open_with)
     expect(".DC32 is registered in File Browser", 'uiPrvStrEndsWithNoCase(ref->name, ".DC32")' in open_with and "UiBrowserOpenDcApp" in launch_file)
@@ -97,13 +100,39 @@ def main() -> int:
     expect("DCAPP draw frames tick LEDs", "ctx->host->ledsTick" in dcapp_draw and "dcAppDrawPresent(ctx);" in dcapp_draw)
 
     expect("Game Boy palette setting is persisted", "GameBoyPaletteNumPalettes" in settings_h and "uint8_t gbPalette;" in settings_h and "#define SETTINGS_CUR_VER\t\t\t16" in settings_c)
-    expect("Game Boy palette defaults and normalizes", "settings->gbPalette = GameBoyPaletteGray" in settings_c and "settings->gbPalette >= GameBoyPaletteNumPalettes" in settings_c)
-    expect("Game Settings exposes palette selector", '"PALETTE:"' in game_settings and "paletteNames[GameBoyPaletteNumPalettes]" in game_settings and "settings->gbPalette" in game_settings)
-    expect("Game Settings includes original Game Boy palettes", "GameBoyPaletteOriginalGb" in settings_h and "GameBoyPalettePocket" in settings_h and "GameBoyPaletteLight" in settings_h and '"OrigGB"' in game_settings and '"Pocket"' in game_settings and '"Light"' in game_settings)
+    palette_ids = [
+        "GameBoyPaletteBw",
+        "GameBoyPaletteDmg",
+        "GameBoyPaletteGbpocket",
+        "GameBoyPaletteBgb",
+        "GameBoyPaletteGbli",
+        "GameBoyPaletteGrafixkidgray",
+        "GameBoyPaletteGrafixkidgreen",
+        "GameBoyPaletteBlackzero",
+        "GameBoyPaletteGbcjp",
+        "GameBoyPaletteGbcu",
+        "GameBoyPaletteGbcua",
+        "GameBoyPaletteGbcub",
+        "GameBoyPaletteGbcl",
+        "GameBoyPaletteGbcla",
+        "GameBoyPaletteGbclb",
+        "GameBoyPaletteGbcd",
+        "GameBoyPaletteGbcda",
+        "GameBoyPaletteGbcdb",
+        "GameBoyPaletteGbcr",
+        "GameBoyPaletteGbceuus",
+        "GameBoyPaletteGbcrb",
+    ]
+    expect("Game Boy palette defaults and normalizes", "settings->gbPalette = GameBoyPaletteBw" in settings_c and "settings->gbPalette >= GameBoyPaletteNumPalettes" in settings_c)
+    expect("Game Settings exposes palette selector", '"PAL:"' in game_settings and "paletteNames[GameBoyPaletteNumPalettes]" in game_settings and "settings->gbPalette" in game_settings)
+    expect("Game Settings includes gb-palettes bw through gbcrb", all(pid in settings_h and f"[{pid}]" in gb and f"[{pid}]" in game_settings for pid in palette_ids))
+    expect("Game Settings uses full palette names", '"Original Game Boy"' in game_settings and '"Game Boy Color Splash Right+B"' in game_settings and '"DkGrn"' not in game_settings and '"OrigGB"' not in game_settings)
     expect("GB launch passes selected palette", ".gbPalette = desiredGbPalette()" in main_c and "gbSetDmgPalette(args->gbPalette)" in gb_app and "void gbSetDmgPalette(uint_fast8_t palette);" in gb_h)
+    expect("DMG-only GB games stay on DMG palette path", "presentAsCgb && (gbExtRead(0x143) & 0x80)" in gb_run)
     expect("DMG palette hook uses selectable BG and OBJ planes", "mGbDmgPaletteColors[GameBoyPaletteNumPalettes][GbDmgPaletteNumPlanes][4]" in gb and "GbDmgPaletteBg" in gb and "GbDmgPaletteObj0" in gb and "GbDmgPaletteObj1" in gb and "colors[(regVal >> 0) & 3]" in dmg_palette)
-    expect("DMG palette table includes original Game Boy colorways", "[GameBoyPaletteOriginalGb]" in gb and "0x7C02" in gb and "[GameBoyPalettePocket]" in gb and "0xC654" in gb and "[GameBoyPaletteLight]" in gb and "0x05B0" in gb)
-    expect("DMG palette selection is sanitized", "palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteGray" in set_dmg_palette)
+    expect("DMG palette table includes source colorways in RGXB5515", "0x9DC1" in gb and "0xC654" in gb and "0x1ED9" in gb and "0x0410" in gb)
+    expect("DMG palette selection is sanitized", "palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteBw" in set_dmg_palette)
+    expect("GB sprite priority uses side buffer marker", "bgToOamPrioPtr[i] & BG_FLAG_UNDER_OBJS" in video_c and "dst[i] & BG_FLAG_UNDER_OBJS" not in video_c)
 
     expect("GB-only menu label ignores act-like-GBC setting", "RomNoColor" in console_name and "RomColorRequired" in console_name and "return \"GB\";" in console_name)
     expect("GB Save to SD is visible for any valid ROM", "uiPrvHaveValidRom(name, NULL, NULL)" in game_menu and "if (validRom) {\n\t\tlabels[numOptions] = \"Save to SD\";" in game_menu)

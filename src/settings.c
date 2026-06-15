@@ -96,7 +96,7 @@ static void settingsPrvNormalize(struct Settings *settings)
 	if (settings->autoclickerCps < SETTINGS_AUTOCLICKER_MIN_CPS || settings->autoclickerCps > SETTINGS_AUTOCLICKER_MAX_CPS)
 		settings->autoclickerCps = 5;
 	if (settings->gbPalette >= GameBoyPaletteNumPalettes)
-		settings->gbPalette = GameBoyPaletteGray;
+		settings->gbPalette = GameBoyPaletteBw;
 }
 
 void settingsGet(struct Settings *settings)
@@ -202,7 +202,7 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 15:			//add Game Boy palette selection
-			settings->gbPalette = GameBoyPaletteGray;
+			settings->gbPalette = GameBoyPaletteBw;
 			//fallthrough
 
 		//other cases here, in increasing order

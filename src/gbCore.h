@@ -6,7 +6,7 @@
 #define HRAM_INDEX_OB_PAL	322	//and the 64 bytes after it too
 #define HRAM_SIZE			386
 
-#define BG_FLAG_UNDER_OBJS	0x20	//lower bit of green in rgb565
+#define BG_FLAG_UNDER_OBJS	0x20	//background/window color 0 marker in the BG-to-OBJ priority buffer
 
 #if __thumb__
 

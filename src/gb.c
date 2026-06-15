@@ -23,7 +23,7 @@ CachedDmgPal dmgFgPals[2];
 
 
 static uint32_t divOfst;
-static uint8_t mDmgPalette = GameBoyPaletteGray;
+static uint8_t mDmgPalette = GameBoyPaletteBw;
 
 extern bool doubleSpeed;
 
@@ -34,83 +34,33 @@ enum GbDmgPalettePlane {
 	GbDmgPaletteNumPlanes,
 };
 
+#define GB_DMG_UNIFORM(c0, c1, c2, c3) {{c0, c1, c2, c3}, {c0, c1, c2, c3}, {c0, c1, c2, c3}}
+
 static const uint16_t mGbDmgPaletteColors[GameBoyPaletteNumPalettes][GbDmgPaletteNumPlanes][4] = {
-	[GameBoyPaletteGray] = {
-		{0xFFDF, 0xAD55, 0x528A, 0x0000},
-		{0xFFDF, 0xAD55, 0x528A, 0x0000},
-		{0xFFDF, 0xAD55, 0x528A, 0x0000},
-	},
-	[GameBoyPaletteBrown] = { // $12, Up
-		{0xFFFF, 0xFD6C, 0x8180, 0x0000},
-		{0x0000, 0xFD6C, 0x8180, 0x0000},
-		{0x0000, 0xFD6C, 0x8180, 0x0000},
-	},
-	[GameBoyPaletteRed] = { // $B0, Up + A
-		{0xFFFF, 0xFC30, 0x91C7, 0x0000},
-		{0x0000, 0x7FE6, 0x0400, 0x0000},
-		{0x0000, 0x6533, 0x001F, 0x0000},
-	},
-	[GameBoyPaletteDarkBrown] = { // $79, Up + B
-		{0xFF38, 0xCCF0, 0x8345, 0x5981},
-		{0x0000, 0xFD6C, 0x8180, 0x0000},
-		{0x0000, 0xFD6C, 0x8180, 0x0000},
-	},
-	[GameBoyPaletteBlue] = { // $88, Left
-		{0xFFFF, 0x6533, 0x001F, 0x0000},
-		{0x0000, 0xFC30, 0x8180, 0x0000},
-		{0x0000, 0x7FE6, 0x0400, 0x0000},
-	},
-	[GameBoyPaletteDarkBlue] = { // $AD, Left + A
-		{0xFFFF, 0x8C7B, 0x5291, 0x0000},
-		{0x0000, 0xFC30, 0x91C7, 0x0000},
-		{0x0000, 0xFD6C, 0x8180, 0x0000},
-	},
-	[GameBoyPalettePaleYellow] = { // $17, Down
-		{0xFFF4, 0xFCB2, 0x94BF, 0x0000},
-		{0x0000, 0xFCB2, 0x94BF, 0x0000},
-		{0x0000, 0xFCB2, 0x94BF, 0x0000},
-	},
-	[GameBoyPaletteOrange] = { // $07, Down + A
-		{0xFFFF, 0xFFE0, 0xF800, 0x0000},
-		{0x0000, 0xFFE0, 0xF800, 0x0000},
-		{0x0000, 0xFFE0, 0xF800, 0x0000},
-	},
-	[GameBoyPaletteYellow] = { // $BA, Down + B
-		{0xFFFF, 0xFFE0, 0x7A40, 0x0000},
-		{0x0000, 0x6533, 0x001F, 0x0000},
-		{0x0000, 0x7FE6, 0x0400, 0x0000},
-	},
-	[GameBoyPaletteGreen] = { // $05, Right
-		{0xFFFF, 0x57E0, 0xFA00, 0x0000},
-		{0x0000, 0x57E0, 0xFA00, 0x0000},
-		{0x0000, 0x57E0, 0xFA00, 0x0000},
-	},
-	[GameBoyPaletteDarkGreen] = { // $7C, Right + A
-		{0xFFFF, 0x7FE6, 0x0318, 0x0000},
-		{0x0000, 0xFC30, 0x91C7, 0x0000},
-		{0x0000, 0xFC30, 0x91C7, 0x0000},
-	},
-	[GameBoyPaletteReverse] = { // $13, Right + B
-		{0x0000, 0x0430, 0xFEE0, 0xFFFF},
-		{0xFFDF, 0x0430, 0xFEE0, 0xFFFF},
-		{0xFFFF, 0x0430, 0xFEE0, 0xFFFF},
-	},
-	[GameBoyPaletteOriginalGb] = {
-		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
-		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
-		{0x7C02, 0x5BC8, 0x3AC9, 0x2A07},
-	},
-	[GameBoyPalettePocket] = {
-		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
-		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
-		{0xC654, 0x8C8D, 0x4A87, 0x18C3},
-	},
-	[GameBoyPaletteLight] = {
-		{0x05B0, 0x04CE, 0x0349, 0x0267},
-		{0x05B0, 0x04CE, 0x0349, 0x0267},
-		{0x05B0, 0x04CE, 0x0349, 0x0267},
-	},
+	[GameBoyPaletteBw] = GB_DMG_UNIFORM(0xFFDF, 0xAD55, 0x528A, 0x0000), // bw: Black & White
+	[GameBoyPaletteDmg] = GB_DMG_UNIFORM(0x9DC1, 0x7502, 0x3306, 0x09C1), // dmg: Original Game Boy
+	[GameBoyPaletteGbpocket] = GB_DMG_UNIFORM(0xC654, 0x8C8D, 0x4A87, 0x18C3), // gbpocket: Game Boy Pocket
+	[GameBoyPaletteBgb] = GB_DMG_UNIFORM(0xE7DA, 0x8E0E, 0x334A, 0x08C4), // bgb: BGB Emulator
+	[GameBoyPaletteGbli] = GB_DMG_UNIFORM(0x1ED9, 0x1E16, 0x1512, 0x0BCD), // gbli: Game Boy Light
+	[GameBoyPaletteGrafixkidgray] = GB_DMG_UNIFORM(0xE6D9, 0xACD2, 0x734C, 0x2944), // grafixkidgray: Grafixkid Gray
+	[GameBoyPaletteGrafixkidgreen] = GB_DMG_UNIFORM(0xDF96, 0xAE12, 0x7C8F, 0x4B0B), // grafixkidgreen: Grafixkid Green
+	[GameBoyPaletteBlackzero] = GB_DMG_UNIFORM(0x7C02, 0x53C8, 0x3AC9, 0x2A07), // blackzero: Game Boy (Black Zero) palette
+	[GameBoyPaletteGbcjp] = GB_DMG_UNIFORM(0xFFDF, 0xFE40, 0x9B00, 0x0000), // gbcjp: PocketCamera, JP
+	[GameBoyPaletteGbcu] = GB_DMG_UNIFORM(0xFFDF, 0xFD4C, 0x8180, 0x0000), // gbcu: Game Boy Color Splash Up
+	[GameBoyPaletteGbcua] = GB_DMG_UNIFORM(0xFFDF, 0xFC10, 0x91C7, 0x0000), // gbcua: Game Boy Color Splash Up+A
+	[GameBoyPaletteGbcub] = GB_DMG_UNIFORM(0xFF18, 0xCCD0, 0x8345, 0x5981), // gbcub: Game Boy Color Splash Up+B
+	[GameBoyPaletteGbcl] = GB_DMG_UNIFORM(0xFFDF, 0x651F, 0x001F, 0x0000), // gbcl: Game Boy Color Splash Left
+	[GameBoyPaletteGbcla] = GB_DMG_UNIFORM(0xFFDF, 0x8C5B, 0x5291, 0x0000), // gbcla: Game Boy Color Splash Left+A
+	[GameBoyPaletteGbclb] = GB_DMG_UNIFORM(0xFFDF, 0xA514, 0x528A, 0x0000), // gbclb: Game Boy Color Splash Left+B
+	[GameBoyPaletteGbcd] = GB_DMG_UNIFORM(0xFFD4, 0xFC92, 0x949F, 0x0000), // gbcd: Game Boy Color Splash Down
+	[GameBoyPaletteGbcda] = GB_DMG_UNIFORM(0xFFDF, 0xFFC0, 0xF800, 0x0000), // gbcda: Game Boy Color Splash Down+A
+	[GameBoyPaletteGbcdb] = GB_DMG_UNIFORM(0xFFDF, 0xFFC0, 0x7A40, 0x0000), // gbcdb: Game Boy Color Splash Down+B
+	[GameBoyPaletteGbcr] = GB_DMG_UNIFORM(0xFFDF, 0x57C0, 0xFA00, 0x0000), // gbcr: Game Boy Color Splash Right
+	[GameBoyPaletteGbceuus] = GB_DMG_UNIFORM(0xFFDF, 0x7FC6, 0x0318, 0x0000), // gbceuus: Game Boy Color Splash Right+A (Game Boy Camera, EU/US)
+	[GameBoyPaletteGbcrb] = GB_DMG_UNIFORM(0x0000, 0x0410, 0xFEC0, 0xFFDF), // gbcrb: Game Boy Color Splash Right+B
 };
+
+#undef GB_DMG_UNIFORM
 
 void gbIoInit(void)
 {
@@ -119,7 +69,7 @@ void gbIoInit(void)
 
 void gbSetDmgPalette(uint_fast8_t palette)
 {
-	mDmgPalette = palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteGray;
+	mDmgPalette = palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteBw;
 }
 
 uint8_t gbIoRead(uint16_t addr)
@@ -229,26 +179,21 @@ uint8_t gbIoRead(uint16_t addr)
 
 
 
-static void gbPrvRecalcCgbPal(CachedCgbPal dstPal, const uint8_t *srcPal, uint_fast8_t writtenOffset, uint_fast16_t flagFor0thElement)
+static void gbPrvRecalcCgbPal(CachedCgbPal dstPal, const uint8_t *srcPal, uint_fast8_t writtenOffset)
 {
 	uint_fast8_t idx = writtenOffset / 2;
 	uint_fast16_t gbcolor = ((const uint16_t*)srcPal)[idx];
 	uint16_t ourCol;
 	
 	ourCol = ((gbcolor & 0x001f) << 11) + ((gbcolor & 0x03e0) << 1) + ((gbcolor & 0x7c00) >> 10);
-	
-	if (!(idx % 4))
-		ourCol |= flagFor0thElement;
-	
 	dstPal[0][idx] = ourCol;	//a sleight of hand
 }
 
-static void gbPrvRecalcDmgPal(CachedDmgPal dst, uint_fast8_t regVal, uint_fast16_t flagFor0thElement,
-	uint_fast8_t plane)
+static void gbPrvRecalcDmgPal(CachedDmgPal dst, uint_fast8_t regVal, uint_fast8_t plane)
 {
 	const uint16_t *colors = mGbDmgPaletteColors[mDmgPalette][plane];
 	
-	dst[0] = colors[(regVal >> 0) & 3] | flagFor0thElement;
+	dst[0] = colors[(regVal >> 0) & 3];
 	dst[1] = colors[(regVal >> 2) & 3];
 	dst[2] = colors[(regVal >> 4) & 3];
 	dst[3] = colors[(regVal >> 6) & 3];
@@ -276,15 +221,15 @@ bool gbIoWrite(uint16_t addr, uint8_t val)
 	switch(addr){
 		
 		case 0x47:	//BG color clut
-			gbPrvRecalcDmgPal(dmgBgPal, val, BG_FLAG_UNDER_OBJS, GbDmgPaletteBg);
+			gbPrvRecalcDmgPal(dmgBgPal, val, GbDmgPaletteBg);
 			goto write_complete;
 		
 		case 0x48:	//OBJ[0] color clut
-			gbPrvRecalcDmgPal(dmgFgPals[0], val, 0, GbDmgPaletteObj0);
+			gbPrvRecalcDmgPal(dmgFgPals[0], val, GbDmgPaletteObj0);
 			goto write_complete;
 		
 		case 0x49:	//OBJ[1] color clut
-			gbPrvRecalcDmgPal(dmgFgPals[1], val, 0, GbDmgPaletteObj1);
+			gbPrvRecalcDmgPal(dmgFgPals[1], val, GbDmgPaletteObj1);
 			goto write_complete;
 		
 		case 0x02:	//SERIAL control reg
@@ -320,25 +265,6 @@ bool gbIoWrite(uint16_t addr, uint8_t val)
 				gbLcdCySetToCy();
 			}
 			
-			//adjust cgb cluts
-			if ((hram[0x40] ^ val) & 0x01) {
-				
-				uint_fast8_t i, j;
-				
-				if (val & 1) {
-					for (i = 0; i < 8; i++) {
-						for (j = 1; j < 4; j++)
-							cgbBgPals[i][j] &=~ BG_FLAG_UNDER_OBJS;
-					}
-				}
-				else {
-					
-					for (i = 0; i < 8; i++) {
-						for (j = 0; j < 4; j++)	//not a bug, [0] already has the bit, but this loop will triviall yunfold with the outer loop better this way
-							cgbBgPals[i][j] |= BG_FLAG_UNDER_OBJS;
-					}
-				}
-			}
 			goto write_complete;
 		
 		case 0x41:
@@ -406,7 +332,7 @@ bool gbIoWrite(uint16_t addr, uint8_t val)
 			t = hram[0x68];				//t = hramPtrIdx
 			i = t & 63;					//desired index
 			hram[HRAM_INDEX_BG_PAL + i] = val;
-			gbPrvRecalcCgbPal(cgbBgPals, hram + HRAM_INDEX_BG_PAL, i, BG_FLAG_UNDER_OBJS);
+			gbPrvRecalcCgbPal(cgbBgPals, hram + HRAM_INDEX_BG_PAL, i);
 			if (t & 0x80)
 				hram[0x68] = (t + 1) & 0xBF;
 			break;
@@ -415,7 +341,7 @@ bool gbIoWrite(uint16_t addr, uint8_t val)
 			t = hram[0x6A];				//t = hramPtrIdx
 			i = t & 63;					//desired index
 			hram[HRAM_INDEX_OB_PAL + i] = val;
-			gbPrvRecalcCgbPal(cgbFgPals, hram + HRAM_INDEX_OB_PAL, i, 0);
+			gbPrvRecalcCgbPal(cgbFgPals, hram + HRAM_INDEX_OB_PAL, i);
 			if (t & 0x80)
 				hram[0x6A] = (t + 1) & 0xBF;
 			break;

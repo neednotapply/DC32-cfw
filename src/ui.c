@@ -2424,29 +2424,35 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speedNames[][8] = DISP_SPEED_NAMES;
 		static const uint8_t speedSettings[] = DISP_SPEED_SETTINGS;
-		static const char paletteNames[GameBoyPaletteNumPalettes][7] = {
-			[GameBoyPaletteGray] = "Gray",
-			[GameBoyPaletteBrown] = "Brown",
-			[GameBoyPaletteRed] = "Red",
-			[GameBoyPaletteDarkBrown] = "DkBrn",
-			[GameBoyPaletteBlue] = "Blue",
-			[GameBoyPaletteDarkBlue] = "DkBlue",
-			[GameBoyPalettePaleYellow] = "PaleY",
-			[GameBoyPaletteOrange] = "Orange",
-			[GameBoyPaletteYellow] = "Yellow",
-			[GameBoyPaletteGreen] = "Green",
-			[GameBoyPaletteDarkGreen] = "DkGrn",
-			[GameBoyPaletteReverse] = "Rev",
-			[GameBoyPaletteOriginalGb] = "OrigGB",
-			[GameBoyPalettePocket] = "Pocket",
-			[GameBoyPaletteLight] = "Light",
+		static const char *const paletteNames[GameBoyPaletteNumPalettes] = {
+			[GameBoyPaletteBw] = "Black & White",
+			[GameBoyPaletteDmg] = "Original Game Boy",
+			[GameBoyPaletteGbpocket] = "Game Boy Pocket",
+			[GameBoyPaletteBgb] = "BGB Emulator",
+			[GameBoyPaletteGbli] = "Game Boy Light",
+			[GameBoyPaletteGrafixkidgray] = "Grafixkid Gray",
+			[GameBoyPaletteGrafixkidgreen] = "Grafixkid Green",
+			[GameBoyPaletteBlackzero] = "Game Boy (Black Zero) palette",
+			[GameBoyPaletteGbcjp] = "PocketCamera, JP",
+			[GameBoyPaletteGbcu] = "Game Boy Color Splash Up",
+			[GameBoyPaletteGbcua] = "Game Boy Color Splash Up+A",
+			[GameBoyPaletteGbcub] = "Game Boy Color Splash Up+B",
+			[GameBoyPaletteGbcl] = "Game Boy Color Splash Left",
+			[GameBoyPaletteGbcla] = "Game Boy Color Splash Left+A",
+			[GameBoyPaletteGbclb] = "Game Boy Color Splash Left+B",
+			[GameBoyPaletteGbcd] = "Game Boy Color Splash Down",
+			[GameBoyPaletteGbcda] = "Game Boy Color Splash Down+A",
+			[GameBoyPaletteGbcdb] = "Game Boy Color Splash Down+B",
+			[GameBoyPaletteGbcr] = "Game Boy Color Splash Right",
+			[GameBoyPaletteGbceuus] = "Game Boy Color Splash Right+A (Game Boy Camera, EU/US)",
+			[GameBoyPaletteGbcrb] = "Game Boy Color Splash Right+B",
 		};
 		uint_fast8_t numSpeeds = sizeof(speedSettings) / sizeof(*speedSettings);
 
 		if (settings->speed >= numSpeeds)
 			settings->speed = 1;
 		if (settings->gbPalette >= GameBoyPaletteNumPalettes)
-			settings->gbPalette = GameBoyPaletteGray;
+			settings->gbPalette = GameBoyPaletteBw;
 
 		uiPrvReset(cnv, false);
 
@@ -2462,9 +2468,9 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 
 		paletteOption = numOptions++;
 		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, paletteOption), 10, "PALETTE:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, paletteOption), 10, "PAL:", -1);
 		cnv->foreColor = 15;
-		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, paletteOption), 95, cnv->w - 95, paletteNames[settings->gbPalette]);
+		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, paletteOption), 45, cnv->w - 45, paletteNames[settings->gbPalette]);
 
 		upscaleOption = numOptions++;
 		cnv->foreColor = 11;

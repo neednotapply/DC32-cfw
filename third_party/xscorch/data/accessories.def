@@ -1,0 +1,257 @@
+; $Header: /fridge/cvs/xscorch/data/accessories.def,v 1.16 2004/01/16 02:35:35 jacob Exp $
+;
+; accessories.def
+; This is the default xscorch accessories definition file.
+;
+
+NoAccessory = accessories_class {
+   ; DO NOT REMOVE THIS ACCESSORY
+   accessoryName = "No Accessory";
+   description   = "A great big empty void of nothingness."
+   armsLevel     = 0;
+   price         = 0;
+   bundle        = 0;
+   shielding     = 0;
+   repulsion     = 0;
+   fuel          = 0;
+   useless       = true;
+   indirect      = false;
+   stateFlags    = "null";
+};
+
+BabyMagnetic = accessories_class {
+   accessoryName = "Baby Magnetic";
+   description   = "A small low-power magnetic shield.";
+   armsLevel     = 1;
+   price         = 10000;
+   bundle        = 3;
+   shielding     = 4000;
+   repulsion     = 50;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, magnetic";
+};
+
+Magnetic = accessories_class {
+   accessoryName = "Magnetic";
+   description   = "A medium sized magnetic shield.";
+   armsLevel     = 2;
+   price         = 15000;
+   bundle        = 2;
+   shielding     = 8000;
+   repulsion     = 75;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, magnetic";
+};
+
+HeavyMagnetic = accessories_class {
+   accessoryName = "Heavy Magnetic";
+   description   = "A large high-power magnetic shield.";
+   armsLevel     = 3;
+   price         = 20000;
+   bundle        = 1;
+   shielding     = 16000;
+   repulsion     = 100;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, magnetic";
+};
+
+BabyShield = accessories_class {
+   accessoryName = "Baby Shield";
+   description   = "A small physical shield layer.";
+   armsLevel     = 2;
+   price         = 20000;
+   bundle        = 3;
+   shielding     = 4000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, standard";
+};
+
+Shield = accessories_class {
+   accessoryName = "Shield";
+   description   = "A physical shield layer around the tank.";
+   armsLevel     = 3;
+   price         = 30000;
+   bundle        = 2;
+   shielding     = 8000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, standard";
+};
+
+HeavyShield = accessories_class {
+   accessoryName = "Heavy Shield";
+   description   = "A large physical shield layer.";
+   armsLevel     = 4;
+   price         = 40000;
+   bundle        = 1;
+   shielding     = 16000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, standard";
+};
+
+BabyForce = accessories_class {
+   accessoryName = "Baby Force";
+   description   = "A small but impregnable force field.";
+   armsLevel     = 2;
+   price         = 30000;
+   bundle        = 3;
+   shielding     = 4000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, force";
+};
+
+Force = accessories_class {
+   accessoryName = "Force";
+   description   = "A force field surrounding the tank.";
+   armsLevel     = 3;
+   price         = 45000;
+   bundle        = 2;
+   shielding     = 8000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, force";
+};
+
+HeavyForce = accessories_class {
+   accessoryName = "Heavy Force";
+   description   = "A large heavy-duty force field.";
+   armsLevel     = 4;
+   price         = 60000;
+   bundle        = 1;
+   shielding     = 16000;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, shield, force";
+};
+
+FuelTank = accessories_class {
+   accessoryName = "Fuel Tank";
+   description   = "Some fuel for a tank's motor will allow it to move around.";
+   armsLevel     = 3;
+   price         = 1000;
+   bundle        = 10;
+   shielding     = 0;
+   repulsion     = 0;
+   fuel          = 10;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, fuel";
+};
+
+TripleTurret = accessories_class {
+   accessoryName = "Triple Turret";
+   description   = "A triple turret can shoot three of some missiles at once.";
+   armsLevel     = 2;
+   price         = 25000;
+   bundle        = 1;
+   shielding     = 0;
+   repulsion     = 0;
+   fuel          = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "permanent, triple_turret";
+};
+
+AutoDefense = accessories_class {
+   accessoryName = "Auto Defense";
+   description   = "This automatic defense system brings up shields very fast.";
+   armsLevel     = 3;
+   price         = 1500;
+   bundle        = 1;
+   shielding     = 0;
+   repulsion     = 0;
+   fuel          = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "permanent, auto_defense";
+};
+
+SolarPanel = accessories_class {
+   accessoryName = "Solar Panel";
+   description   = "Solar Panels recharge shields slightly each turn.";
+   armsLevel     = 3;
+   price         = 2500;
+   bundle        = 1;
+   shielding     = 0;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "permanent, recharge";
+};
+
+ContactTrigger = accessories_class {
+   accessoryName = "Contact Trigger";
+   description   = "With contact triggers, missiles will explode as soon as they hit anything.";
+   armsLevel     = 3;
+   price         = 1000;
+   bundle        = 25;
+   shielding     = 0;
+   repulsion     = 0;
+   fuel          = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, contact_trigger";
+};
+
+Batteries = accessories_class {
+   accessoryName = "Batteries";
+   description   = "A tank's self-repair system needs batteries to run.";
+   armsLevel     = 2;
+   price         = 5000;
+   bundle        = 10;
+   shielding     = 0;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, battery";
+};
+
+Teleporter = accessories_class {
+;   accessoryName = "Teleporter";
+   accessoryName = "!Teleporter";
+
+; Currently, teleporters do NOTHING
+;   description   = "A teleporter moves your tank to a random new location.";
+;   armsLevel     = 3;
+   description   = "[unimplemented]";
+   armsLevel     = 5;
+
+   price         = 5000;
+   bundle        = 1;
+   shielding     = 0;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, teleporter";
+};
+
+Parachute = accessories_class {
+;   accessoryName = "Parachute";
+   accessoryName = "!Parachute";
+
+; Currently, parachutes do NOTHING
+;   description   = "Parachutes can save your tank from nasty falls.";
+;   armsLevel     = 1;
+   description   = "[unimplemented]";
+   armsLevel     = 5;
+
+   price         = 2000;
+   bundle        = 3;
+   shielding     = 0;
+   repulsion     = 0;
+   useless       = false;
+   indirect      = false;
+   stateFlags    = "consumable, parachute";
+};

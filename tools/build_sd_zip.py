@@ -50,6 +50,10 @@ ARDUBOY_GENRE_DIRS = (
 DOOM_REPO = "https://github.com/kilograham/rp2040-doom.git"
 DOOM_RELEASE = "defcon32_v1"
 DOOM_WHX_SOURCE = REPO_ROOT / "third_party" / "rp2040-doom" / "doom1.whx"
+CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
+PIPEDREAMER_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "pipe-pipedreamer.pak"
+XSCORCH_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "scorch-xscorch.pak"
+XSOKOBAN_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "sokoban-xsokoban.pak"
 
 ROM_DIRS = {
     "AB": "Arduboy",
@@ -79,12 +83,21 @@ APP_BINARIES = (
     "labyrinth.DC32",
     "trex.DC32",
     "doom.DC32",
+    "chips.DC32",
+    "scorch.DC32",
+    "pipe.DC32",
+    "cave.DC32",
+    "sokoban.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
 )
 APP_DATA_FILES = {
     "APPS/doom1.whx": DOOM_WHX_SOURCE,
+    "APPS/chips-tworld.pak": CHIPS_TWORLD_PACK_SOURCE,
+    "APPS/pipe-pipedreamer.pak": PIPEDREAMER_PACK_SOURCE,
+    "APPS/scorch-xscorch.pak": XSCORCH_PACK_SOURCE,
+    "APPS/sokoban-xsokoban.pak": XSOKOBAN_PACK_SOURCE,
 }
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
@@ -175,6 +188,18 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "release": DOOM_RELEASE,
                 "paths": ["doom1.whx"],
                 "sd_path": "APPS/",
+            },
+            "period_ports": {
+                "reserved_ids": {},
+                "accepted_ids": {
+                    "chips": 207,
+                    "scorch": 208,
+                    "pipe": 209,
+                    "cave": 210,
+                    "sokoban": 211,
+                },
+                "sd_path": "APPS/",
+                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Cave Story is an NXEngine/doukutsu data-compatible loader port that requires user-provided Cave data, and Sokoban is an XSokoban-derived port. No placeholder binaries or proprietary user data are packaged.",
             },
         },
     }
@@ -510,7 +535,34 @@ def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
         target = stage / sd_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target)
+    write_period_ports_readme(dst)
     return hashes
+
+
+def write_period_ports_readme(apps_dir: Path) -> None:
+    (apps_dir / "README-period-ports.txt").write_text(
+        "Faithful period ports status.\n"
+        "\n"
+        "Packaged:\n"
+        "- 207 Chip's Challenge: /APPS/chips.DC32 plus /APPS/chips-tworld.pak; user builds /APPS/chips.pak from Win 3.1 CHIPS.DAT and CHIPS.EXE\n"
+        "- 208 Scorched Earth: /APPS/scorch.DC32 plus /APPS/scorch-xscorch.pak\n"
+        "- 209 Pipe Dream: /APPS/pipe.DC32 plus /APPS/pipe-pipedreamer.pak\n"
+        "- 210 Cave Story: /APPS/cave.DC32; user builds /APPS/cave.pak from freeware Cave Story data\n"
+        "- 211 Sokoban: /APPS/sokoban.DC32 plus /APPS/sokoban-xsokoban.pak\n"
+        "\n"
+        "Required user data:\n"
+        "- Cave Story: /APPS/cave.pak\n"
+        "- Chip's Challenge: /APPS/chips.pak\n"
+        "\n"
+        "Cave Story freeware data, CHIPS.DAT, and proprietary original Chip's graphics are not redistributed. Build those packs locally by running:\n"
+        "- python tools/build_cave_pack.py\n"
+        "- python tools/build_chips_pack.py\n"
+        "Both scripts prompt for paths and write the badge-ready pak. The Chip's packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
+        "\n"
+        "The firmware menu exposes only period titles whose source-derived ports have passed acceptance.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
@@ -585,7 +637,10 @@ def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
 
 These app binaries were built from this repository and are loaded by the
 resident firmware shell from /APPS. DOOM also includes the WHX data payload
-from the rp2040-doom DEF CON 32 release under /APPS.
+from the rp2040-doom DEF CON 32 release under /APPS. Chip's Challenge,
+Scorched Earth, Pipe Dream, Cave Story, and Sokoban are included as
+source-derived/data-compatible period ports; no placeholder binaries or
+proprietary user data are included.
 
 ## APPS
 
@@ -600,6 +655,12 @@ from the rp2040-doom DEF CON 32 release under /APPS.
 - Source paths: doom1.whx
 - SD path: APPS/
 - Notes: Shareware DOOM1.WAD data is staged from APPS/doom1.whx at launch; raw WAD loading is not part of this build.
+
+## Faithful Period Ports
+
+- Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 210 Cave Story, data-compatible with freeware Cave Story packs and informed by NXEngine-evo/doukutsu-rs formats; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps
+- Data helpers: tools/build_cave_pack.py, tools/build_chips_pack.py, tools/build_period_assets.py
+- Notes: Cave Story freeware data, CHIPS.DAT, and unclear proprietary original graphics are user-provided only.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

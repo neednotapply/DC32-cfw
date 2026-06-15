@@ -1,0 +1,55 @@
+$Header: /fridge/cvs/xscorch/doc/AI,v 1.5 2004/03/25 16:04:58 jacob Exp $
+
+
+AI file for XScorch.  
+Copyright(c) 2000-2004 Justin David Smith
+Copyright(c) 2000-2004 Jacob Luna Lundberg.
+
+
+This document may agree with version 0.2.0.
+
+
+
+CONTENTS
+
+   Immediate Attention
+   AI Conservative Strategies
+   Other thoughts
+
+
+
+IMMEDIATE ATTENTION
+
+   AI purchasing needs a bunch of rewriting to make it more flexible and to
+   allow us to suggest for example to buy something early on but only once.
+
+
+
+AI CONSERVATIVE STRATEGIES
+
+   Suggestions from RJ Marquette:
+      I have a suggestion for a new player, call him the "Economist": His
+      goal, basically, is to get you to use your shields up via lots of
+      napalm/missles that hit near the shields (rather than directly on
+      them).  What happens after two or three rounds is that the target can
+      no longer afford to buy good shields or weapons.  By the end of the
+      game, they're almost helpless.  (It's a long-term strategy instead of
+      a one-round strategy.) Oh, yeah, he has to buy and use strong shields
+      himself for this to work.
+
+   I hope to merge these ideas as soon as I have some free time not hacking
+   away at the network code :)
+
+   
+   
+OTHER THOUGHTS
+
+   Need a hook to say whether AI hit the intended target; if not, then the
+   AI should automagically modify the angle slightly to try to hit the
+   target (note, they'll need to know if the tank was closer or farther from
+   their strike) (this is also rather contingient on if either tank moves).
+
+   Need an AI that maintains a list of targets to be attacked.
+   
+   Need to be able to restrict AI's from buying weapons above a certain 
+   yield -- this should make the AI's somewhat easier than they are now.

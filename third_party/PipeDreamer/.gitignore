@@ -1,0 +1,8 @@
+# Builds directory
+/Builds
+
+# JUCE includes
+/JuceLibraryCode
+
+# Junk directory
+/Temp

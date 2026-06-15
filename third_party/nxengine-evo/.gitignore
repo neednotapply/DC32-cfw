@@ -1,0 +1,9 @@
+/.flatpak-builder
+/build
+/bin
+/extern
+/tools
+
+*.AppImage
+*.flatpak
+*.snap

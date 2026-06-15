@@ -1,0 +1,599 @@
+.\"  $Header: /fridge/cvs/xscorch/doc/xscorch.6,v 1.21 2011-08-01 00:31:46 jacob Exp $
+.\"
+.\"
+.\"  Once upon a time
+.\"  There was a document formatting system
+.\"  It had a nice, complete set of commands
+.\"  That were intuitive
+.\"  And memorable.
+.\"  
+.\"  This is definitely _not_ that system.
+.\"
+.\"  
+.\"
+.TH xscorch 6 "May 2001" "Justin David Smith" \"
+.SH NAME
+xscorch \- Annihilate enemy tanks using overpowered guns.
+.SH SYNOPSIS
+.B "xscorch"
+.P
+.B "xscorch "
+.I "[options]"
+.P
+.B xscorch \-\-help
+.SH DESCRIPTION
+Xscorch is a clone of the classic DOS game, "Scorched
+Earth". The basic goal is to annihilate enemy tanks using
+overpowered guns :). Basically, you buy weapons, you target
+the enemy by adjusting the angle of your turret and firing
+power, and you hope to destroy their tank before they destroy
+yours.
+.SH GAMEPLAY
+First, fiddle with the options in the main menu.  There are
+a number of options which are described below, which may make
+the game easier or harder.  The default options make for a
+reasonable level of gameplay.  Most of the game configuration
+is controlled from the user interface, although there are a
+few command\-line options which are mentioned below.
+Once you are ready to begin
+a new game, you might want to \fISave Options\fP to save your
+configuration, then select \fIBegin Game\fP to start a new
+game.
+.P
+Gameplay is divided up into several rounds.  Each round
+consists of two parts:  the \fIInventory\fP phase and the
+\fIBattle\fP phase.  In the Inventory phase, you can buy
+weapons to shoot at your opponents, and accessories to
+help defend your tank.  See the Inventory section below
+for information on the weapons and accessories you may buy.
+In the Battle phase, you setup defenses, choose a weapon,
+aim and fire at your opponents.  See the section on Battle
+below, for more information.
+.SH INVENTORY
+The player has the option to buy weapons and accessories
+to make the game more interesting.  Weapons are just that:
+an assortment of missiles, including ICBM\-like warheads,
+napalm, lasers, and a number of custom weapons to bring
+down specific defenses.  Accessories are methods to make
+gameplay easier for the player and increase their chance
+of survival, with guidance systems, shields, fuel, batteries,
+and other odds\-and\-ends.
+.P
+At the beginning of a round, each player is given an
+opportunity to buy or sell weapons and accessories.  Each player
+may have up to 99 of any item in their inventory.  A few weapons
+have an infinite supply (for example, Baby Missiles) \- these
+weapons cannot be purchased.
+.P
+Weapons and
+accessories are sold in bundles; the price for the bundle
+is displayed in the inventory, and you must buy items as
+a complete bundle.  The exception to this is when a player
+attempts to buy more of an item than their inventory can
+hold; in this case, the bundle will be broken and the weapons
+are sold on an individual basis, with a small markup applied.
+.P
+Weapons and accessories may also be sold from a player's
+inventory.  Again, items are generally sold as a bundle.
+The player will receive a reduced amount of money for the
+sale \- hey, the middleman has to make money somewhere :)
+.P
+In the Inventory screen, two panels
+are displayed, listing the weapons and accessories that
+are available.  The \fITab\fP key will switch between the various
+panes.  \fIUp Arrow\fP and \fIDown Arrow\fP will allow the player to
+scroll through the list of items, \fIRight Arrow\fP will buy a bundle, and \fILeft Arrow\fP will sell
+a bundle of the currently highlighted item.
+.P
+For each item,
+the \fIname\fP, \fIbundle size\fP/\fItotal price\fP, and
+\fIcurrent inventory\fP are displayed.
+.P
+Items which can neither be bought or sold will appear darkened.
+If the player has maxed their inventory for that item, or they
+cannot afford to purchase the item, or the item has a higher
+\fIarms level\fP than the player is allowed, then the item cannot
+be purchased.
+Items which can be bought will appear with an arrow pointing 
+to the right, and items which can be sold will appear with an
+arrow pointing to the left.
+.P
+The items that are available are listed in the next two sections.
+.SH WEAPONS LIST
+This list will be added once the weapons list is reasonably stable.
+.SH ACCESSORIES LIST
+This list will be added once the accessories list is reasonably stable.
+.SH BATTLE
+This overview is sadly, incomplete.
+.SH TANK CONTROLS
+.\"  Welcome to the tank controls section.  
+.\"  This code really looks pretty horrendous
+.\"  I hope this is actually the comment char
+.\"
+.TP
+\fILeft\fP, \fIRight\fP
+Change the turret angle.  This will adjust the turret angle in increments of 5 degrees.
+For finer control, hold \fIShift\fP to adjust the angle in increments of 1 degree.
+.TP
+\fIUp\fP, \fIDown\fP
+Change the firing power, in the range of 0 to 1000.  This will adjust the firing power
+in increments of 20.  For finer control, hold \fIShift\fP to adjust the firing power
+in increments of 1.
+.TP
+\fITab\fP
+Select the next weapon available in your inventory.
+.TP
+\fIShift+Tab\fP
+Select the previous weapon available in your inventory.
+.TP
+\fIB\fP, \fIb\fP
+Activate a battery.  A single battery can restore 5% of damage done to your
+tank, and therefore restore the maximum firing power by 5% when you are damaged.
+You must have a battery to discharge in your inventory to excercise this option.
+.TP
+\fIE\fP, \fIe\fP
+Activate or energize the currently selected shields.
+.TP
+\fIF\fP, \fIf\fP
+Activate your fuel tanks.  A window will be displayed, indicating the amount of
+fuel you have available.  As long as you have fuel, you may use the \fILeft\fP and
+\fIRight\fP arrows to move one unit to the left or right, respectively.  In general,
+you cannot move your tank up a steep hill.  Immobile tanks will not be able to 
+excercise this option.
+.TP
+\fIR\fP, \fIr\fP
+Force a redraw of the screen.
+.TP
+\fIS\fP, \fIs\fP
+Toggle the currently selected shields.  The currently selected shields are the
+shields which will be used when you Energize.  Shields are classified by a
+power number with a type suffix:  \fIM\fP for magnetic shielding, \fIF\fP for force
+shielding, and \fIS\fP for your standard, run-of-the-mill shields.  If no shields
+are available, \fI0S\fP is displayed.
+.TP
+\fIT\fP, \fIt\fP
+Toggle contact triggers on/off.  This is only meaningful if you actually \fIhave\fP
+some contact triggers of course, and when tunneling is enabled.  Weapons that are
+fired after this point will have contact triggers equipped (until you run out).
+.TP
+\fI0\fP \- \fI9\fP
+Display information about a particular player.  \fI1\fP gives information about
+Player 1, and \fI0\fP gives information about Player 10.  
+.TP
+\fIEnter\fP
+Accept your orders.
+.TP
+\fICtrl+Y\fP
+Bring up the System Menu (this can also be accessed from the menus).  You can
+control certain graphics options from the system menu, clear the screen of smoke
+trails, and end a round prematurely. 
+.TP
+\fICtrl+Z\fP
+Pauses the game.
+.TP
+\fICtrl+R\fP
+Resign from the game.  This will end the game for everyone.  You will be asked
+to confirm the resignation.
+.SH SYSTEM MENU
+.P
+The system menu gives you some control over the game while it is in progress.
+In this menu, you will have options to change how the game is displayed (e.g.
+the \fIGraphics Fast\fP option described below).  You also have access to a
+few useful commands, described below.
+.TP
+\fBMass Kill\fP
+Kills everyone still alive in the round.  No player gets credit for the
+kills, and none are considered a suicide.  This option is useful if all
+human players have already been eliminated from the game, but the AI
+players are making no progress whatsoever in annihilating each other.
+This option ends the current round only.
+.TP
+\fBErase Smoke\fP
+If you have used smoke tracers or have \fITrace Paths\fP enabled, then
+this option will clear all smoke trails from the sky.
+.TP
+\fBRetreat\fP
+N/A
+.TP
+\fBResign Game\fP
+Resigns from the current round and all remaining rounds.  This option
+ends the entire game, and will take you back to the intro screen.
+.TP
+\fBSound Setup\fP
+Takes you to the \fISound Options\fP window.
+.SH AI PLAYERS
+.TP
+.B Human
+The humans believe they are the superior mind.  The AI's rather disagree with
+that sentiment.  Keep this in mind when you are wondering why 9 AI's would want
+to simultaneously target your tank...
+.TP
+.B Moron
+This AI fires at random.  Of all the AI's, this one has by far the highest suicide
+rate.  An alternate name is ``Cannon Fodder''.
+.TP
+.B Shooter
+This AI goes for targets it has a line\-of\-sight to.  It's not a great player otherwise.
+This AI buys weapons that have the best economical yield, but during the game it 
+will select weapons which have the highest yield.
+.TP
+.B Spreader
+This AI is similar to the Shooter, except a Spreader buys weapons with the highest yield,
+without regard for the price.
+.TP
+.B Chooser
+This AI chooses a victim.  Once chosen, the victim is attacked until they are dead, or
+the Chooser loses the ability to reach the victim. This AI does not need line\-of\-sight,
+but fortunately it cannot compensate for wind.
+.TP
+.B Calculater
+This AI is like Chooser, except a Calculater can compensate for the wind.  These guys are
+fairly deadly in a fight; they also tend to allocate large budgets to defense and offense.
+.TP
+.B Annihilater
+This AI goes for weapons that will cause as much damage as possible, without much regard
+for individual victims.  This AI prefers spread weapons to the more focused, precision
+weapons.  A few Annihilaters can clear the terrain easily.  These AI's don't worry about
+defenses too much.  With their destructive tendency, they won't survive long anyway \-
+but neither will anyone else.
+.TP
+.B Insanity
+No one knows what this AI thinks...
+.TP
+.B Unknown
+This selects one of the above AI's at random, but you will not be informed which
+AI was selected.
+.SH CONFIGURATION OPTIONS
+\fIPlayers/Rounds\fP:
+.TP
+\fBNumber of Players\fP (integer, 2\-10)
+Set the number of players participating in the game.
+.TP
+\fBNumber of Rounds\fP (integer, >= 1)
+Set the number of rounds to play for this game.
+.TP 
+\fBAI Type\fP (list)
+Select the AI type.  Human players are ``Human''; the remaining AI's
+are documented above.
+.TP
+\fBPlayer Name\fP (string)
+Give a unique name for each player.
+.TP
+\fBTank Style\fP (list)
+Select the type/shape of the tank, for each player.
+.P
+\fIEconomics\fP:
+.TP
+\fBInterest Rate\fP (float, 0\-0.30)
+Interest rate for savings, compounded once per round.
+.TP
+\fBDynamic Interest\fP (toggle)
+If enabled, interest rates will change during the game.
+.TP
+\fBInitial Cash\fP (integer, 0\-1000000)
+Amount of money each player should start with.
+.TP
+\fBAIs Can Buy\fP (toggle)
+If enabled, computers are permitted to buy items.  
+The AI's are very uninteresting if this option is turned off.
+.TP
+\fBAIs Buy Aggressively\fP (toggle)
+If the previous option is enabled, the AI's will buy items
+conservatively.  With this option, the AI's will allocate
+larger budgets and buy bigger items early in the game.
+.TP
+\fBFree Market\fP (toggle)
+N/A
+.TP
+\fBScoring\fP (list)
+Specify how scoring works, selecting from Basic, Standard, Greedy,
+or possibly other methods defined in the configuration file:
+.PD 0
+.RS +12
+.TP 9
+\fIBasic\fP
+Players only receive money for kills and survival.
+.TP 9
+\fIStandard\fP
+Players receive less money for kills and survival, but they will
+also receive money for damaging an opponent.
+.TP 9
+\fIGreedy\fP
+Players are paid as in Standard scoring, but with bonuses for
+unused inventory at the end of the round.
+.RE
+.PD
+.TP
+\fBThe Lottery\fP (toggle)
+If the lottery is enabled, there will be a random drawing at the start of
+each round.  A random player will receive a bundle of a random weapon for
+free as the lottery award.  This is a great way to inject a little extra
+life into AIs who are usually conservative buyers.  Plus it's always great
+fun when you get a free Annihilator...
+.P
+\fIPhysics\fP:
+.TP
+\fBAir Viscosity\fP (float)
+N/A
+.TP
+\fBGravity\fP (float, 0\-10)
+Specify the gravity, in pixels per cycle squared (one cycle is 
+roughly 50 milliseconds).
+.TP
+\fBGround Damping\fP (float, 0\-10)
+Specify the ground damping, used in tunnelling calculations.
+.TP
+\fBMaximum Wind Speed\fP (float, 0\-10)
+Specify the maximum wind speed, in pixels per cycle squared.
+The actual wind velocity is initialised once per round, to
+some value in (-\fImax\fP, \fImax\fP).
+.TP
+\fBWind is Dynamic\fP (toggle)
+Normally the wind remains constant through a round.
+If this is enabled, the wind will change once per turn.
+.TP
+\fBSuspend Dirt\fP (percentage)
+N/A
+.TP
+\fBTanks Fall\fP (percentage)
+N/A
+.TP
+\fBBorders Extend\fP (integer, >= 0)
+This specifies how far off\-screen weapons should be tracked,
+when you are playing with no walls.  When this value is
+zero, weapons will disappear as soon as they leave the 
+screen in the horizontal direction, even if wind would have
+brought them back on\-screen.
+.TP
+\fBWalls Are\fP (list)
+Specify how weapons behave when they hit a boundary.  Note,
+the ground is always ``concrete'' -- this specifies how the sides
+and ceiling behave:
+.PD 0
+.RS +12
+.TP 11
+\fINone\fP
+The sides and ceiling are open.
+.TP 11
+\fIConcrete\fP
+All sides are solid.  Weapons hitting any boundary will explode.
+.TP 11
+\fIPadded\fP
+Weapons hitting the sides and ceiling will bounce off, although 
+at a reduced velocity.
+.TP 11
+\fIRubber\fP
+Weapons hitting the boundary will bounce off at exactly the same
+velocity.
+.TP 11
+\fISpringy\fP
+Weapons hitting the boundary will bounce off with an additional
+``kick'' to the velocity.
+.TP 11
+\fIWraparound\fP
+The ceiling is open.  Weapons going off one side will reappear
+on the opposite side.  Explosions will also wrap around the 
+screen if they detonate near an edge.
+.TP 11
+\fIRandom\fP
+One of the above types of walls are selected at random.
+.RE
+.PD
+.P
+\fILandscape\fP:
+.TP
+\fBSky\fP (list)
+Specify the background sky.
+.TP
+\fBHostile Environment\fP (toggle)
+N/A
+.TP
+\fBLand Generator\fP (list)
+Specify the generator to use to create the land.
+.TP
+\fBBumpiness\fP (percentage)
+Specify the noise on the generated landscape.
+.P
+\fIWeapons\fP:
+.TP
+\fBArms Level\fP (integer, 0\-4)
+Specify the maximum arms level for the game.  Only weapons
+with this arms level or lower may be purchased by any player,
+under normal circumstances.
+.TP
+\fBBomb Icon Size\fP (integer, 0\-4)
+Specify the size of the bomb icons, while they are traversing
+their path in the sky.  This does not affect the size of explosions,
+or the size of the smoke paths (if \fItrace paths\fP is on).
+.TP
+\fBTunneling\fP (toggle)
+If set, weapons are allowed to tunnel through land.  If you enable
+this, you will want to buy contact triggers if you want a particular
+weapon to always detonate on impact (instead of tunneling through
+land).
+.TP
+\fBScaling\fP (float)
+Scale the size of explosions by this value.  If playing on a very
+large or very small playing field, you might want to adjust this 
+value.
+.TP
+\fBTrace Paths\fP (toggle)
+If enabled, all weapons leave a smoke trail to reveal their trajectory.
+If this option is off, you can still use \fISmoke Tracers\fP to determine
+the path a weapon will take.
+.TP
+\fBUseless Items\fP (toggle)
+Some weapons are not useful given the current configuration (e.g.
+contact triggers are irrelevant if tunneling is disabled).  If this
+option is enabled, then weapons which will have no effect are not
+listed in the inventory screens.
+.P
+\fIGraphics\fP:
+.TP
+\fBScreen Width\fP (integer)
+Set the width of the playing field, in pixels.
+.TP
+\fBScreen Height\fP (integer)
+Set the height of the playing field, in pixels.
+.TP
+\fBDithering\fP (toggle)
+If enabled, the land and sky gradients will be dithered.  This option
+is particularly useful on 16\-bit displays, where the gradient is
+very noticeable otherwise.  This does slow down land generation 
+somewhat.
+.TP
+\fBAnimation\fP (toggle)
+If enabled, explosions and other effects will be animated.  This option
+can also be controlled from the \fISystem Menu\fP.
+.TP
+\fBGraphics Are Fast\fP (toggle)
+If enabled, all graphics are always as fast as possible.  This option
+can also be controlled from the \fISystem Menu\fP.
+.TP
+\fBComputers Are Fast\fP (toggle)
+If enabled, graphics are fast when there only computer players are alive.
+This option can also be controlled from the \fISystem Menu\fP.
+.P
+\fIGameplay Options\fP:
+.TP
+\fBMode\fP (list)
+Determines if all players will fire at once (\fISynchronous\fP), or
+whether each player will fire independently (\fISequential\fP).
+.TP
+\fBTeams\fP (list)
+N/A
+.TP
+\fBOrder\fP (list)
+Determines the player order.
+.TP
+\fBTalk Mode\fP (list)
+Determines who is allowed to talk.
+.TP
+\fBTalk Probability\fP (percentage)
+Determines the likelihood that a player will speak at the end of a turn.
+.TP
+\fBExtended Status\fP (toggle)
+If set, the status bar will contain an additional row of extended information
+during the game (things such as trigger and battery inventories, life, wind).
+.TP
+\fBTooltips\fP (toggle)
+If set, tooltips will be displayed where available.
+A restart is required to change the value of this option.
+.P
+\fIAI Controller\fP:
+.TP
+\fBHuman Target Practice\fP (toggle)
+AI's will always prefer human 
+targets to AI targets (except for AI's that fire at   
+random).  When playing against 9 Calculators, this can
+make your day pretty lousy.
+.TP
+\fBAllow Offset Targetting\fP (toggle)
+Generally, when a weapon hits a
+shield it does less damage than an explosion detonating
+right outside the shield (weapons hitting the shield do
+not have a chance to detonate).  This changes the AI 
+targetting behaviour so they will deliberately aim outside
+the shield, if their intended victim has raised shields.
+.TP
+\fBAlways Offset\fP (toggle)
+If the above option is set, this option will force the
+AI to always offset its targetting as if the player had
+raised shields.  This allows the AI to compensate for
+cases where the player may simply not have had their
+turn yet to raise shields.  The downside is the AI will
+never attempt to score a direct hit with this option enabled.
+.TP
+\fBEnable Scan Refinement\fP (toggle)
+If set, harder AIs are allowed to refine their trajectories
+by computing trajectories that take into account player 
+shielding effect and various other factors they do not
+normally consider.  This option could slow down gameplay
+a bit but makes the AIs much more difficult.
+.TP
+\fBNo Budget Constraints\fP (toggle)
+AI's will spend as much money as
+they can, disregarding their budget preferences.
+.P
+\fISound Setup\fP:
+.TP
+\fBEnable Sound\fP (toggle)
+When set, music and sound effects will be played.
+.TP
+\fBUse HQ Mixer\fP (toggle)
+When set, mikmod's high-quality mixer will be used.
+.SH COMMAND-LINE OPTIONS
+.TP
+.B \-\-help
+Display a brief synopsis of the command-line options available.
+.TP
+.B \-\-insanity
+This is insanity, Max!  Or what if it's genius?
+.TP
+.B \-\-yields
+Display weapon yields, and economical yields.
+.TP
+.B \-\-geometry=\fIw\fPx\fIh\fP
+Specify an initial window geometry for xscorch, where
+\fIw\fP is the width and \fIh\fP is the height of the 
+playing field.  Useful for displays less than around
+800x600 resolution.  Note this option overrides the
+settings in the config file, but you can save the new
+options to your config file so you don't have to specify
+this every time.  You may also use \fB\-g\fP.
+.TP
+.B \-\-config=\fIfile\fP
+Load an alternate user config file, in \fIfile\fP.
+.TP
+.B \-\-sound
+Enable music and sound effects.  You may also use \fB\-S\fP.
+.TP
+.B \-\-nosound
+Disable music and sound effects.  You may also use \fB\-s\fP.
+.TP
+.B \-\-hqmixer
+Enable use of the high-quality mixer, if sound is enabled.
+This may use a lot of CPU power on older machines.
+.TP
+.B \-\-nohqmixer
+Disable use of the high-quality mixer, if sound is enabled.
+.TP
+.B \-\-name
+Set the name of your player, if you are initiating a network
+game.  By default, your user name is used.
+.TP
+.B \-\-port
+Set the port number to use in a network game.  This option
+is only relevant if you also specify \fB\-\-client\fP or
+\fB\-\-server\fP.  The default is dependent on the protocol
+number, but is some large port number.
+.TP
+.B \-\-client=\fIserver\fP
+Start xscorch in client mode, and connect to \fIserver\fP
+(which should already be running).  If \fB\-\-name\fP and
+\fB\-\-port\fP are not specified, reasonable defaults are used.
+.TP
+.B \-\-server
+Start xscorch in server mode, and wait for connections from
+the clients.  \fB\-\-name\fP may be used in conjunction to
+specify the name of this player.
+.SH NETWORK MODE
+This is very unstable right now, and therefore is not documented.
+.SH FILES
+.TP
+.B ~/.xscorch/config
+User's default configuration for xscorch.
+.TP
+.B tankprofiles
+Profile bitmaps for the tanks, usually stored in the local share directory.
+.SH SEE ALSO
+The xscorch home page at <http://www.xscorch.org/>.  There is also
+additional documentation in the source distribution.
+.SH AUTHORS
+xscorch was written by Justin David Smith <justins(at)chaos2.org> 
+and Jacob Luna Lundberg <jacob(at)gnifty.net>.  
+(Please do not list these e-mail addresses on webpages, or                                                               
+list them in other packages, without contacting us first.)                                                               
+.PP
+This manual page written by Justin David Smith <justins(at)chaos2.org>.
+Copyright(c) 2001,2000 Justin David Smith.

@@ -1,0 +1,42 @@
+; $Header: /fridge/cvs/xscorch/data/scorings.def,v 1.2 2003/02/28 12:13:25 jacob Exp $
+;
+; scorings.def
+; This is the default xscorch economy scoring definition file.
+; It's a rather bad idea to remove all these scorings.  ;)
+;
+
+Basic = scorings_class {
+   scoringName   = "Basic";
+   description   = "A scoring method that emphasizes number of kills.";
+   survivalBonus = 100000;
+   damageBonus   = 0;
+   killBonus     = 40000;
+   damageLoss    = 0;
+   deathLoss     = 20000;
+   suicideLoss   = 100000;
+   fixed         = false;
+};
+
+Standard = scorings_class {
+   scoringName   = "Standard";
+   description   = "A scoring method that penalizes and awards based on tank damage.";
+   survivalBonus = 70000;
+   damageBonus   = 500;
+   killBonus     = 30000;
+   damageLoss    = 250;
+   deathLoss     = 20000;
+   suicideLoss   = 100000;
+   fixed         = false;
+};
+
+Greedy = scorings_class {
+   scoringName   = "Greedy";
+   description   = "[unimplemented] A scoring method that pays based on unused inventory.";
+   survivalBonus = 70000;
+   damageBonus   = 500;
+   killBonus     = 30000;
+   damageLoss    = 250;
+   deathLoss     = 20000;
+   suicideLoss   = 100000;
+   fixed         = false;
+};

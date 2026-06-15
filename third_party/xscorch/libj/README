@@ -1,0 +1,22 @@
+$Header: /fridge/cvs/xscorch/libj/README,v 1.5 2004/02/26 05:56:50 justins Exp $
+
+
+This is the README for LIBJ.  Not much is documented here right now,
+unfortunately.  But to install the system, you should be able to simply
+run
+   ./configure
+   make
+   make install      # as root
+
+NOTE: I would recommend installing this library to an alternate location,
+      ./configure --prefix=/usr/local/libj, for easier package maintenance.
+
+NOTE: This library is under heavy development, version 4 may not strictly
+      adhere to standard library versioning.  If in doubt, link against the
+      specific library versions you want, or link statically.
+
+
+Please note that this code is licensed under version 2 of the GNU General
+Public License ONLY, the version that is included with this source distri-
+bution.  NO later version of the General Public License is valid for this
+code.

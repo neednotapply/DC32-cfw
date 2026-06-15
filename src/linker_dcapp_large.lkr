@@ -1,0 +1,47 @@
+MEMORY
+{
+        approm : ORIGIN = 0x10100000, LENGTH = 0x00300000
+        appram : ORIGIN = 0x2005F000, LENGTH = 0x00014000
+        trash  : ORIGIN = 0xffff0000, LENGTH = 64K
+}
+
+SECTIONS
+{
+        .dcapp_header : {
+                __dcapp_header = ABSOLUTE(.);
+                KEEP(*(.dcapp_header))
+                . = ALIGN(256);
+        } > approm
+
+        .text : {
+                *(.text) *(.text.*)
+                *(.rodata) *(.rodata.*)
+                . = ALIGN(4);
+        } > approm
+
+        .data : AT ( ADDR(.text) + SIZEOF(.text) ) {
+                __data_start = ABSOLUTE(.);
+                __data_data = LOADADDR(.data);
+                *(.fastcode) *(.fastcode.*)
+                *(.data) *(.data.*)
+                . = ALIGN(4);
+                __data_end = ABSOLUTE(.);
+        } > appram
+
+        .bss (NOLOAD) : {
+                . = ALIGN(4);
+                __bss_start = ABSOLUTE(.);
+                *(.bss) *(.bss.*) *(COMMON)
+                . = ALIGN(4);
+                __bss_end = ABSOLUTE(.);
+        } > appram
+
+        .trash1 : { __exidx_start = ABSOLUTE(.) ; *(.ARM.exidx) *(.ARM.exidx.*) ; __exidx_end = ABSOLUTE(.) ; } > trash
+        .trash2 : { *(.init) *(.init.*) *(.fini) *(.fini.*) *(.init_array) *(.init_array.*) *(.fini_array) *(.fini_array.*) } > trash
+}
+
+__data_size = __data_end - __data_start;
+__bss_size = __bss_end - __bss_start;
+__app_image_end = LOADADDR(.data) + SIZEOF(.data);
+
+ENTRY(dcAppEntry)

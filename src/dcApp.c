@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "dcapp_build_contract.h"
 #include "audioPwm.h"
 #include "dispDefcon.h"
 #include "fatfs.h"
@@ -22,6 +23,9 @@ static DcAppVoidF mActiveRefresh;
 static struct ToolWorkspaceSpan mActiveScratch;
 static bool mActiveScratchValid;
 static char mLastError[128];
+static const uint32_t mDcAppBuildContractWords[DCAPP_CONTRACT_HASH_WORDS] = {
+	DCAPP_BUILD_CONTRACT_WORDS
+};
 
 static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdGameGb, "Game Boy", "/APPS/gb.DC32", false},
@@ -40,6 +44,11 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdLabyrinth, "Labyrinth", "/APPS/labyrinth.DC32", true},
 	{DcAppIdTrex, "T-Rex Runner", "/APPS/trex.DC32", true},
 	{DcAppIdDoom, "DOOM (shareware)", "/APPS/doom.DC32", true},
+	{DcAppIdChips, "Chip's Challenge", "/APPS/chips.DC32", true},
+	{DcAppIdScorch, "Scorched Earth", "/APPS/scorch.DC32", true},
+	{DcAppIdPipe, "Pipe Dream", "/APPS/pipe.DC32", true},
+	{DcAppIdCave, "Cave Story", "/APPS/cave.DC32", true},
+	{DcAppIdSokoban, "Sokoban", "/APPS/sokoban.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
 	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
@@ -185,9 +194,9 @@ static bool dcAppPrvReadExact(struct FatfsFil *fil, void *dst, uint32_t len)
 	return fatfsFileRead(fil, dst, len, &got) && got == len;
 }
 
-static const struct DcAppImageHeader *dcAppPrvCachedHeader(void)
+static const struct DcAppImageHeader *dcAppPrvCachedHeaderAt(uint32_t loadAddr)
 {
-	return (const struct DcAppImageHeader*)flashUncachedPtr(QSPI_APP_CACHE_START);
+	return (const struct DcAppImageHeader*)flashUncachedPtr(loadAddr);
 }
 
 static uint32_t dcAppPrvCrc32Update(uint32_t crc, const void *data, uint32_t len)
@@ -214,19 +223,62 @@ static bool dcAppPrvRangeInAppRam(uint32_t addr, uint32_t size)
 	return addr >= DCAPP_RAM_START && end <= DCAPP_RAM_END;
 }
 
+static bool dcAppPrvHeaderHasCurrentBuildContract(const struct DcAppImageHeader *hdr)
+{
+	if (!hdr || hdr->reserved[DCAPP_CONTRACT_RESERVED_INDEX] != DCAPP_CONTRACT_MAGIC)
+		return false;
+	for (uint_fast8_t i = 0; i < DCAPP_CONTRACT_HASH_WORDS; i++)
+		if (hdr->reserved[DCAPP_CONTRACT_HASH_RESERVED_INDEX + i] != mDcAppBuildContractWords[i])
+			return false;
+	return true;
+}
+
+static bool dcAppPrvHeaderLooksLikeThisRuntime(const struct DcAppImageHeader *hdr, uint32_t runtime)
+{
+	return hdr &&
+		hdr->magic == DCAPP_MAGIC &&
+		hdr->headerSize == DCAPP_HEADER_SIZE &&
+		hdr->abiVersion == DCAPP_ABI_VERSION &&
+		hdr->runtime == runtime;
+}
+
+static bool dcAppPrvImageLimit(const struct DcAppImageHeader *hdr, uint32_t *limitP)
+{
+	uint32_t limit;
+
+	if (!hdr || (hdr->flags & ~DCAPP_IMAGE_FLAG_LARGE_XIP))
+		return false;
+	if (hdr->flags & DCAPP_IMAGE_FLAG_LARGE_XIP) {
+		if (hdr->loadAddr != QSPI_ROM_START)
+			return false;
+		limit = QSPI_ROM_SIZE_MAX;
+	}
+	else {
+		if (hdr->loadAddr != QSPI_APP_CACHE_START)
+			return false;
+		limit = QSPI_APP_CACHE_SIZE;
+	}
+	if (limitP)
+		*limitP = limit;
+	return true;
+}
+
 static enum DcAppResult dcAppPrvValidateHeader(const struct DcAppImageHeader *hdr, uint32_t runtime)
 {
-	uint32_t dataEnd;
+	uint32_t dataEnd, imageLimit;
 
 	if (!hdr || hdr->magic != DCAPP_MAGIC || hdr->headerSize != DCAPP_HEADER_SIZE)
 		return DcAppResultInvalid;
 	if (hdr->abiVersion != DCAPP_ABI_VERSION || hdr->runtime != (uint32_t)runtime)
 		return DcAppResultIncompatible;
-	if (hdr->loadAddr != QSPI_APP_CACHE_START ||
-			hdr->appRamStart != DCAPP_RAM_START ||
+	if (!dcAppPrvHeaderHasCurrentBuildContract(hdr))
+		return DcAppResultIncompatible;
+	if (!dcAppPrvImageLimit(hdr, &imageLimit))
+		return DcAppResultIncompatible;
+	if (hdr->appRamStart != DCAPP_RAM_START ||
 			hdr->appRamSize != DCAPP_RAM_SIZE)
 		return DcAppResultIncompatible;
-	if (hdr->imageSize <= hdr->headerSize || hdr->imageSize > QSPI_APP_CACHE_SIZE)
+	if (hdr->imageSize <= hdr->headerSize || hdr->imageSize > imageLimit)
 		return DcAppResultTooLarge;
 	if ((hdr->entryOffset & ~1u) < hdr->headerSize || (hdr->entryOffset & ~1u) >= hdr->imageSize)
 		return DcAppResultInvalid;
@@ -247,32 +299,40 @@ static enum DcAppResult dcAppPrvValidateHeader(const struct DcAppImageHeader *hd
 	return DcAppResultOk;
 }
 
-static bool dcAppPrvCachedHeaderLooksValid(const struct DcAppImageHeader *hdr)
+static bool dcAppPrvCachedHeaderLooksValidAt(const struct DcAppImageHeader *hdr, uint32_t loadAddr)
 {
+	uint32_t imageLimit;
+
 	if (!hdr || hdr->magic != DCAPP_MAGIC || hdr->headerSize != DCAPP_HEADER_SIZE)
 		return false;
 	if (hdr->abiVersion != DCAPP_ABI_VERSION)
 		return false;
-	if (hdr->loadAddr != QSPI_APP_CACHE_START ||
+	if (hdr->loadAddr != loadAddr ||
 			hdr->appRamStart != DCAPP_RAM_START ||
 			hdr->appRamSize != DCAPP_RAM_SIZE)
 		return false;
-	return hdr->imageSize > hdr->headerSize && hdr->imageSize <= QSPI_APP_CACHE_SIZE;
+	if (!dcAppPrvImageLimit(hdr, &imageLimit))
+		return false;
+	return hdr->imageSize > hdr->headerSize && hdr->imageSize <= imageLimit;
 }
 
-static uint32_t dcAppPrvCachedEraseSpan(uint32_t imageSize)
+static uint32_t dcAppPrvCachedEraseSpan(const struct DcAppImageHeader *wanted)
 {
-	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
-	uint32_t eraseSize = dcAppPrvAlignUp(imageSize, QSPI_ERASE_GRANULARITY);
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeaderAt(wanted->loadAddr);
+	uint32_t imageLimit, eraseSize = dcAppPrvAlignUp(wanted->imageSize, QSPI_ERASE_GRANULARITY);
 
-	if (dcAppPrvCachedHeaderLooksValid(cached)) {
+	if (!dcAppPrvImageLimit(wanted, &imageLimit))
+		return 0;
+	if (dcAppPrvCachedHeaderLooksValidAt(cached, wanted->loadAddr)) {
 		uint32_t cachedEraseSize = dcAppPrvAlignUp(cached->imageSize, QSPI_ERASE_GRANULARITY);
 
 		if (eraseSize < cachedEraseSize)
 			eraseSize = cachedEraseSize;
 	}
 	else
-		eraseSize = QSPI_APP_CACHE_SIZE;
+		eraseSize = imageLimit;
+	if (eraseSize > imageLimit)
+		eraseSize = imageLimit;
 	return eraseSize;
 }
 
@@ -280,14 +340,14 @@ static uint32_t dcAppPrvCachedImageCrc32(const struct DcAppImageHeader *hdr)
 {
 	uint32_t crc = 0xffffffffu;
 
-	crc = dcAppPrvCrc32Update(crc, flashUncachedPtr(QSPI_APP_CACHE_START + hdr->headerSize),
+	crc = dcAppPrvCrc32Update(crc, flashUncachedPtr(hdr->loadAddr + hdr->headerSize),
 		hdr->imageSize - hdr->headerSize);
 	return crc ^ 0xffffffffu;
 }
 
 static bool dcAppPrvVerifyCachedImage(const struct DcAppImageHeader *wanted, uint32_t runtime)
 {
-	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeaderAt(wanted->loadAddr);
 
 	return dcAppPrvValidateHeader(cached, runtime) == DcAppResultOk &&
 		!memcmp(cached, wanted, sizeof(*wanted)) &&
@@ -296,9 +356,10 @@ static bool dcAppPrvVerifyCachedImage(const struct DcAppImageHeader *wanted, uin
 
 static bool dcAppPrvCachedBuildMatches(const struct DcAppImageHeader *wanted, uint32_t runtime)
 {
-	const struct DcAppImageHeader *cached = dcAppPrvCachedHeader();
+	const struct DcAppImageHeader *cached = dcAppPrvCachedHeaderAt(wanted->loadAddr);
 
-	return !memcmp(cached->buildId, wanted->buildId, sizeof(wanted->buildId)) &&
+	return dcAppPrvValidateHeader(cached, runtime) == DcAppResultOk &&
+		!memcmp(cached->buildId, wanted->buildId, sizeof(wanted->buildId)) &&
 		dcAppPrvVerifyCachedImage(wanted, runtime);
 }
 
@@ -346,9 +407,12 @@ static void dcAppPrvClearActiveAppContext(void)
 	dcAppPrvClearActiveRamContext();
 }
 
-static void dcAppPrvSyncExecutableCache(void)
+static void dcAppPrvSyncExecutableImage(const struct DcAppImageHeader *hdr)
 {
-	flashSyncExecutableRange(QSPI_APP_CACHE_START, QSPI_APP_CACHE_SIZE);
+	uint32_t imageLimit;
+
+	if (dcAppPrvImageLimit(hdr, &imageLimit))
+		flashSyncExecutableRange(hdr->loadAddr, imageLimit);
 }
 
 static void dcAppPrvBeginActiveRamContext(const struct DcAppImageHeader *hdr)
@@ -418,7 +482,13 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 	if (result != DcAppResultOk) {
 		char msg[96];
 
-		snprintf(msg, sizeof(msg), "%s app is %s", dcAppPrvRuntimeName(runtime), dcAppResultName(result));
+		if (result == DcAppResultIncompatible &&
+				dcAppPrvHeaderLooksLikeThisRuntime(&hdr, runtime) &&
+				!dcAppPrvHeaderHasCurrentBuildContract(&hdr))
+			snprintf(msg, sizeof(msg), "Update /APPS: %s does not match this firmware",
+				path[6] ? path + 6 : path);
+		else
+			snprintf(msg, sizeof(msg), "%s app is %s", dcAppPrvRuntimeName(runtime), dcAppResultName(result));
 		result = dcAppPrvFail(result, msg);
 		goto out;
 	}
@@ -427,7 +497,7 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		goto out;
 	}
 	if (dcAppPrvCachedBuildMatches(&hdr, runtime)) {
-		mLoadedHeader = *dcAppPrvCachedHeader();
+		mLoadedHeader = *dcAppPrvCachedHeaderAt(hdr.loadAddr);
 		mLoadedRuntime = runtime;
 		result = DcAppResultOk;
 		goto out;
@@ -437,8 +507,8 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultReadError, "Cannot rewind app file");
 		goto out;
 	}
-	eraseSize = dcAppPrvCachedEraseSpan(hdr.imageSize);
-	if (!flashWrite(QSPI_APP_CACHE_START, eraseSize, NULL, 0)) {
+	eraseSize = dcAppPrvCachedEraseSpan(&hdr);
+	if (!eraseSize || !flashWrite(hdr.loadAddr, eraseSize, NULL, 0)) {
 		result = dcAppPrvFail(DcAppResultFlashError, "Cannot erase app cache");
 		goto out;
 	}
@@ -462,7 +532,7 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		writeSize = dcAppPrvAlignUp(now, QSPI_WRITE_GRANULARITY);
 		if (writeSize > now)
 			memset(buf + now, 0xff, writeSize - now);
-		if (!flashWrite(QSPI_APP_CACHE_START + pos, 0, buf, writeSize)) {
+		if (!flashWrite(hdr.loadAddr + pos, 0, buf, writeSize)) {
 			result = dcAppPrvFail(DcAppResultFlashError, "Cannot write app cache");
 			goto out;
 		}
@@ -476,9 +546,9 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultFlashError, "App flash verify failed");
 		goto out;
 	}
-	dcAppPrvSyncExecutableCache();
+	dcAppPrvSyncExecutableImage(&hdr);
 
-	mLoadedHeader = *dcAppPrvCachedHeader();
+	mLoadedHeader = *dcAppPrvCachedHeaderAt(hdr.loadAddr);
 	mLoadedRuntime = runtime;
 	result = DcAppResultOk;
 
@@ -508,7 +578,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	if (mLoadedRuntime != runtime || dcAppPrvValidateHeader(&mLoadedHeader, runtime) != DcAppResultOk)
 		return dcAppPrvFail(DcAppResultNoLoadedApp, "No compatible app is loaded");
 	dcAppPrvClearActiveAppContext();
-	dcAppPrvSyncExecutableCache();
+	dcAppPrvSyncExecutableImage(&mLoadedHeader);
 	audioPwmStop();
 	if (!dcAppPrvApplyAppRam(&mLoadedHeader))
 		return dcAppPrvFail(DcAppResultInvalid, "Cannot initialize app RAM");

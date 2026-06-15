@@ -1,0 +1,65 @@
+$Header: /fridge/cvs/xscorch/AUTHORS,v 1.17 2011-08-01 00:01:39 jacob Exp $
+
+
+(Please do not list these e-mail addresses on webpages, or
+list them in other packages, without contacting us first.)
+
+
+
+Principle code written by:
+
+   Justin David Smith (c) 2005,2004,2003,2002,2001,2000
+   http://chaos2.org/
+   justins(at)chaos2.org
+
+   Jacob Luna Lundberg (c) 2011,2009,2006,2005,2004,2003,2002,2001,2000
+   http://www.gnifty.net/
+   jacob(at)gnifty.net
+
+
+
+Contributors:
+
+   Matti Hänninen (c) 2000
+   matti (a) mvillage.u-net.com
+   Improved land generation
+
+   Jason House (c) 2003
+   jhouse (a) mitre.org
+   New shielding algorithms
+   Various bug fixes
+
+   Jake Post (c) 2000,2001
+   waif (a) chaos2.org
+   Nifty plasma fractals used in certain explosions
+   Algorithm used to bounce missiles off of Force Shields
+
+   Nickolai Zeldovich (c) 2000
+   kolya (a) mit.edu
+   Random player locations
+   Network code contributions
+
+
+
+Thanks:
+
+   Mikhail Kruk and Alexander Rasin, http://www.scorch2000.com/
+   They gave us their insight on network development from when they
+   developed the Java version of the game.  Without their advice it
+   probably would have taken forever for us to figure it out :)
+   Thanks!
+
+   The various people who have ported xscorch to different platforms:
+      *  Will Andrews, FreeBSD
+      *  H. Wade Minter, RedHat
+      *  Marcin Garski, Fedora Project
+      *  Brian Bassett, Debian, 2001
+      *  Brian Almeida, Debian, 2000,2001
+      *  Michael D. Ivey, Debian, 2002,2003
+      *  Team OS/2 Russia, OS/2
+
+
+Please note that most of this code is licensed under version 2 of the GNU
+General Public License ONLY, the version that is included with this source
+distribution.  NO later version of the General Public License is valid for
+the full xscorch distribution.

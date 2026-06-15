@@ -1,0 +1,141 @@
+/* $Header: /fridge/cvs/xscorch/libj/libj.h.in,v 1.12 2009-02-24 05:14:21 jacob Exp $ */
+/* 
+
+   libj - libj.h                 Copyright (C) 1998-2003 Justin David Smith
+   justins (a) chaos2.org        http://chaos2.org/
+    
+   Definitions for libj
+   
+
+   This program is free software; you can redistribute it and/or modify it
+   under the terms of the GNU General Public License as published by the
+   Free Software Foundation, version 2 of the License ONLY.
+
+   This program is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   General Public License for more details.
+
+   You should have received a copy of the GNU General Public License along
+   with this program, in the file COPYING. If not, write to the Free
+   Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA
+   
+   
+   This file is part of LIBJ.
+   
+*/
+
+
+/* For @PACKAGE@, libj version @LIBJ_VERSION@ */
+
+
+#ifndef __libj_included
+#define __libj_included
+
+
+/* Include files */
+#include <stdlib.h>
+
+
+/* Setup libj embedded/standalone and other configuration */
+#define  LIBJ_STANDALONE      @LIBJ_STANDALONE@
+#define  LIBJ_C99_STANDARD    @LIBJ_C99_STANDARD@
+
+
+/* Version information */
+#if LIBJ_STANDALONE
+#define  __libj_version       @LIBJ_VERSION_EXPR@
+#endif /* LIBJ_STANDALONE */
+
+
+/* Compilation definitions */
+#define  LIBJ_LIBC_STRING     @LIBJ_USE_LIBC_STRING@
+
+#ifndef TIME_WITH_SYS_TIME
+#define  TIME_WITH_SYS_TIME   @LIBJ_TIME_WITH_SYS_TIME@
+#endif /* TIME_WITH_SYS_TIME */
+
+#ifndef HAVE_SYS_TIME_H
+#define  HAVE_SYS_TIME_H      @LIBJ_HAVE_SYS_TIME_H@
+#endif /* HAVE_SYS_TIME_H */
+
+#ifndef HAVE_GETTIMEOFDAY
+#define  HAVE_GETTIMEOFDAY    @LIBJ_HAVE_GETTIMEOFDAY@
+#endif /* HAVE_GETTIMEOFDAY */
+
+
+/* Miscellaneous constants */
+#define  LIBJ_RK_PRIME     32749 /* Rabin-karp prime number (should be 15-bits max) */
+#define  LIBJ_READBUF      0x4000/* Default read buffer size */
+
+
+/* Data types */
+#ifndef LIBJ_TYPES
+#define  LIBJ_TYPES              1
+typedef  unsigned @LIBJ_BYTE_TYPE@     ubyte;
+typedef  unsigned @LIBJ_WORD_TYPE@     uword;
+typedef  unsigned @LIBJ_DWORD_TYPE@    udword;
+typedef  unsigned @LIBJ_QWORD_TYPE@    uqword;
+
+typedef  signed   @LIBJ_BYTE_TYPE@     sbyte;
+typedef  signed   @LIBJ_WORD_TYPE@     sword;
+typedef  signed   @LIBJ_DWORD_TYPE@    sdword;
+typedef  signed   @LIBJ_QWORD_TYPE@    sqword;
+
+typedef  unsigned @LIBJ_BYTE_TYPE@     byte;
+typedef  unsigned @LIBJ_WORD_TYPE@     word;
+typedef  unsigned @LIBJ_DWORD_TYPE@    dword;
+typedef  unsigned @LIBJ_QWORD_TYPE@    qword;
+typedef  unsigned @LIBJ_DWORD_TYPE@    sizea;
+typedef  signed   @LIBJ_DWORD_TYPE@    indexa;
+typedef  unsigned @LIBJ_WORD_TYPE@     wchar;
+typedef  signed   @LIBJ_DWORD_TYPE@    dimensiona;
+
+#define  DWORD_MAX               0xffffffff
+#define  WORD_MAX                0xffff
+#define  BYTE_MAX                0xff
+#endif /* LIBJ_TYPES */
+
+
+/* Other useful definitions */
+#ifndef LIBJ_BOOL
+#define  LIBJ_BOOL               1
+#define  false                   0
+#define  true                    (!false)
+#ifndef __cplusplus
+typedef  ubyte                   bool;
+#endif /* not C++ */
+#endif /* LIBJ_BOOL */
+
+
+/* Useful in manipulating ranges of numbers */
+#define  clamp(x, a, b)          ((x) < (a) ? (a) : (x) > (b) ? (b) : (x))
+#define  min(x, a)               ((x) < (a) ? (x) : (a))
+#define  max(x, a)               ((x) > (a) ? (x) : (a))
+
+
+/* Typical function defines */
+typedef  void (*destructorfn)(void *data);
+typedef  bool (*comparefn)(const void *a, const void *b);
+typedef  bool (*iteratorfn)(void *a, void *params);
+
+
+/* Version method */
+#if LIBJ_STANDALONE
+unsigned int libj_version(void);
+#endif /* LIBJ_STANDALONE */
+
+
+/* __libj_unused is a special attribute indicating a function argument is
+   ignored within the function; this is useful for functions which MUST accept
+   an argument because they escape, but do not actually access the argument. */
+#ifndef __libj_unused
+#if __GNUC__ && LIBJ_C99_STANDARD
+#define  __libj_unused                  __attribute__((unused))
+#else /* Not C99 code */
+#define  __libj_unused
+#endif /* LIBJ_C99_STANDARD? */  
+#endif /* __libj_unused undefined? */
+
+
+#endif /* Header included? */

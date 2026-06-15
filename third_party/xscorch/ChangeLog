@@ -1,0 +1,999 @@
+$Header: /fridge/cvs/xscorch/ChangeLog,v 1.180 2011-07-31 23:44:41 jacob Exp $
+
+
+ChangeLog for XScorch.
+Copyright(c) 2000-2004 Justin David Smith
+Copyright(c) 2000-2011 Jacob Luna Lundberg.
+
+
+Changes in 0.2.1
+------------------
+
+   KNOWN BUGS:
+    * Leap Frogs fail to leap in Interleaved Mode, because the land
+      is not cleared by one explosion before the next missile is animated.
+    * Some moves/items are interpreted locally instead of sent through
+      the network server like they should be.  It contributes to desync.
+    * Graphics/Computers are fast - hangs and crashes have been reported.
+    * The wedge code sometimes draws straight ends instead of rounded ones.
+    * The man page is out of date enough to notice.
+
+
+   BUG FIXES:
+    * Audited for 64-bit pointers and should now run on 64-bit platforms.
+    * Hans de Goede of the Fedora project fixed a stack smash in saddconf.
+    * Fix from Sayu for roller infinite loop on elastic/rubbery walls bug.
+
+
+   MISCELLANEOUS:
+    * Updated the FSF's address in our GPL notices.
+    * Upgraded various autotools cruft so it kinda works with newer versions.
+    * Patch from Ilya Barygin to allow linking with the --as-needed option.
+    * Added autoselection of h_addr_list[0] vs. h_addr.
+    * Updated the libtoolization.
+
+
+   GTK 2.0 CONVERSION
+    * GTK >= 2.20 is now required.  I got tired of the GTK habit of
+      constantly coming up with a new shiny thing and deprecating every
+      way that used to be the right way to do stuff, so I am not going
+      to even vaguely try to support GTK < 2.20.
+    * Fixed segfault in some menus caused by incorrect use of GtkDialogBox.
+    * Changed yet more random interfaces GTK changed for whatever reason.
+    * We need to finish GTK2 support.  We are using allow deprecated some.
+      1. GdkFont is deprecated, so all the font code still needs rewritten.
+      2. The chat window used GtkText and still need to be rewritten.
+      3. sgtk/swidgets/sconsole.c:#define  __ALLOW_DEPRECATED_GDK__
+         sgtk/swidgets/sdialog.c:#define  __ALLOW_DEPRECATED_GDK__
+         sgtk/swindow-gtk.c:#define  __ALLOW_DEPRECATED_GDK__
+
+
+
+Changes in 0.2.0
+------------------
+
+   KNOWN BUGS:
+    * Some moves/items are interpreted locally instead of sent through
+      the network server like they should be.  It contributes to desync.
+    * Graphics/Computers are fast - hangs and crashes have been reported.
+    * The wedge code sometimes draws straight ends instead of rounded ones.
+    * Leap Frogs fail to leap in Interleaved Mode, because the land is not
+      cleared by one explosion before the next missile is animated...
+    * The man page is out of date enough to notice.
+
+
+   BUG FIXES:
+    * Removed excessive assertion in seconomy-gtk.c (thanks Gunnar).
+    * Fix snet header file inclusion.
+    * Only sa_handler OR sa_sigaction in handler (cross compatibility).
+    * Repaired two bugs in sgame/soptions.c (fixes solaris compiles).
+
+
+   MISCELLANEOUS:
+    * License restricted to version 2 of the GPL.
+    * Easter Egg wars :)
+    * Fixed #warnings or changed them to /* TEMP */ for 0.2.0 release.
+
+
+
+Changes in 0.1.16
+------------------
+
+   KNOWN BUGS:
+    * Some moves/items are interpreted locally instead of sent through
+      the network server like they should be.  It contributes to desync.
+    * Graphics/Computers are fast - hangs and crashes have been reported.
+    * The wedge code sometimes draws straight ends instead of rounded ones.
+    * Leap Frogs fail to leap in Interleaved Mode, because the land is not
+      cleared by one explosion before the next missile is animated...
+    * The man page is out of date enough to notice.
+
+
+   BUG FIXES:
+    * Resolved the force shields bug, thanks to Jason House.
+    * Switched to more accurate (and slower) mag shield computations.
+    * Fixed bug where power was being reduced unfairly at start of turn.
+    * Resolved the mag shields sign bug in 0.1.16-pre1 (Jason House).
+    * Prevent Auto Defense from raising a dead player's shields.
+    * Fix precision and yield calculations on triple weapons.
+    * WTF?  Wrong scaling used again/still when life lost...
+    * Fix napalm bugs including tunneling through solid rock and
+      fizzling even with contact triggers.
+    * Fixed argument parsing of -g, -S, and unknown option error reporting.
+    * Replaced !vp->dead with SC_PLAYER_IS_ALIVE(vp) in sai/saiturn.c
+      This should make dead people invisible to AIs.
+    * Weapons no longer pass through shields, with or without triggers.
+    * Cleanup of sphysics and strack code, and adding more safety checks.
+    * Corrected minor memory leaks, and a potentially major NULL pointer
+      dereference, in the console highlights code.
+    * Added support for dynamically updating fonts on consoles.
+    * Added Glib assertions to console code to help track down problems.
+    * Fixed several significant errors in the flight trajectory code,
+      involving improperly initialized values, broken invariants, and
+      other minor errors that, added up, resulted in serious bugs.  This
+      fixes issues with tunnelling weapons never detonating or dampening
+      until impact with the ground.
+    * Fixed several logic errors in the roller code.
+    * xscorch binary no longer has a dependence on the installed man page.
+    * xscorch binary no longer has a dependence on license or xscorch.txt
+      files.
+
+
+   ACCESSORIES:
+    * Switched accessory info storage over to the data registry.
+
+
+   ECONOMICS:
+    * Created scoring.def config file and added readers (Jason House).
+    * Switched economics scoring types over to data registry storage.
+
+
+   WEAPONS:
+    * Cleanup of the phoenix system code.
+    * Created a weapon explosion dispatch that simplifies things.
+    * Add phoenix action DETONATE which causes immediate detonation.
+    * Made some weapon explosion types match the def file more closely.
+    * Add a new weapon called the ``Black Market MIRV''.  =)
+    * For the truly adventurous, added a debug-only weapon called
+      ``Mr. Napalm''.  Think Mr. Fusion, only with... ah... napalm...
+    * Switched weapon info storage over to the data registry.
+    * Implemented the capability to detonate weapons at the tank barrel.
+    * Implemented wedged blasts, allowing Riot Charge and Riot Blast.
+      Thanks to Jason House for the wedged explosions drawing code.
+
+
+   MISCELLANEOUS:
+    * Fixed <string.h> functions all over the codebase.
+    * Fixed compiler warnings caused by empty last case switches.
+    * Resolved some ambiguities in string manipulations.
+    * Added memcmpn to sstr. Analagous to strcmpn.
+    * Added truly hidden options.  Insanity, indeed...
+    * Implemented a registry for in-game data.
+    * It is now possible to override the fonts.  Save a ~/.xscorch/config
+      file and edit the entries in the fonts section.  I (Justin) find that
+      adding this to ~/.xscorch/config helps a lot if you're on XFree86 4.x:
+         fonts = font_class {
+            fixedFont        = "-adobe-courier-medium-r-*-*-12-*-*";
+            italicFixedFont  = "-adobe-courier-medium-o-*-*-12-*-*";
+            boldFixedFont    = "-adobe-courier-bold-r-*-*-12-*-*";
+         }; End of block fonts
+    * Added font selection interface.  It's not quite done yet, but you can
+      access it from the main menu, or from the Graphics options window. It
+      sort of works; the status bar gets reset, which can be annoying in
+      the middle of the game, but the other consoles seem to update fine.
+    * Converted over to using embedded libj libraries, instead of manually
+      imported files for registry/string functions.
+    * Added --enable-debug configure option.
+    * Updated the ChangeLog. Numerous times...
+    * Reorganized includes throughout the codebase.  From now on they are
+      supposed to be rather alphabetized, so please sort when you add. ;)
+      A note on that:  xscorch.h and sgtk.h break the rules, as they *must*
+      be listed first if they are included at all.
+    * Compliance with C99.
+    * Fixed up and commented lots of trajectory code in sphysics.c.
+    * Link problem on binary in OpenBSD - need explicit -lm (Jesse Meyer).
+    * Fixing lags in interface caused by state machine problems.
+    * Updated libtool, dispite what a PITA it is.
+    * Hasn't anyone figured out what --insanity does yet?
+
+
+   GTK 2.0 CONVERSION
+    * Initiating conversion of interface code to GTK 2.0.  The 2.0-specific
+      code is NOT WELL TESTED yet.  To force GTK 1.2, use the new configure
+      option --with-gtk-12 (currently this is the default).  To force GTK
+      2.0, use --without-gtk-12.  Once GTK 2.0 support is stable, the default
+      will change to using GTK 2.0 code.
+    * Current issues:
+      1. GdkFont was deprecated.  All font code will need to be rewritten.
+      2. There is text which assumes latin-1 encoding, GTK 2 wants unicode.
+         To complicate matters, I use EUC-JP encoding, so forget about
+         entering unicode data from my terminals...
+      3. A couple of spots with GtkText must be rewritten.  This has been
+         partially done for ScDialog, but right now the font support is
+         only partially there.
+      4. Some signalling paths, notably for expose, are not compatible
+         with GTK 1.2.  This will take some time to fix everywhere; for
+         now, the code is at least drawing, and that's good enough for me.
+
+
+
+Changes in 0.1.15
+------------------
+
+   KNOWN BUGS:
+    * Force Shields are definitely rebounding at odd angles sometimes.
+    * Graphics/Computers are fast - hangs and crashes have been reported.
+    * Napalm can tunnel upwards through solid rock, erm...
+    * AIs target dead people.  ``I see dead people...''
+
+
+   BUG FIXES:
+    * Removed extra slashes being added to SC_GLOBAL_DIR in sgtk/smenu-gtk.c
+    * Added a signal handler for SIGPIPE and removed MSG_NOSIGNAL
+
+
+   NETWORK:
+    * Update tcpnet to 0.5, only change is removal of MSG_NOSIGNAL
+
+
+   AI:
+    * Added some support to allow AIs to use Shield Sappers, but it
+      is disabled for now because most of them almost always miss...
+    * Made AIs buy just a wee bit more aggressively.  If they lose the
+      first several rounds, they're often effectively done for good.
+      What we really need here is a complete overhaul, however.
+
+
+
+Changes in 0.1.14
+------------------
+
+   This release is gearing up toward a possible 0.2 release, now that most
+   of the weapons are implemented...
+
+   KNOWN BUGS
+    * Force Shields are definitely rebounding at odd angles sometimes.
+    * Graphics/Computers are fast - hangs and crashes have been reported.
+
+
+   BUG FIXES:
+    * Fixed a segfault in _sc_spill_fill, when no walls were selected and
+      napalm detonated off-screen.  Parts of the spill code were not using
+      proper VCS.
+    * Fixed up a quick hack for the ``useless items'' bug.
+      (Turning display of such items off was causing a lockup.)
+    * Fixed some of the long standing roller bugs.
+    * Fixed another roller bug (lockup on direct tank impact).
+    * argument misordering in memcpy() in snetconnect.c
+    * Fixed order for winners/losers first
+    * Call order breakage in sending auto defense shield orders.
+    * Wrong scaling was used in reducing power when life lost.
+    * Return Leap Frogs to reasonable y values before creating children.
+    * Fixed the funky tank placement where some got platforms and some not.
+      (sc_land_avg_height_around() didn't always get it right)
+    * Fixed potential infinite loop in MORON AI
+      (thanks to Mark Anderson for spotting)
+    * Fixed minor error in console driver; it allowed nonprintable chars
+    * Fixed the buggy allowreturn logic in sactiveconsole.c
+    * Fixed a bug that allowed user to issue commands to AI if the AI
+      spent awhile thinking (this was one heck of a ``feature'' :)
+
+
+   ACCESSORIES:
+    * Improved magnetic effect precision in mag shielding.
+    * Added the Tank Defense window (for Auto Defense accessories).
+      It's currently incompletely implemented but I wanted to check
+      it in anyway while I go off looking for a checkbox widget...
+    * Months later -- finished the Tank Defense window.  Yay!
+
+
+   WEAPONS:
+    * Fixed thia really naaty apelling error in the weapona def file.
+
+
+   ECONOMICS:
+    * Winnings now scale by initialcash, so as not to be trivialised
+      by a high interest rate and initial cash setting.
+    * There is now a Lottery option that awards a random weapon to a
+      random player before each round.
+
+
+   MISCELLANEOUS:
+    * --insanity does something now :)
+    * Status bar includes information on rounds.
+    * Added PGUP and PGDN to the tank power key bindings.
+    * Cleaning up hacks in inventory dialogue
+    * Made player selweapon and selshield use info ptrs.  This also
+      cleans up the former hack used to fix the ``useless items bug''.
+
+
+   NETWORK:
+    * The low level of the network has been switched over to a much cleaner
+      packet engine designed for TCP specifically.  If all goes well, there
+      won't be any real change to network games, but this will allow for us
+      to start working on the areas of networking that need it...
+    * Update tcpnet to 0.4, no interface or packet changes.
+
+
+
+Changes in 0.1.13
+------------------
+
+   KNOWN BUGS:
+    * There is some evidence that force shields may not be rebounding
+      weapons in quite the right direction, but only occasionally.
+    * Player drop, death and move events do not trigger a landfall on
+      land above the tank (can only happen in certain circumstances but
+      appears to be aggravated in Interleave mode)
+
+
+   BUG FIXES:
+    * Fixed buggy calculations for determining shield and tank impacts.
+    * Fixed a nasty bug where double-clicking in inventory screen and
+      other locations was interpreted as _three_ button clicks, not 2.
+    * Fixed funky bombs so they will draw arcs when the center of
+      detonation is at ground level (or more specifically, one pixel
+      below ground level).
+    * Fixed bug in scrollable active consoles, which caused mouse click
+      events to be interpreted at the wrong locations when scrolled.
+    * Fixed error in values displayed in inventory header (round count)
+
+
+   INTERFACE:
+    * Keybindings for shields have changed!  Press `e' to engage the
+      shields now; the `s' key now toggles between shields which are
+      currently in inventory, as it should always have done...
+    * Status bar has been redesigned: there is a new option, Extended
+      Status in game options window, which will bring up a two-line
+      statusbar; the second line contains less vital information about
+      the current game.
+    * Added wind indicator to top-right of screen
+    * Status bar now accepts mouse input on certain controls, to toggle
+      weapons, activate shields, toggle triggers, use batteries, move.
+    * Information about the currently selected item is now displayed at
+      the bottom of the inventory screen.
+
+   The currently selected shields are displayed in the status bar next
+   to the strength of the current shield.  The display for currently
+   selected shields is a bit cryptic, but it will help to know that
+   shields are classified by their power, with a suffix indicating type:
+   M for magnetic, F for force, and S for standard shields.  So, for
+   example, `160M' represents a magnetic shield with 16000 life.
+
+   When no shields are selected (i.e. you have no shields left in your
+   inventory), the text `None' is displayed next to the shield power in
+   the status bar.
+
+
+   ACCESSORIES:
+    * Remove shield probability hack.
+    * Support for Magnetic Shields.
+    * Support for Force Shields.
+    * Disallow shields directly absorbing their owner's missiles.
+    * Each shield type has its own colour.
+    * Solar Panels can recharge some shield damage each turn.
+
+   The magnetic shielding is a very complex piece to tune correctly
+   so it may be a bit odd until we get it adjusted just right.  Feel
+   free to e-mail us (particularly Jacob) with any suggestions as to
+   tuning or functionality of the new shielding.
+
+
+   WEAPONS:
+    * Created the Shield Sapper weapon, which really saps shields.
+
+
+   AI:
+    * Worked on AI targetting, making them compensate for new shields
+    * Added new option, "Always Offset" to the AI controller menu.
+    * Added new option, "Scan Refinement" to the AI controller menu.
+    * Updates to Annihilator AI, w.r.t. its budget
+    * AI's now know how to buy and use batteries
+
+
+   GAME PLAY MODES:
+
+   Interleave mode is in development.  This will probably be renamed
+   once it stabilizes, currently it is anything but stable.  When enabled,
+   it basically means weapons and explosions are run in parallel -- the
+   game will NOT stop to draw an explosion, other weapons will merrily
+   continue to fly and detonate.
+
+   The major problem with it right now is an issue of causality -- when
+   do certain events occur?  F.e., land isn't cleared until an explosion
+   clears (not as its exploding), which causes drastically different
+   behaviour for spread weapons than the old state machine gave.  Whether
+   this is a good or bad thing?  *shrug*
+
+   If you really want to play with this, check the ``Interleave Tracking''
+   checkbox in the ``Game Options'' window.  And watch out for levitating
+   napalm :)
+
+
+   MISCELLANEOUS:
+    * Immobile tanks are identified in player screen with an `(I)'
+    * Auto defense now automatically revives dead shields when the
+      tank sustains damage
+    * Cleaned up GTK dialogue code
+    * Tank info and Tank Fuel screens now focus properly, and also
+      accept the ESC key to close the windows out (in addition to
+      Return)
+    * Fixed most console windows so they FINALLY grab focus like
+      they were supposed to do 10 releases back or so...
+    * Added tooltips, and a configuration option in Game Options
+      to turn tooltips off.
+    * Console scrollbars now accept mouse input
+    * Consoles now accept PageUp/PageDown to scroll
+    * State machine overhaul (partly to support interleaving
+      the various tracking states, making simultaneous explosions
+      and weapon tracking possible)
+
+
+
+Changes in 0.1.12
+------------------
+
+   This release should be considered to resolve most of the stability
+   regression of the last release, except in the networking code, which
+   is already marked with a big fat EXPERIMENTAL anyway.  ;-)
+
+   BUG FIXES:
+    * Fixed a nasty loop bug in the Moron AI weapons purchasing.
+    * Enabled compile-time font selection (see sgtkfont.h).
+    * Fixed a memory leak in an aibuy failure path probably nobody sees.
+    * Fixed can-buy limitations for one-time purchases (like Triple Turret).
+    * Removed const from info structs (no user-visible change I hope).
+    * Fixed a `weapon inventories linger from one game to the next' bug.
+    * Working on getting tunnelling to work properly...  Currently the
+      tunnelling is working reasonably well (landfall is postponed until
+      the weapon actually detonates) but there is some strange rebound
+      going on when the weapon first impacts with land...
+    * Implemented proper mechanism for making course corrections to a
+      missile in FLIGHT mode, use sc_traj_revise_velocity(), do NOT attempt
+      to modify the control equations directly.
+    * Above fix also fixes tunnelling rebound bug
+    * Fixed wind bug/quicksand bug in tunnelling by revising acceleration
+      values while a weapon is tunnelling through the ground.  This finally
+      makes tunnelling quite usable!
+
+
+   TANK PROFILES:
+    * Added two new tank profiles and renamed Default to Fortification.
+    * Added support for more/less fuel-efficient tanks.
+    * Added support for harder/softer tanks.
+    * Added support for immobile tanks.
+    * Added turretRadius option (affects both firing point and drawing).
+      Make sure this value is large enough to be outside shield radius...
+
+   Yes yes, so hardness isn't really a very good measure of how much damage
+   a tank will take.  When I worked for a Titanium manufacturer they were
+   constantly looking for that elusive balance of hardness and strength that
+   would work best on tanks.  It's worth a lot of money...  Plus real tanks
+   tend to have this brittle filler crap that is supposed to absorb the
+   shock from direct hits.  Turns out that otherwise the concussion will
+   often do in the tank's occupants even if the tank itself isn't really
+   breached.  Hmm.  So anyway, it's a computer game.  Let's just call it
+   hardness, ok?  =)
+
+
+   ACCESSORIES:
+    * Fixed contact triggers so they're only consumed if they're consumable.
+    * The accessories.def version of the weapons.def file is now supported.
+    * Added batteries for repairing tank damage (and therefore allowing you
+      to restore full firing power when damaged, see below).  To use a single
+      battery on a damaged tank, press `B' -- it restores 5% of life.
+
+
+   WEAPONS:
+    * The yield calculations of spider weapons (funky bomb) are increased
+      by 50% to more accurately model the yields given in the real code.
+      On average, 75% of legs are detonated, not 50% as assumed before.
+    * Remove the phoenix debug output that snuck into the last release.
+    * Restored the functionality of the DEFER state flag.
+    * Resolve remaining Leap Frog issues.
+    * Firing power is limited by tank's life (i.e. damage sustained directly
+      to tank will affect maximum firing ability)
+    * Added precision weapons buying for Choosers and Calculators.
+    * Made AIs that buy from lists of weapons a bit less predictable.
+    * Introduced notion of ground damping to tunneling weapons.
+    * Ground damping constant can be controlled in Physics Options window.
+
+
+   MISCELLANEOUS:
+    * Fixed AUTHORS to credit Brian Bassett as the new Debian maintainer.
+
+
+
+Changes in 0.1.11
+------------------
+
+   KNOWN ISSUES:
+    * This release may be a regression in stability.  There are changes
+      to internal game structures that the network code definitely has
+      NOT been updated for, in particular.  0.1.10 is more stable, but
+      hey -- this release has rollers :)
+    * For most accessories, you can only purchase one bundle right now.
+      Don't know why, but bug will probably be cleared once accessories
+      are moved to the config files.
+    * Tunnelling leaves a lot to be desired.  It produces ah... amusing
+      effects -- probably also why digger/sandhog weapons don't work.
+
+
+   WEAPONRY AND ACCESSORIES:
+    * Roller weapons are now supported.
+    * Work is in progress on the digger/sandhog weapons.
+    * Work is in progress on tunnelling/contact triggers.
+    * Auto-defense is now implemented, so sequential mode is now
+      playable :)  Auto-defense will just bring up the best shields
+      that you have at the beginning of the round; not too fancy
+      right now.  Includes AI support for auto-defense.
+    * Fixed bug in napalm spill code that caused napalm weapons to
+      fizzle unexpectedly in certain terrains.
+    * Really fixed the fuel bug this time...
+    * Check out the new weapons.def file!
+
+
+   NETWORK:
+    * Player status is now sent across the network; the network
+      information panel will tell you who else is in the game,
+      their network address, and their current status.
+    * Not much progress here this time.  Go play with weapons.def!
+    * Network support is NOT compatible with previous releases, and
+      currently no weapon configurations are sent across; so you
+      will see _very_ interesting results if you mix-n-match the
+      weapon.def files on each client.
+
+
+   EXPLOSIONS AND ANIMATION:
+    * Explosions now ``clear'' by erasing from the inside out.
+    * Fixed redraw problem when using riot bombs (bug was introduced
+      in the prerelease from the new explosion clearing code).
+    * Dirt bombs and riot bombs now animate.
+    * Fixed bug where tanks are not redrawn if buried, after land fall.
+    * Further bugfixes in explosion drawing code.
+
+
+   MISCELLANEOUS:
+    * Fixed an omission in snet/Makefile.am that prevented compiling
+      when mikmod enabled and installed in a nonstandard location
+      (thanks to Will Andrews for spotting)
+    * Various changes in the game timing.
+    * ``None'' landscape added (mainly for debug: to test rollers).
+    * Added support for loading user-defined weapons and tank
+      profiles -- see the user config file for more.
+    * Can now specify an alternate user config file to load, using
+      the --config option on the command-line.
+    * Build system updated; new configure option, --disable-sound,
+      to disable sound support in the client.
+
+   The changes required to bring the game's manipulation of weapons
+   structures in line and allow loading of weapons files were not at
+   all small ones.  I (Jacob) had to rewrite several functions in
+   random places like saibuy.c and sinventory-gtk.c in order to allow
+   this to work.  So in some ways this release may be a bit of a
+   stability regression.  Please test it.  Go look in the weapons.def
+   file and play in there too.  I will try and write some useful
+   documentation on the structure of this file soon.  In the meantime
+   there is some documentation inside sphoenix.h for the bold.  The
+   next release will hopefully modify accessories to load from file.
+
+   On the other side of things, the new weapons stuff definitely will
+   have destabilized network games to the extent that you must make
+   sure the client and server have the same weapons.def file.  In the
+   future, the server will manage the weapons lists and this will
+   alleviate this particular problem.  Networking is still in quite a
+   transitional state anyway, and is likely to be unstable in other
+   ways as well.  Look for big changes there in the ``near'' future.
+
+
+
+Changes in 0.1.10
+------------------
+
+   NETWORK SUPPORT:
+    * The network sync types are now checked.
+    * Better documentation on the sync events in the code.
+    * Chat dialogue box is hooked up.
+    * We have packet ordering, but not yet retransmission or reordering
+      so if tcp manages to drop a packet it's game over...
+    * Lots of (now dead) bugs fell out of the new packet reception code.
+    * Server is now allowed to configure most game options, even after
+      other players have connected.  Clients may look at the game options
+      but they will not be allowed to change the options.
+
+
+   MISCELLANEOUS:
+    * Some sundry speling fixces went in to the source commentary.
+    * Sanity checking is performed before beginning a game.
+
+   ``Bring out your dead...''
+   ``But I'm not dead yet!''
+
+   We're still here, just incredibly busy these days -- both of us are
+   swamped in the vagaries of academia, work, research, and more work.  But
+   there have been changes in the game, mostly to the networking code --
+   we're trying to get it to be more stable.  Please give it a try, and let
+   us know if it's working, etc.  See doc/NETWORK for some more information.
+
+   We want to get the networking stuff stable before continuing work on
+   other aspects of the game.  If you'd like to help out on anything in the
+   game, just drop us an e-mail -- we'd love to have the help (and it could
+   speed up the release cycle, too :) We'll try to get prereleases out more
+   often, time permitting.
+
+
+
+Changes in 0.1.9
+-----------------
+
+   BUG FIXES:
+    * Deflector shield strength was too low/incorrect.
+    * Fixed problem with shields taking the shot when player fires to
+      right at 64degrees.
+    * Fixed problem with signal handling that prevented GTK from
+      exiting when various dialogues were open.
+    * Fuel counter wasn't decremented when moving (I think this bug was
+      introduced in the prereleases).
+
+
+   NETWORK SUPPORT:
+    * Gave up on UDP, ripped out xpuyopuyo's TCP codebase.
+    * Implemented (mostly) variable length packets and a recv queue.
+    * Fixed condition that might cause segfault regarding screen
+      sizes (see #warning's in 0.1.8 for details)
+    * Fixed misalignment caused by PRELUDE_BEGIN state (particularly
+      noticable when given the --client command-line option).
+    * Verification is sort of done on the current player state.
+    * Merged recvfrom() calls into single function (Nickolai Zeldovich)
+    * Fixed misalignments that were caused by a certain packet arriving
+      out of order.
+    * Messages are now displayed when client is waiting for some sort
+      of network activity.
+    * Player movement with fuel is now communicated.
+    * Client code was cleaned up.
+    * Network > Status option enabled in network games.  The server can
+      see all client connections, although the client does not (yet) have
+      that information.
+
+   This is a significant overhaul of the network code base; we decided to go
+   with TCP after all since the amount of data communicated is rather low.
+   The network code is much more stable; we were able to play complete
+   rounds over a rather unstable network link across 1000miles :)  Even the
+   bugs in the program (levitating land?!) were consistent on both sides.
+
+   There is better error recovery.  When a client drops off permanently, we
+   will probably have their player permanently destroyed, or perhaps turn it
+   over to an AI player.  Currently, nothing is done, so their tank will just
+   sit there until the end of time or someone gets around to blowing it up :)
+
+   The downside is 0.1.9 server can only talk to 0.1.9 clients; the protocol
+   is not yet stable.  But it seems to be working better; if you want to
+   give it a try, just do ./configure --enable-network
+
+
+
+Changes in 0.1.8
+-----------------
+
+   NETWORK SUPPORT:
+    * It's there.  It sort of works.  See below.
+    * Merged network bugfixes by Nickolai Zeldovich
+    * Added --port, --server, --client, --name commandline options
+    * Config data/player information is synchronized, sort of.
+    * Player orders and inventories are synchronized.
+
+
+   MISCELLANEOUS:
+    * Random walls implemented
+    * Fixed bug with getopt() that prevented compile on SunOS
+    * The animate flag is now used in land, player dropping
+
+   This release is a bugfix-only release, unless you're following network
+   development.  If you're following the network development, PLEASE read
+   doc/NETWORK for the current status, especially before sending in bug
+   reports.  Networking is disabled by default, you need to ./configure
+   --enable-network if you want to try network play.
+
+   There was a segfault-on-startup report on a libc-5 system, but we've been
+   unable to determine if xscorch was at fault.  Anyone out there with Linux
+   libc 5.3.12 who has been able to run xscorch?
+
+
+
+Changes in 0.1.7
+-----------------
+
+   NETWORKING MODE:
+    * Client/server communication code written.
+    * Control messages and chat appear to be working.
+    * Chat sort of works (can send, but text box isn't updated for recv)
+
+
+   BUG FIXES:
+    * VCS bug: tanks disappear when wrapping around - fixed.
+    * VCS bug: tanks can colocate if in different frames - fixed.
+    * VCS bug: distance calculation for damage could take long path even
+      with wraparound boundaries, causing no damage to be dealt even
+      though it is reasonable to expect damage - fixed.
+
+   The virtual coordinate system (VCS) was implemented in 0.1.5 to make
+   coordinate specification simpler, by allowing us to specify coordinates
+   without having to worry about the boundary conditions all over the code.
+   Unfortunately, this change broke a lot of things.  Hopefully they are
+   fixed now.
+
+   Networking code is disabled by default; you must configure with the
+   option --enable-network to build the networking code.  NETWORK GAMES
+   ARE NOT CURRENTLY PLAYABLE, but if you'd like to check out the code,
+   help debug it or better yet, send in code, we'd appreciate it.
+
+
+
+Changes in 0.1.6
+-----------------
+
+   BUG FIXES:
+    * Fixed an off-by-one error that will cause segfaults on game start
+      for most operating systems (even sometimes Linux).
+    * Additional safeties to avoid a potential but unlikely segfault
+      when verifying phoenix class weaponry.
+    * make install now uses DESTDIR.
+
+
+   PORTABILITY:
+    * Removed some DEBUG defines that used ellipsi from xscorch.h.
+    * Replaced variable array declarations with malloc/free.
+
+
+   GAMEPLAY:
+    * Tank profiles are implemented.  As a direct consequence, tanks can
+      no longer occupy the same location on the screen.  Nor can they
+      occupy the same position as a blob of land.  The physics model should
+      be much better behaved, now.  This also means there will be user-
+      selectable tank icons, in the near future.
+
+   If you get any `levitation' warnings during the game, please contact us
+   promptly.  I think I've resolved the levitation bug, but I'm not sure.
+
+
+
+Changes in 0.1.5
+-----------------
+
+   BUG FIXES:
+    * Fix minor alloc bug with AI controller (Nickolai Zeldovich).
+    * Problems with attempting to install to `NONE' are hopefully fixed.
+    * Since 0.1.2, funky bombs detonated near the edge of the screen could
+      send legs in the wrong direction.  This has hopefully been solved as
+      part of a large simplification in how land locations are specified.
+
+
+   GAMEPLAY:
+    * Player starting positions are now randomized (Nickolai Zeldovich).
+
+
+   WEAPONS:
+    * Liquid dirt implemented.
+    * Triple Shots have gone away, in favor of the new Triple Turret
+      accessory, which now impacts both baby missiles and missiles...
+    * Weapon verification completed, one step closer to weapon save files.
+
+   Ah, I forgot to release 0.1.4, in the midst of the system crash.  Let's
+   see, Sequential mode has been implemented, but otherwise the changes from
+   0.1.4 were minor.  Tank profiles (-> custom tank icons) are next on
+   Justin's list, and user-defined weapons are coming up on Jacob's list.
+
+
+
+Changes in 0.1.4
+-----------------
+
+   BUG FIXES:
+    * Fix realloc bug that shows up in Solaris (Nickolai Zeldovich).
+
+
+   GAMEPLAY:
+    * Sequential mode implemented
+    * Explosions are now faster
+
+
+
+Changes in 0.1.3
+-----------------
+
+   BUG FIXES:
+    * Bug prevented compiling without sound support, now fixed.
+
+
+   GRAPHICS:
+    * Napalm now has flames.  In the next version, they'll probably be
+      animated flames.
+
+
+   USER INTERFACE:
+    * Pause feature: press ^Z.  This is only meaningful during actual
+      firing but it's kind of handy to be able to pause the game while
+      the missiles are flying...
+
+
+
+Changes in 0.1.2
+-----------------
+
+   BUG FIXES:
+    * Fix crash on startup:  0.1.1 introduced a realloc thinko because I
+      wasn't really prepared to release yet.  The realloc was to remind me
+      how it should get done...  This release makes sure to initialise that
+      pointer first.  ;) -Jacob
+    * Made Spider weapons (Funky Bombs) avoid potential lockup.
+    * Fixed fatal bug with --geometry, when dimensions given were small.
+
+
+   SOUND SUPPORT:
+    * Sound support is present - see below for comments.
+
+
+   USER INTERFACE:
+    * Minor enhancements; status bar is now usable in small screens (it
+      will split into two rows so you still have access to all the info)
+    * Inventory lists will attempt to adjust to the current window size.
+
+
+   MISCELLANEOUS:
+    * `Unknown' AI added. This will select a random AI type, but
+      you will not be informed which AI you are playing against!
+    * `Random' landscape generator and `Random' sky selection.  These
+      will select any of the landscape generators to construct land.
+    * `Mass Kill', in the System Menu, is implemented.
+    * Icon-related code updated.
+    * Ditch Day's Tomorrow!
+
+   Sound support is present, but as you'll quickly notice, there are no
+   sounds yet.  Neither of us is particularly musically gifted, so if
+   someone out there is willing to write modules and sound effects, that
+   would be great!  The system is currently looking for XM files, although
+   any format playable by libmikmod is fine.
+
+   If you're interested in doing music, I've been thinking of splitting
+   it into five parts, prelude, inventory screen, main game, end round,
+   and end game.
+
+
+
+Changes in 0.1.1
+-----------------
+
+   USER INTERFACE:
+    * Merged icon, in xscorch-icon.xpm (Matti Hänninen).
+    * New xscorch logo! (thanks to Claire Luna Lundberg)
+    * Now you can find out who killed you (at end of round).
+      Look for the horribly labelled `Xby' field.
+    * Added --geometry command-line option
+    * Inventory lists are scrolling.  Unfortunately, the scroll
+      bars are not actually hooked up (yet).  Arrow keys will
+      scroll through the list; I'll get the pager keys working
+      someday.  Also, the inventory lists will be smarter about
+      dynamically sizing in the next release.
+
+
+   WEAPONS and DETONATIONS:
+    * Version 1.0 of Riot Bombs, dirt weapons.
+    * Ripped out constants all over the place to allow dynamic
+      resizing of weapon and accessory lists.  This allows changes
+      that will introduce save files for both categories.
+    * Made RAND phoenix location work (mostly).
+    * Killed one of the state flag ints in the sc_weapon struct.
+    * New plasma explosion-drawing code
+
+
+   LAND and GRAPHICS:
+    * New landscape:  Canyon
+
+   This release is primarily a bugfix release for folks who were having
+   crashes when running the game on recent Debian and FreeBSD releases.
+   The bug corrected is that of pressing Enter while in Inventory or
+   certain other screens.
+
+   In the meantime, enjoy the dirt bomb and riot charges :)
+
+
+
+Changes in 0.1.0
+-----------------
+
+   LAND and GRAPHICS:
+    * Merged Matti Hänninen's improved land generation code.
+    * Finally fixed the land_level bug on right boundary.
+    * Explosions wrap when wraparound walls are selected
+    * Added support for dynamic screen size / other graphics
+      options are implemented, and the graphics pipe has been
+      optimized yet again.  Land draws fast, now!
+
+
+   CONFIGURATION:
+    * Configuration files have been written; can save the game
+      options (well, most of them) by clicking the "Save Options"
+      button in the main menu.
+
+
+   WEAPONS and DETONATIONS:
+    * Funky Bombs really work now.
+    * Added "Black Rain" under arms level four.
+    * Complete separation of location from function of phoenix
+      weapons.  This will make some really twisted weapons possible
+      to create if you tweak sweapon.c right.  But the weapons
+      struct is rather poorly documented / commented right now...
+    * Improvements to weapon yield calculations used by AIs.
+    * Adjustments to scaling of Leap Frogs.
+    * Trace Paths is implemented.
+    * Napalm is implemented.
+    * Players can die in several ways.
+
+      Napalm is implemented.  It isn't all that great yet, but it
+      is implemented.  Future improvements will bring along burnt
+      land, and animated flames... for the time being, the relevant
+      part -- the destructive power -- is there. :)
+
+
+   AI CONTROLLER:
+      The AI controller is implemented.  These options are global,
+      they will affect all AI types.  These options will generally
+      make the game quite miserable for the human players.
+
+       - Human Target Practice:  AI's will always prefer human
+         targets to AI targets (except for AI's that fire at
+         random).  When playing against 9 Calculators, this can
+         make your day pretty lousy.
+
+       - Allow Offset Targetting:  generally, when a weapon hits a
+         shield it does less damage than an explosion detonating
+         right outside the shield (weapons hitting the shield do
+         not have a chance to detonate).  This changes the AI
+         targetting behaviour so they will deliberately aim outside
+         the shield, if their intended victim has raised shields.
+
+       - No budget constraints:  AI's will spend as much money as
+         they can, disregarding their budget preferences.
+
+
+   MISCELLANEOUS:
+    * Fixed a serious timing problem in the game
+    * Fuel has been implemented; press "F".  While in fuel menu,
+      you can use buttons or the Left/Right arrow keys to move.
+    * System menu implemented  (Ctrl-Y)
+    * Explosions wrap when wraparound walls are selected
+    * Added --yields command-line option
+    * Options not implemented are marked "N/A"
+    * Actual documentation exists, yay!
+
+   At this point, the game is functional enough to go to 0.1.0.  The 0.1.0
+   series will see addition of the missing weapons and accessories, and
+   implementation of the remaining "N/A" options.
+
+   Please note, that _two_ versions of the man page will be installed. One
+   is a "standard" manpage, while the other is a text document which is used
+   for the on-line game help.  You may remove the latter document, but the
+   Help menu will no longer function.
+
+
+
+Changes in 0.0.2
+-----------------
+
+   *  Justin: I broke smoke tracers. Hopefully they are fixed now.
+   *   Jacob: Changed accessory lookup to model after weapon lookup.
+              Created a weapon-specific yield calculation function.
+              Increased velocity damping in Leap-Frog weapons.
+              Made shield damage spill over when a shield fails.
+              Made chain weapons get smaller not larger.
+              Cleaned up and moved sc_phoenix_frog to sc_phoenix_chain.
+
+   *  Justin: Major UI changes.  Console widgets are now implemented so we
+         can have decent mouse support.  As time permits, these consoles
+         will take on a style other than the current "block-character"
+         format they are in.  The widgets will probably change in
+         appearance, but the usage will remain the same.
+   *  Justin: Overhaul of configuration dialogues
+
+   *  Justin: Added --insanity command-line option.
+
+   Thanks to everyone who dropped us a note about the first release -- we
+   appreciate the feedback!
+
+   There's not much new, in terms of gameplay.  This release is mainly a
+   restructuring of the code, so most of the advanced weapons/accessories
+   can be implemented.  Now that the code structure has more or less
+   stabilized, this is a good opportunity for other interested developers
+   to join the bandwagon.
+
+   In the next couple of releases, most of the weapons and accessories will
+   be implemented (and maybe a few new items as well) -- for all of those
+   whose favourite weapon is napalm, don't worry -- it is at the top of the
+   list :)
+
+
+
+Changes in 0.0.1
+-----------------
+
+   *  Justin and Jacob: Coded like crazy.  Here's the result...

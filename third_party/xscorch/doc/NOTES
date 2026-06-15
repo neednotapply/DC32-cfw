@@ -1,0 +1,201 @@
+$Header: /fridge/cvs/xscorch/doc/NOTES,v 1.39 2011-08-01 00:01:39 jacob Exp $
+
+
+NOTES file for XScorch.  
+Copyright(c) 2000-2004 Justin David Smith
+Copyright(c) 2000-2011 Jacob Luna Lundberg.
+
+
+This document agrees with version 0.2.1.
+
+
+!! Please read this document before reporting a bug.  This document contains
+   the current known issues with the game.  In particular, if you have ideas
+   on how to fix these bugs or implement some of these features, we'd like
+   to hear from you: send e-mail to xscorch(at)xscorch.org.
+
+Also refer to doc/NETWORK for network-related issues, and doc/AI for issues
+relating to the computer AI's.
+
+
+CONTENTS
+
+   Immediate Attention
+   Jacob's Notes
+   Weapons Implementation Status
+   Features Not Yet Implemented/Known Problems
+   Waif's Notes on log_accum.pl
+
+
+IMMEDIATE ATTENTION
+
+   Balance: Economics unfair, shield strength (Mattias Eriksson)
+
+   Network: Packet retransmission!
+
+
+JACOB'S NOTES
+
+   ** More Things for Immediate Attention **
+   These are the features and bugs I plan to work on soon.
+
+   * Hopefulls for release soon *
+   Radiator system that reduces your damage by (50 * (1 - p->power / 1000)) percent?
+   Make spider phoenix more aware of hills in the way...
+   Rewrite the AI budgeting system -- what a mess!
+   Finish teaching AIs to use Shield Sappers.
+   Document the weapon info struct format.
+   Animate napalm flames (?).
+
+   * Long term stuff *
+   Weapon creation utility.
+   Check out porting to WinCrud via gtk (painful) ...
+   There are in fact several things that need selectable tracking functions...
+   [Now partially implemented.]
+   o  blasts at tank barrel
+   o  sandhogs underground
+   o  rollers on surface
+
+   * Weapon selling/trading in game *
+   We both have thoughts on this and I think it will happen.  Stay tuned...
+   o  To do this we will need `unique' weapons, i.e. eliminate the idea of a `mass
+      market' with a surplus of weaponry.  Might be easy, hard to say `tho.
+   o  `fair' pricing model for custom weapons.  Can't have Bob the Destroyer
+      designing a new weapon with 10000Force destructive, then making it available
+      for 1$ (would be amusing, though).
+
+   * Napalm doesn't spill on high-speed impact, even with triggers.
+     JDS:  I left comments in sspill.c about this; I think I know what's
+           going on.  Does it only occur when the weapon tunnels?
+
+
+WEAPONS IMPLEMENTATION STATUS
+
+   ** The Weapon List **
+   We still have a ways to go creating weapons.
+   We need some more specialized detonation functions.
+
+   * separate weapon explosion drawing functions *
+   (marked by conventions used with weapons list below)
+   + (a) circular gradient explosions ("normal" weapons)
+   + (b) spread circular gradient explosions (funky bombs)
+   + (c) dribbling liquid explosions (liquid dirt, napalm)
+   - (d) digging (dirt eating) pseudo-explosions (diggers, sandhogs)
+   + (e) spraying explosions (riot charge/blast, dirt charge)
+     (f) beam weapons (lasers mostly)
+
+   * weapon list goal *
+   Those that are fully implemented are marked at the left with a '+'.
+   Those that are partially (often twistedly) implemented are marked with a '-'.
+   Note that our explosive radii run about twice those of the original game.
+
+        [Name]                [Cost] [Bundle Size] Radius-[Scorch]-[XScorch] [Arms Level]
+   +    No Weapon                 $0             0        N/I          0        0
+   +    Baby Missile            $400             0         10         20        0
+   +    Missile               $1,875             5         20         40        0
+   +    Baby Nuke            $10,000             3         40         80        0
+   +    Nuke                 $12,000             1         75        150        1
+   +    Leap Frog            $10,000             2   30,25,20   60,50,41        3
+   +    Funky Bomb            $7,000             2         80        160        4
+   +    MIRV                 $10,000             3         20         40        2
+   +    Black Market MIRV    $15,000             3        N/I       ~100        4
+   +    Death's Head         $20,000             1         35         70        4
+   +    Annihilator          $24,000             1        N/I        200        4
+   +    The Chaos         $5,000,000             1        N/I        200        5
+   +    The Chaos^2       $9,999,999             1        N/I        200        6
+   +    Napalm               $10,000            10        N/A        N/A        2
+   +    Hot Napalm           $20,000             2        N/A        N/A        4
+   +    Black Rain           $30,000             2        N/I         20        4
+   +    Mr. Napalm        $3,000,000             2        N/I        N/A        6
+   +    Tracer                   $10            20          0          0        0
+   +    Smoke Tracer            $500            10          0          0        1
+   +    Shield Sapper         $2,500             5        N/I          0        3
+   +    Baby Roller           $5,000            10         10         20        2
+   +    Roller                $6,000             5         20         40        2
+   +    Heavy Roller          $6,750             2         45         90        3
+   +    Riot Charge           $2,000            10         36         72        2
+   +    Riot Blast            $5,000             5         60        120        3
+   +    Riot Bomb             $5,000             5         30         60        3
+   +    Heavy Riot Bomb       $4,750             2         45         90        3
+   -    Baby Digger           $3,000            10        N/A        N/A        0
+   -    Digger                $2,500             5        N/A        N/A        0
+   -    Heavy Digger          $6,750             2        N/A        N/A        1
+   -    Baby Sandhog         $10,000            10        N/A        N/A        0
+   -    Sandhog              $16,750             5        N/A        N/A        0
+   -    Heavy Sandhog        $25,000             2        N/A        N/A        1
+   +    Dirt Clod             $5,000            10         20         40        0
+   +    Dirt Ball             $5,000             5         35         70        0
+   +    Ton of Dirt           $6,750             2         70        140        1
+   +    Liquid Dirt           $5,000            10        N/A        N/A        2
+   +    Dirt Charge           $5,000             5        N/A        N/A        1
+        Earth Disrupter       $5,000            10        N/A        N/A        0
+        Plasma Blast          $9,000             5      10-75     20-150        3
+   +    Shield Sapper        $10,000             2        N/I          0        3
+        Laser                 $5,000             5        N/A        N/A        2
+
+   * potentials *
+   Sticky Air (implement with object land type and tracers)
+   Sticky Air Disruptor (see above)
+   Tunnel Tracking (accessory >:)
+   Teleporter (accessory, chosen, or random location? preference for random)
+   Jump Jets (accessory, thoughts?)
+   Popcorn Bomb (weapon, sounds a lot like a funky bomb, hmm)
+   Dirt tower (weapon?)
+   Teleport shield (accessory, sort of pairs with warp shield)
+     a) you're hit, you're transported.
+   Warp Shield (accessory, sort of pairs with teleport shield)
+     b) you're hit, weapon is transported >:)
+   Flicker Shield (accessory, what the heck is this anyway?)
+   Patriot Missles (weapon, any ideas?)
+   Plasma laser (weapon, gnifty looking laser I assume)
+
+   * special cases *
+   Rollers are implemented as a new phoenix case (CONVERT).
+   The Chaos and Mr. Napalm really are mostly for testing.
+   But they are fun.  So who knows what the future holds...
+   And as for The Chaos^2, well ... ask Justin.  ;-)
+
+
+FEATURES NOT YET IMPLEMENTED/KNOWN PROBLEMS
+
+   Economics:
+    * Free market not implemented
+    * Greedy scoring not properly implemented
+
+   Interface:
+    * Mouse support partially implemented
+
+   Landscape:
+    * Hostile environments not implemented
+
+   Physics:
+    * Suspend dirt not implemented
+    * Tanks fall not implemented
+
+      These will probably come along soon, now that tank profiles are 
+      implemented == bug with land falling on the tank can finally be
+      avoided.
+
+    * Viscosity does not currently work
+      This has been removed, because the trajectory functions cannot 
+      currently compensate for the viscosity of air.
+
+    * Springy walls are not properly implemented (no damping over time!)
+
+   Play options:
+    * Player Teams not implemented
+
+   Players: 
+    * Insanity AI not implemented
+
+   Sound:
+    * Soundtracks are implemented but as yet have no music to play
+      This causes some "file not found" warnings during gameplay
+    * Sound effects are still a ways down the line
+
+
+WAIF'S NOTES ON log_accum.pl
+
+   Let it be noted that log_accum.pl is a pain in the ass
+   Summaries are broken until further notice.  May be that current cvs
+   version is incompatibile with script assumptions.

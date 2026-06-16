@@ -63,9 +63,13 @@ def main() -> int:
     category_runner = function_body(ui, "uiPrvRunCategoryToolEntry")
     game_menu = function_body(ui, "uiGameMenu")
     run_loaded_game = function_body(ui, "uiPrvRunLoadedGame")
-    console_name = function_body(ui, "uiPrvCurrentGameConsoleName")
+    console_name = function_body(ui, "uiPrvCurrentGameConsole")
     save_export_success = function_body(ui, "uiPrvSaveExportShowSuccess")
     save_export_options = function_body(ui, "uiPrvExportCurrentSavestateWithOptions")
+    save_export_prepare = function_body(ui, "uiPrvPrepareSaveExportResult")
+    save_open = function_body(ui, "uiPrvOpenSaveFile")
+    save_subdir = function_body(ui, "uiPrvSaveSubdirForConsole")
+    save_name = function_body(ui, "uiPrvSaveFileName")
     game_settings = function_body(ui, "uiPrvGameSettings")
     dmg_palette = function_body(gb, "gbPrvRecalcDmgPal")
     set_dmg_palette = function_body(gb, "gbSetDmgPalette")
@@ -74,7 +78,7 @@ def main() -> int:
     expect(".ir Open With only offers Universal IR", '"Universal IR"' in open_with and '"Power"' not in open_with and '"Mute"' not in open_with)
     expect(".DC32 is registered in File Browser", 'uiPrvStrEndsWithNoCase(ref->name, ".DC32")' in open_with and "UiBrowserOpenDcApp" in launch_file)
     expect(".DC32 launch is catalog-only", "uiPrvBrowserFindDcApp" in ui and "That .DC32 app is not registered." in launch_file)
-    expect("runtime DCAPP engines guide users to Emulation", "uiPrvBrowserDcAppIsRuntimeEngine" in ui and "Open Emulation from Games to run ROMs." in launch_file)
+    expect("runtime DCAPP engines guide users to Emulators", "uiPrvBrowserDcAppIsRuntimeEngine" in ui and "Open Emulators from Games to run ROMs." in launch_file)
 
     expect("IR selected button becomes progress title", 'buttonName && *buttonName ? buttonName : "IR Button"' in ir_button)
     expect("IR line reader can cancel pathological reads", "uiPrvIrCancelRequested()" in ir_read_line and "cancelledP" in ir_read_line)
@@ -99,7 +103,7 @@ def main() -> int:
     expect("DCAPP host API exposes LED tick", "void (*ledsTick)(void);" in dcapp_h and ".ledsTick = badgeLedsTick" in dcapp_c)
     expect("DCAPP draw frames tick LEDs", "ctx->host->ledsTick" in dcapp_draw and "dcAppDrawPresent(ctx);" in dcapp_draw)
 
-    expect("Game Boy palette setting is persisted", "GameBoyPaletteNumPalettes" in settings_h and "uint8_t gbPalette;" in settings_h and "#define SETTINGS_CUR_VER\t\t\t16" in settings_c)
+    expect("Game Boy palette setting is persisted", "GameBoyPaletteNumPalettes" in settings_h and "uint8_t gbPalette;" in settings_h and "#define SETTINGS_CUR_VER\t\t\t17" in settings_c)
     palette_ids = [
         "GameBoyPaletteBw",
         "GameBoyPaletteDmg",
@@ -125,9 +129,9 @@ def main() -> int:
         "GameBoyPaletteGbcPreferred",
     ]
     expect("Game Boy palette defaults and normalizes", "settings->gbPalette = GameBoyPaletteGbcPreferred" in settings_c and "settings->gbPalette >= GameBoyPaletteNumPalettes" in settings_c)
-    expect("Game Settings exposes palette selector", '"PAL:"' in game_settings and "paletteNames[GameBoyPaletteNumPalettes]" in game_settings and "settings->gbPalette" in game_settings and '"GBC Preferred"' in game_settings)
-    expect("Game Settings includes gb-palettes bw through gbcrb", all(pid in settings_h and f"[{pid}]" in gb and f"[{pid}]" in game_settings for pid in palette_ids))
-    expect("Game Settings uses color palette names", '"Pale Yellow"' in game_settings and '"Dark Green"' in game_settings and '"Reverse"' in game_settings and "Game Boy Color Splash" not in game_settings and '"DkGrn"' not in game_settings and '"OrigGB"' not in game_settings)
+    expect("Gameboy Settings exposes palette selector", '"PALETTE:"' in game_settings and "paletteNames[GameBoyPaletteNumPalettes]" in game_settings and "settings->gbPalette" in game_settings and '"GBC Preferred"' in game_settings)
+    expect("Gameboy Settings includes gb-palettes bw through gbcrb", all(pid in settings_h and f"[{pid}]" in gb and f"[{pid}]" in game_settings for pid in palette_ids))
+    expect("Gameboy Settings uses color palette names", '"Pale Yellow"' in game_settings and '"Dark Green"' in game_settings and '"Reverse"' in game_settings and "Game Boy Color Splash" not in game_settings and '"DkGrn"' not in game_settings and '"OrigGB"' not in game_settings)
     expect("GB launch passes selected palette", ".gbPalette = desiredGbPalette()" in main_c and "gbSetDmgPaletteForRom(args->rom, args->romSize, args->gbPalette)" in gb_app and "void gbSetDmgPaletteForRom(const void *rom, uint32_t romSize, uint_fast8_t palette);" in gb_h)
     expect("DMG-only GB games stay on DMG palette path", "presentAsCgb && (gbExtRead(0x143) & 0x80)" in gb_run)
     expect("GB startup refreshes cached DMG palette registers", "gbIoWrite(0x47, hram[0x47]);" in gb_run and "gbIoWrite(0x48, hram[0x48]);" in gb_run and "gbIoWrite(0x49, hram[0x49]);" in gb_run)
@@ -139,11 +143,14 @@ def main() -> int:
     expect("DMG palette selection is sanitized", "palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteBw" in set_dmg_palette)
     expect("GB sprite priority uses side buffer marker", "bgToOamPrioPtr[i] & BG_FLAG_UNDER_OBJS" in video_c and "dst[i] & BG_FLAG_UNDER_OBJS" not in video_c)
 
-    expect("GB-only menu label ignores act-like-GBC setting", "RomNoColor" in console_name and "RomColorRequired" in console_name and "return \"GB\";" in console_name)
+    expect("current console detection ignores removed act-like-GBC toggle", "RomNoColor" in console_name and "RomColorRequired" in console_name and "settings.actLikeGBC" not in console_name)
     expect("GB Save to SD is visible for any valid ROM", "uiPrvHaveValidRom(name, NULL, NULL)" in game_menu and "if (validRom) {\n\t\tlabels[numOptions] = \"Save to SD\";" in game_menu)
     expect("manual Save to SD reports no battery save", "nothingToExport" in ui and "This game has no battery save to export." in ui)
     expect("non-manual empty save export stays quiet", "if (result->manualRequest)\n\t\t\tuiAlert(cnv, \"This game has no battery save to export.\"" in save_export_success and "result.manualRequest = force" in save_export_options)
     expect("return to main menu exports current save with popup", "mLastGameMenuAction == UiGameActionSwitchTool" in run_loaded_game and "uiPrvExportCurrentSavestateWithOptions(cnv, false, true)" in run_loaded_game)
+    expect("emulator saves use console subfolders", all(token in save_subdir for token in ['"AB"', '"GB"', '"GBC"', '"NES"']) and "uiPrvOpenSaveDirForConsole(vol, console, false)" in save_open and "uiPrvOpenSaveDirForConsole(vol, result->saveConsole, true)" in ui)
+    expect("emulator saves prefer detected titles", "detectedName" in save_name and "uiPrvDetectedSaveTitle" in save_name and "uiPrvDetectedSaveTitleForSelection(&selection, detectedName" in save_export_prepare)
+    expect("legacy ROM-name save lookup is removed", "SaveNameKindLegacy" not in ui and "uiPrvRawSaveFileName" not in ui)
 
     print("release polish static tests passed")
     return 0

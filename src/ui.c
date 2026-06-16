@@ -108,6 +108,48 @@ static uint_fast16_t mUiRepeatKey;
 static uint64_t mUiRepeatNextTicks;
 static bool mUiKeyRepeated;
 
+enum UiEmulatorConsole {
+	UiEmulatorConsoleArduboy,
+	UiEmulatorConsoleGameboy,
+	UiEmulatorConsoleGameboyColor,
+	UiEmulatorConsoleNes,
+	UiEmulatorConsoleNum,
+};
+
+static enum UiEmulatorConsole uiPrvCurrentGameConsole(void);
+
+static const char *uiPrvEmulatorConsoleName(enum UiEmulatorConsole console)
+{
+	switch (console) {
+		case UiEmulatorConsoleArduboy:
+			return "Arduboy";
+		case UiEmulatorConsoleGameboy:
+			return "Gameboy";
+		case UiEmulatorConsoleGameboyColor:
+			return "Gameboy Color";
+		case UiEmulatorConsoleNes:
+			return "Nintendo Entertainment System";
+		default:
+			return "Emulator";
+	}
+}
+
+static const char *uiPrvEmulatorSettingsName(enum UiEmulatorConsole console)
+{
+	switch (console) {
+		case UiEmulatorConsoleArduboy:
+			return "Arduboy Settings";
+		case UiEmulatorConsoleGameboy:
+			return "Gameboy Settings";
+		case UiEmulatorConsoleGameboyColor:
+			return "Gameboy Color Settings";
+		case UiEmulatorConsoleNes:
+			return "NES Settings";
+		default:
+			return "Emulator Settings";
+	}
+}
+
 static const char *uiPrvNesRegionName(enum NesRegion region)
 {
 	switch (region) {
@@ -1468,6 +1510,26 @@ static bool uiPrvRomFileName(const char *fname)
 		uiPrvStrEndsWithNoCase(fname, ".arduboy");
 }
 
+static bool uiPrvGameboyRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".gb");
+}
+
+static bool uiPrvGameboyColorRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".gbc");
+}
+
+static bool uiPrvNesRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".nes");
+}
+
+static bool uiPrvArduboyRomFileName(const char *fname)
+{
+	return uiPrvStrEndsWithNoCase(fname, ".hex") || uiPrvStrEndsWithNoCase(fname, ".arduboy");
+}
+
 #define GAME_META_MAGIC			0x31454d47u /* GME1 */
 #define GAME_META_OFFSET		(QSPI_FILENAME_MAXLEN - QSPI_WRITE_GRANULARITY)
 
@@ -1482,9 +1544,7 @@ struct GameSelectionFlashMeta {
 enum SaveNameKind {
 	SaveNameKindAuto = 0,
 	SaveNameKindClean = 1,
-	SaveNameKindFull = 2,
 	SaveNameKindFallback = 3,
-	SaveNameKindLegacy = 4,
 };
 
 struct CartRamOwner {
@@ -1540,12 +1600,8 @@ static const char *uiPrvSaveNameKindName(enum SaveNameKind kind)
 	switch (kind) {
 		case SaveNameKindClean:
 			return "clean";
-		case SaveNameKindFull:
-			return "full";
 		case SaveNameKindFallback:
 			return "fallback";
-		case SaveNameKindLegacy:
-			return "legacy";
 		case SaveNameKindAuto:
 		default:
 			return "auto";
@@ -1641,6 +1697,100 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 	static void uiPrvCopyStr(char *dst, uint32_t dstLen, const char *src);
 
 	typedef bool (*UiFileNameFilterF)(const char *name);
+	typedef void (*UiFileDisplayNameF)(char *dst, uint32_t dstLen, const char *name);
+
+	static UiFileNameFilterF uiPrvRomFilterForConsole(enum UiEmulatorConsole console)
+	{
+		switch (console) {
+			case UiEmulatorConsoleArduboy:
+				return uiPrvArduboyRomFileName;
+			case UiEmulatorConsoleGameboy:
+				return uiPrvGameboyRomFileName;
+			case UiEmulatorConsoleGameboyColor:
+				return uiPrvGameboyColorRomFileName;
+			case UiEmulatorConsoleNes:
+				return uiPrvNesRomFileName;
+			default:
+				return uiPrvRomFileName;
+		}
+	}
+
+	static const char *uiPrvRomRootForConsole(enum UiEmulatorConsole console)
+	{
+		switch (console) {
+			case UiEmulatorConsoleArduboy:
+				return "/ROMS/AB";
+			case UiEmulatorConsoleGameboy:
+				return "/ROMS/GB";
+			case UiEmulatorConsoleGameboyColor:
+				return "/ROMS/GBC";
+			case UiEmulatorConsoleNes:
+				return "/ROMS/NES";
+			default:
+				return "/ROMS";
+		}
+	}
+
+	static const char *uiPrvSaveSubdirForConsole(enum UiEmulatorConsole console)
+	{
+		switch (console) {
+			case UiEmulatorConsoleArduboy:
+				return "AB";
+			case UiEmulatorConsoleGameboyColor:
+				return "GBC";
+			case UiEmulatorConsoleNes:
+				return "NES";
+			case UiEmulatorConsoleGameboy:
+			default:
+				return "GB";
+		}
+	}
+
+	static void uiPrvSaveDirPathForConsole(enum UiEmulatorConsole console, char *dst, uint32_t dstLen)
+	{
+		if (!dstLen)
+			return;
+		(void)sprintf(dst, "/SAVE/%s", uiPrvSaveSubdirForConsole(console));
+	}
+
+	static enum UiEmulatorConsole uiPrvSaveConsoleForGame(enum GameRuntime runtime, enum RomColorSupport colorSupport, const char *romName)
+	{
+		if (runtime == GameRuntimeNes)
+			return UiEmulatorConsoleNes;
+		if (runtime == GameRuntimeArduboy)
+			return UiEmulatorConsoleArduboy;
+		if (runtime == GameRuntimeGb) {
+			if (romName && uiPrvStrEndsWithNoCase(romName, ".gbc"))
+				return UiEmulatorConsoleGameboyColor;
+			if (romName && uiPrvStrEndsWithNoCase(romName, ".gb"))
+				return UiEmulatorConsoleGameboy;
+			return colorSupport == RomNoColor ? UiEmulatorConsoleGameboy : UiEmulatorConsoleGameboyColor;
+		}
+		return UiEmulatorConsoleGameboy;
+	}
+
+	static struct FatfsDir *uiPrvOpenSaveDirForConsole(struct FatfsVol *vol, enum UiEmulatorConsole console, bool create)
+	{
+		struct FatfsDir *rootDir, *saveDir = NULL;
+		struct FatFileLocator loc;
+		const char *subdir = uiPrvSaveSubdirForConsole(console);
+
+		rootDir = fatfsDirOpen(vol, "/SAVE");
+		if (!rootDir && create) {
+			if (fatfsDirCreate(vol, "/SAVE", &loc))
+				rootDir = fatfsDirOpenWithLocator(vol, &loc);
+		}
+		if (!rootDir)
+			return NULL;
+
+		saveDir = fatfsDirOpenAt(rootDir, subdir);
+		if (!saveDir && create) {
+			if (fatfsDirCreateAt(rootDir, subdir, &loc))
+				saveDir = fatfsDirOpenWithLocator(vol, &loc);
+		}
+		fatfsDirClose(rootDir);
+		return saveDir;
+	}
 
 	struct UiFileListCtx {
 		struct MusicOption *nextAvail;
@@ -1914,7 +2064,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		*topItemP = topItem;
 	}
 
-	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, bool ignoreRootBack, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz)
+	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, bool ignoreRootBack, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz, UiFileDisplayNameF displayNameF)
 	{
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
 		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
@@ -1994,8 +2144,16 @@ reload_dir:
 				for (i = firstRow; i < itemsOnscreen && draw; i++, draw = draw->next) {
 					if (draw->isDir)
 						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
-					else
-						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, draw->name);
+					else {
+						char displayName[UI_PICK_FILE_NAME_BUF_SZ];
+						const char *name = draw->name;
+
+						if (displayNameF) {
+							displayNameF(displayName, sizeof(displayName), draw->name);
+							name = displayName;
+						}
+						uiPrvDrawTruncText(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, name);
+					}
 				}
 
 				prevSelOnscreenItem = selectedOnscreenItem + 1;
@@ -2410,17 +2568,94 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 	}
 }
 
-static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, struct Settings *settings)
+static bool uiPrvEmulatorHasPalette(enum UiEmulatorConsole console)
+{
+	return console == UiEmulatorConsoleGameboy;
+}
+
+static bool uiPrvEmulatorHasDisplayOptions(enum UiEmulatorConsole console)
+{
+	return console == UiEmulatorConsoleGameboy ||
+		console == UiEmulatorConsoleGameboyColor ||
+		console == UiEmulatorConsoleNes;
+}
+
+static uint_fast8_t uiPrvEmulatorSpeed(const struct Settings *settings, enum UiEmulatorConsole console)
+{
+	switch (console) {
+		case UiEmulatorConsoleGameboy:
+			return settings->gbSpeed;
+		case UiEmulatorConsoleGameboyColor:
+			return settings->gbcSpeed;
+		case UiEmulatorConsoleNes:
+			return settings->nesSpeed;
+		default:
+			return settings->speed;
+	}
+}
+
+static void uiPrvEmulatorSetSpeed(struct Settings *settings, enum UiEmulatorConsole console, uint_fast8_t speed)
+{
+	switch (console) {
+		case UiEmulatorConsoleGameboy:
+			settings->gbSpeed = speed;
+			settings->speed = speed;
+			break;
+		case UiEmulatorConsoleGameboyColor:
+			settings->gbcSpeed = speed;
+			break;
+		case UiEmulatorConsoleNes:
+			settings->nesSpeed = speed;
+			break;
+		default:
+			settings->speed = speed;
+			break;
+	}
+}
+
+static bool uiPrvEmulatorUpscale(const struct Settings *settings, enum UiEmulatorConsole console)
+{
+	switch (console) {
+		case UiEmulatorConsoleGameboy:
+			return settings->gbUpscale;
+		case UiEmulatorConsoleGameboyColor:
+			return settings->gbcUpscale;
+		case UiEmulatorConsoleNes:
+			return settings->nesUpscale;
+		default:
+			return false;
+	}
+}
+
+static void uiPrvEmulatorSetUpscale(struct Settings *settings, enum UiEmulatorConsole console, bool upscale)
+{
+	switch (console) {
+		case UiEmulatorConsoleGameboy:
+			settings->gbUpscale = upscale;
+			settings->upscale = upscale;
+			break;
+		case UiEmulatorConsoleGameboyColor:
+			settings->gbcUpscale = upscale;
+			break;
+		case UiEmulatorConsoleNes:
+			settings->nesUpscale = upscale;
+			break;
+		default:
+			break;
+	}
+}
+
+static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, struct Settings *settings, enum UiEmulatorConsole console)
 {
 	bool restartCurGame = false;
 	int_fast8_t selOption = 0;
 
-	uiPrvSetHeaderTitle("Game Settings");
+	uiPrvSetHeaderTitle(uiPrvEmulatorSettingsName(console));
 	uiPrvReset(cnv, false);
 
 	while (1) {
 
-		int_fast8_t numOptions = 0, doneOption, cgbOption, paletteOption, upscaleOption, speedOption;
+		int_fast8_t numOptions = 0, doneOption, paletteOption = -1, upscaleOption = -1, speedOption = -1;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 		static const char speedNames[][8] = DISP_SPEED_NAMES;
 		static const uint8_t speedSettings[] = DISP_SPEED_SETTINGS;
@@ -2449,41 +2684,43 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 			[GameBoyPaletteGbcPreferred] = "GBC Preferred",
 		};
 		uint_fast8_t numSpeeds = sizeof(speedSettings) / sizeof(*speedSettings);
+		uint_fast8_t speed = uiPrvEmulatorSpeed(settings, console);
 
-		if (settings->speed >= numSpeeds)
-			settings->speed = 1;
+		settings->actLikeGBC = 1;
+		if (speed >= numSpeeds)
+			speed = 1;
 		if (settings->gbPalette >= GameBoyPaletteNumPalettes)
 			settings->gbPalette = GameBoyPaletteBw;
+		uiPrvEmulatorSetSpeed(settings, console, speed);
 
+		uiPrvSetHeaderTitle(uiPrvEmulatorSettingsName(console));
 		uiPrvReset(cnv, false);
 
 		doneOption = numOptions++;
 		cnv->foreColor = 11;
 		uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 
-		cgbOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 10, "COLOR:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, uiPrvMenuRow(cnv, cgbOption), 111, settings->actLikeGBC ? "YES       " : "NO       ", -1);
+		if (uiPrvEmulatorHasPalette(console)) {
+			paletteOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, uiPrvMenuRow(cnv, paletteOption), 10, "PALETTE:", -1);
+			cnv->foreColor = 15;
+			uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, paletteOption), 85, cnv->w - 85, paletteNames[settings->gbPalette]);
+		}
 
-		paletteOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, paletteOption), 10, "PAL:", -1);
-		cnv->foreColor = 15;
-		uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, paletteOption), 45, cnv->w - 45, paletteNames[settings->gbPalette]);
+		if (uiPrvEmulatorHasDisplayOptions(console)) {
+			upscaleOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 10, "UPSCALE:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 111, uiPrvEmulatorUpscale(settings, console) ? "YES       " : "NO       ", -1);
 
-		upscaleOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 10, "UPSCALE:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, uiPrvMenuRow(cnv, upscaleOption), 111, settings->upscale ? "YES       " : "NO       ", -1);
-
-		speedOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 10, "SPEED:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 111, speedNames[settings->speed], sizeof(speedNames[settings->speed]));
+			speedOption = numOptions++;
+			cnv->foreColor = 11;
+			uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 10, "SPEED:", -1);
+			cnv->foreColor = 15;
+			uiPuts(cnv, uiPrvMenuRow(cnv, speedOption), 111, speedNames[speed], sizeof(speedNames[speed]));
+		}
 
 		selOption = uiPrvMenu(cnv, selOption, numOptions, &button);
 		if (uiPrvToolExitRequested())
@@ -2494,27 +2731,28 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 		if (selOption == speedOption) {
 
 			if (button == KEY_BIT_LEFT) {
-				if (settings->speed)
-					settings->speed--;
+				if (speed)
+					speed--;
 				else
-					settings->speed = numSpeeds - 1;
+					speed = numSpeeds - 1;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if ((uint_fast8_t)(settings->speed + 1) < numSpeeds)
-					settings->speed++;
+				if ((uint_fast8_t)(speed + 1) < numSpeeds)
+					speed++;
 				else
-					settings->speed = 0;
+					speed = 0;
 			}
 
-			dispOff();
-			dispInit(speedSettings[settings->speed]);
-			dispSetContrast(settings->contrast);		//must be reset
+			uiPrvEmulatorSetSpeed(settings, console, speed);
+			if (console == UiEmulatorConsoleGameboy || console == UiEmulatorConsoleGameboyColor) {
+				dispOff();
+				dispInit(speedSettings[speed]);
+				dispSetContrast(settings->contrast);		//must be reset
+			}
 		}
 
-		if (selOption == upscaleOption) {
-
-			settings->upscale = !settings->upscale;
-		}
+		if (selOption == upscaleOption)
+			uiPrvEmulatorSetUpscale(settings, console, !uiPrvEmulatorUpscale(settings, console));
 
 		if (selOption == paletteOption) {
 
@@ -2523,12 +2761,6 @@ static bool __attribute__((noinline)) uiPrvGameSettings(struct Canvas *cnv, stru
 				settings->gbPalette = settings->gbPalette ? settings->gbPalette - 1 : GameBoyPaletteNumPalettes - 1;
 			else
 				settings->gbPalette = (settings->gbPalette + 1) % GameBoyPaletteNumPalettes;
-		}
-
-		if (selOption == cgbOption) {
-
-			restartCurGame = true;
-			settings->actLikeGBC = !settings->actLikeGBC;
 		}
 	}
 }
@@ -2866,6 +3098,36 @@ static void __attribute__((noinline)) uiPrvUsbSettings(struct Canvas *cnv, struc
 	}
 }
 
+static bool __attribute__((noinline)) uiPrvEmulatorSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	bool restartCurGame = false;
+	uint_fast8_t selOption = 0;
+	static const enum UiEmulatorConsole consoles[] = {
+		UiEmulatorConsoleArduboy,
+		UiEmulatorConsoleGameboy,
+		UiEmulatorConsoleGameboyColor,
+		UiEmulatorConsoleNes,
+	};
+	enum { NumConsoles = sizeof(consoles) / sizeof(*consoles) };
+
+	while (1) {
+		uint_fast8_t i;
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+		uiPrvSetHeaderTitle("Emulators");
+		uiPrvReset(cnv, false);
+		for (i = 0; i < NumConsoles; i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, uiPrvEmulatorSettingsName(consoles[i]), -1);
+
+		selOption = uiPrvMenu(cnv, selOption, NumConsoles, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B)
+			return restartCurGame;
+		restartCurGame = uiPrvGameSettings(cnv, settings, consoles[selOption]) || restartCurGame;
+		if (uiPrvToolExitRequested())
+			return restartCurGame;
+	}
+}
+
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exitOnDone)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
@@ -2882,14 +3144,14 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	uiPrvReset(cnv, false);
 
 	while (1) {
-		uint_fast8_t doneOption = 0, gameOption = exitOnDone ? 1 : 0, clockOption = gameOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, usbOption = screenOption + 1, selOption;
+		uint_fast8_t doneOption = 0, emulatorsOption = exitOnDone ? 1 : 0, clockOption = emulatorsOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, usbOption = screenOption + 1, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvSetHeaderTitle("Settings");
 		uiPrvReset(cnv, false);
 		if (exitOnDone)
 			uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
-		uiPuts(cnv, uiPrvMenuRow(cnv, gameOption), 10, "Game", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, emulatorsOption), 10, "Emulators", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, clockOption), 10, "Clock", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, screenOption), 10, "Screen", -1);
@@ -2906,8 +3168,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 		}
 		if (selOption == screenOption)
 			uiPrvScreenSettings(cnv, &settings);
-		else if (selOption == gameOption)
-			restartCurGame = uiPrvGameSettings(cnv, &settings) || restartCurGame;
+		else if (selOption == emulatorsOption)
+			restartCurGame = uiPrvEmulatorSettings(cnv, &settings) || restartCurGame;
 		else if (selOption == clockOption)
 			uiPrvClockSettings(cnv);
 		else if (selOption == ledSettingsOption)
@@ -2921,13 +3183,13 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	}
 }
 
-static bool __attribute__((noinline)) uiPrvEditGameSettings(struct Canvas *cnv)
+static bool __attribute__((noinline)) uiPrvEditGameSettings(struct Canvas *cnv, enum UiEmulatorConsole console)
 {
 	struct Settings settings;
 	bool restartCurGame;
 
 	settingsGet(&settings);
-	restartCurGame = uiPrvGameSettings(cnv, &settings);
+	restartCurGame = uiPrvGameSettings(cnv, &settings, console);
 	settingsSet(&settings);
 	return restartCurGame;
 }
@@ -3191,13 +3453,19 @@ bool uiSaveSavestate(void)
 			uiPrvCopyStr(dst, dstLen, fallbackName);
 	}
 
+	static void uiPrvRomDisplayName(char *dst, uint32_t dstLen, const char *name)
+	{
+		char fallbackStem[UI_PICK_FILE_NAME_BUF_SZ];
+
+		uiPrvCopyRomStem(fallbackStem, sizeof(fallbackStem), name);
+		uiPrvCleanGameTitleFromPath(dst, dstLen, name, fallbackStem);
+	}
+
 	static bool uiPrvSaveNameKindValid(uint32_t kind)
 	{
 		return kind == SaveNameKindAuto ||
 			kind == SaveNameKindClean ||
-			kind == SaveNameKindFull ||
-			kind == SaveNameKindFallback ||
-			kind == SaveNameKindLegacy;
+			kind == SaveNameKindFallback;
 	}
 
 	static enum SaveNameKind uiPrvSelectedSaveNameKind(void)
@@ -3376,35 +3644,84 @@ bool uiSaveSavestate(void)
 		return true;
 	}
 
+	static bool uiPrvCleanSaveStem(char *dst, uint32_t dstLen, const char *stem)
+	{
+		uint32_t outLen = 0;
+		bool pendingSpace = false;
+
+		if (!dstLen)
+			return false;
+		if (!stem)
+			stem = "";
+
+		while (*stem) {
+			uint8_t ch = (uint8_t)*stem++;
+			bool valid = ch >= 0x20 && ch != 0x7f &&
+				ch != '\\' && ch != '/' && ch != ':' && ch != '*' &&
+				ch != '?' && ch != '"' && ch != '<' && ch != '>' &&
+				ch != '|';
+
+			if (!valid || ch == ' ' || ch == '\t') {
+				if (outLen)
+					pendingSpace = true;
+				continue;
+			}
+
+			if (pendingSpace) {
+				if (outLen + 2 >= dstLen)
+					break;
+				dst[outLen++] = ' ';
+				pendingSpace = false;
+			}
+			else if (outLen + 1 >= dstLen)
+				break;
+
+			dst[outLen++] = (char)ch;
+		}
+		dst[outLen] = 0;
+		return outLen != 0;
+	}
+
+	static bool uiPrvDetectedSaveTitle(enum GameRuntime runtime, const char *detectedName, char *dst, uint32_t dstLen)
+	{
+		char stem[UI_PICK_FILE_NAME_BUF_SZ];
+
+		if (!uiPrvCleanSaveStem(stem, sizeof(stem), detectedName))
+			return false;
+		if (runtime == GameRuntimeNes && !strncmp(stem, "NES M", 5))
+			return false;
+		if (runtime == GameRuntimeArduboy && !strcmp(stem, "ARDUBOY"))
+			return false;
+		uiPrvCopyStr(dst, dstLen, stem);
+		return true;
+	}
+
 	static void uiPrvSaveNameFromStem(const char *stem, char *dst, uint32_t dstLen);
 
-	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
+	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, const char *detectedName, char *dst, uint32_t dstLen)
 	{
 		char stem[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackStem[UI_PICK_FILE_NAME_BUF_SZ];
 
-		(void)runtime;
-		uiPrvCopyRomStem(fallbackStem, sizeof(fallbackStem), romName);
-		uiPrvCleanGameTitleFromPath(stem, sizeof(stem), romName, fallbackStem);
-		uiPrvSaveNameFromStem(stem, dst, dstLen);
-	}
-
-	static void uiPrvRawSaveFileName(const char *romName, enum GameRuntime runtime, char *dst, uint32_t dstLen)
-	{
-		char stem[UI_PICK_FILE_NAME_BUF_SZ];
-
-		(void)runtime;
-		uiPrvCopyRomStem(stem, sizeof(stem), romName);
+		if (!uiPrvDetectedSaveTitle(runtime, detectedName, stem, sizeof(stem))) {
+			uiPrvCopyRomStem(fallbackStem, sizeof(fallbackStem), romName);
+			uiPrvCleanGameTitleFromPath(stem, sizeof(stem), romName, fallbackStem);
+		}
 		uiPrvSaveNameFromStem(stem, dst, dstLen);
 	}
 
 	static void uiPrvSaveNameFromStem(const char *stem, char *dst, uint32_t dstLen)
 	{
+		char cleanStem[UI_PICK_FILE_NAME_BUF_SZ];
 		uint32_t pos = 0;
 
 		if (!dstLen)
 			return;
 
+		if (!uiPrvCleanSaveStem(cleanStem, sizeof(cleanStem), stem))
+			uiPrvCopyStr(cleanStem, sizeof(cleanStem), "SAVE");
+
+		stem = cleanStem;
 		while (*stem && pos + 5 < dstLen)
 			dst[pos++] = *stem++;
 		if (pos + 4 < dstLen) {
@@ -3490,12 +3807,13 @@ bool uiSaveSavestate(void)
 	}
 
 	static struct FatfsFil *uiPrvOpenSaveFile(struct FatfsVol *vol, const char *romName, enum GameRuntime runtime,
-		uint32_t expectedSize, enum SaveNameKind *saveNameKindP, bool *badSizeP)
+		enum UiEmulatorConsole console, const char *detectedName, uint32_t expectedSize,
+		enum SaveNameKind *saveNameKindP, bool *badSizeP)
 	{
 		struct FatfsDir *dir;
 		struct FatfsFil *fil = NULL;
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
-		char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char saveDirPath[16];
 		char fallbackName[13];
 		const char *foundName = NULL;
 		enum SaveNameKind foundKind = SaveNameKindAuto;
@@ -3503,11 +3821,15 @@ bool uiSaveSavestate(void)
 		if (!expectedSize)
 			return NULL;
 
-		dir = fatfsDirOpen(vol, "/SAVE");
-		if (!dir)
+		uiPrvSaveDirPathForConsole(console, saveDirPath, sizeof(saveDirPath));
+		dir = uiPrvOpenSaveDirForConsole(vol, console, false);
+		if (!dir) {
+			pr("Savegame import: no save folder %s for %s (%lu bytes expected)\n",
+				saveDirPath, romName, (unsigned long)expectedSize);
 			return NULL;
+		}
 
-		uiPrvSaveFileName(romName, runtime, saveName, sizeof(saveName));
+		uiPrvSaveFileName(romName, runtime, detectedName, saveName, sizeof(saveName));
 		fil = uiPrvOpenSaveFileIfSizeMatches(dir, saveName, expectedSize, badSizeP);
 		if (fil) {
 			foundName = saveName;
@@ -3515,18 +3837,8 @@ bool uiSaveSavestate(void)
 			if (saveNameKindP)
 				*saveNameKindP = foundKind;
 		}
-		uiPrvRawSaveFileName(romName, runtime, fullSaveName, sizeof(fullSaveName));
-		if (!fil && fullSaveName[0] && strcmp(saveName, fullSaveName)) {
-			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fullSaveName, expectedSize, badSizeP);
-			if (fil) {
-				foundName = fullSaveName;
-				foundKind = SaveNameKindFull;
-				if (saveNameKindP)
-					*saveNameKindP = foundKind;
-			}
-		}
-		uiPrvSaveFallbackFileName(romName, runtime, fallbackName, sizeof(fallbackName));
-		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName) && strcmp(fullSaveName, fallbackName)) {
+		uiPrvSaveFallbackFileName(saveName, runtime, fallbackName, sizeof(fallbackName));
+		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName)) {
 			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fallbackName, expectedSize, badSizeP);
 			if (fil) {
 				foundName = fallbackName;
@@ -3535,24 +3847,46 @@ bool uiSaveSavestate(void)
 					*saveNameKindP = foundKind;
 			}
 		}
-		if (!fil && strcmp(saveName, romName) && strcmp(fullSaveName, romName) && strcmp(fallbackName, romName)) {
-			fil = uiPrvOpenSaveFileIfSizeMatches(dir, romName, expectedSize, badSizeP);
-			if (fil) {
-				foundName = romName;
-				foundKind = SaveNameKindLegacy;
-				if (saveNameKindP)
-					*saveNameKindP = foundKind;
-			}
-		}
 
 		if (fil)
-			pr("Savegame import: found /SAVE/%s (%lu bytes, source=%s) for %s\n",
-				foundName, (unsigned long)expectedSize, uiPrvSaveNameKindName(foundKind), romName);
+			pr("Savegame import: found %s/%s (%lu bytes, source=%s) for %s\n",
+				saveDirPath, foundName, (unsigned long)expectedSize, uiPrvSaveNameKindName(foundKind), romName);
 		else
-			pr("Savegame import: no matching save found for %s (%lu bytes expected)\n",
-				romName, (unsigned long)expectedSize);
+			pr("Savegame import: no matching save found in %s for %s (%lu bytes expected)\n",
+				saveDirPath, romName, (unsigned long)expectedSize);
 		fatfsDirClose(dir);
 		return fil;
+	}
+
+	static void uiPrvDetectedSaveTitleForSelection(const struct GameSelection *selection, char *dst, uint32_t dstLen)
+	{
+		if (!dstLen)
+			return;
+		dst[0] = 0;
+		if (!selection)
+			return;
+
+		if (selection->runtime == GameRuntimeGb) {
+			char name[ROM_NAME_LEN + 1];
+			uint32_t romSize, saveRamSize;
+			enum RomColorSupport colorSupport;
+
+			name[ROM_NAME_LEN] = 0;
+			if (mbcRomAnalyze((const void*)QSPI_ROM_START, &romSize, &saveRamSize, &colorSupport, name))
+				uiPrvCopyStr(dst, dstLen, name);
+		}
+		else if (selection->runtime == GameRuntimeNes) {
+			struct NesRomInfo info;
+
+			if (nesAnalyzeRom((const void*)QSPI_ROM_START, selection->romSize ? selection->romSize : QSPI_ROM_SIZE_MAX, &info))
+				uiPrvCopyStr(dst, dstLen, info.name);
+		}
+		else if (selection->runtime == GameRuntimeArduboy) {
+			struct ArduboyRomInfo info;
+
+			if (arduboyAnalyzeRom((const void*)QSPI_ROM_START, selection->romSize ? selection->romSize : QSPI_ROM_SIZE_MAX, &info) && !info.isPackage)
+				uiPrvCopyStr(dst, dstLen, info.name);
+		}
 	}
 
 	enum SaveExportStatus {
@@ -3584,10 +3918,10 @@ bool uiSaveSavestate(void)
 
 	struct SaveExportResult {
 		enum SaveExportStatus status;
+		enum UiEmulatorConsole saveConsole;
+		char saveDirPath[16];
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
-		char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
-		char legacySaveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackSaveName[13];
 		const char *openPath;
 		uint32_t bytesExpected;
@@ -3666,6 +4000,7 @@ bool uiSaveSavestate(void)
 		struct ArduboyRomInfo arduboyInfo;
 		struct FatfsDir *dir;
 		struct CartHeader hdr;
+		enum UiEmulatorConsole saveConsole;
 		bool ret = false, badSaveSize = false, preserveCachedSave = false, arduboyPackage = false;
 		
 		static const char colorTypes[][10] = {
@@ -3725,6 +4060,7 @@ bool uiSaveSavestate(void)
 			uiAlert(cnv, "Does not appear to be a valid ROM file", DialogTypeOk);
 			goto out_close_file;
 		}
+		internalName[ROM_NAME_LEN] = 0;
 
 		if (romSzExpected > QSPI_ROM_SIZE_MAX) {
 			char msg[96];
@@ -3748,7 +4084,8 @@ bool uiSaveSavestate(void)
 			goto out_close_file;
 		}
 
-		filS = uiPrvOpenSaveFile(vol, romName, runtime, ramSzExpected, &saveNameKind, &badSaveSize);
+		saveConsole = uiPrvSaveConsoleForGame(runtime, colorSupport, romName);
+		filS = uiPrvOpenSaveFile(vol, romName, runtime, saveConsole, internalName, ramSzExpected, &saveNameKind, &badSaveSize);
 		if (!filS && badSaveSize) {
 			uiAlert(cnv, "Savegame file size does not match the expected size. It will not be loaded.", DialogTypeOk);
 			goto out_close_file;
@@ -3952,9 +4289,9 @@ static void uiPrvSaveExportResultInit(struct SaveExportResult *result)
 
 static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
 {
+	enum UiEmulatorConsole saveConsole = result->saveConsole;
+	char saveDirPath[16];
 	char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
-	char fullSaveName[UI_PICK_FILE_NAME_BUF_SZ];
-	char legacySaveName[UI_PICK_FILE_NAME_BUF_SZ];
 	char fallbackSaveName[13];
 	uint32_t bytesExpected = result->bytesExpected;
 	uint8_t attemptNo = result->attemptNo;
@@ -3964,14 +4301,13 @@ static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
 	bool retryAttempted = result->retryAttempted;
 	bool manualRequest = result->manualRequest;
 
+	uiPrvCopyStr(saveDirPath, sizeof(saveDirPath), result->saveDirPath);
 	uiPrvCopyStr(primarySaveName, sizeof(primarySaveName), result->primarySaveName);
-	uiPrvCopyStr(fullSaveName, sizeof(fullSaveName), result->fullSaveName);
-	uiPrvCopyStr(legacySaveName, sizeof(legacySaveName), result->legacySaveName);
 	uiPrvCopyStr(fallbackSaveName, sizeof(fallbackSaveName), result->fallbackSaveName);
 	uiPrvSaveExportResultInit(result);
+	result->saveConsole = saveConsole;
+	uiPrvCopyStr(result->saveDirPath, sizeof(result->saveDirPath), saveDirPath);
 	uiPrvCopyStr(result->primarySaveName, sizeof(result->primarySaveName), primarySaveName);
-	uiPrvCopyStr(result->fullSaveName, sizeof(result->fullSaveName), fullSaveName);
-	uiPrvCopyStr(result->legacySaveName, sizeof(result->legacySaveName), legacySaveName);
 	uiPrvCopyStr(result->fallbackSaveName, sizeof(result->fallbackSaveName), fallbackSaveName);
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), primarySaveName);
 	result->bytesExpected = bytesExpected;
@@ -4039,13 +4375,6 @@ static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExp
 	}
 
 	switch (result->preferredSaveNameKind) {
-		case SaveNameKindFull:
-			if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
-				uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
-				return;
-			}
-			break;
-
 		case SaveNameKindFallback:
 			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
 				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
@@ -4053,24 +4382,9 @@ static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExp
 			}
 			break;
 
-		case SaveNameKindLegacy:
-			if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
-				uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
-				return;
-			}
-			break;
-
 		case SaveNameKindAuto:
-			if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
-				uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
-				return;
-			}
 			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
 				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
-				return;
-			}
-			if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
-				uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
 				return;
 			}
 			break;
@@ -4078,21 +4392,6 @@ static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExp
 		case SaveNameKindClean:
 		default:
 			break;
-	}
-
-	if (result->preferredSaveNameKind != SaveNameKindAuto && result->preferredSaveNameKind != SaveNameKindClean) {
-		if (uiPrvSaveExportNameExists(saveDir, result->fullSaveName)) {
-			uiPrvSaveExportSetTarget(result, result->fullSaveName, SaveNameKindFull);
-			return;
-		}
-		if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
-			uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
-			return;
-		}
-		if (uiPrvSaveExportNameExists(saveDir, result->legacySaveName)) {
-			uiPrvSaveExportSetTarget(result, result->legacySaveName, SaveNameKindLegacy);
-			return;
-		}
 	}
 
 	uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindClean);
@@ -4112,47 +4411,38 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 	if (flags.RO)
 		pr("Savegame export: card reports write protect; attempting verified write anyway\n");
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
+	saveDir = uiPrvOpenSaveDirForConsole(vol, result->saveConsole, true);
 	if (!saveDir) {
-		struct FatFileLocator loc;
-
-		pr("Savegame export: /SAVE missing, creating it\n");
-		if (!fatfsDirCreate(vol, "/SAVE", &loc) || !(saveDir = fatfsDirOpenWithLocator(vol, &loc))) {
-			pr("Savegame export: cannot create/open /SAVE\n");
-			uiPrvSaveExportSetStatus(result, SaveExportStatusSaveDirFailed);
-			return false;
-		}
+		pr("Savegame export: cannot create/open %s\n", result->saveDirPath);
+		uiPrvSaveExportSetStatus(result, SaveExportStatusSaveDirFailed);
+		return false;
 	}
 
 	uiPrvChooseSaveExportTarget(saveDir, result);
-	pr("Savegame export: preparing /SAVE/%s (%u bytes, preferred=%u chosen=%u)\n", result->saveName, result->bytesExpected,
+	pr("Savegame export: preparing %s/%s (%u bytes, preferred=%u chosen=%u)\n",
+		result->saveDirPath, result->saveName, result->bytesExpected,
 		(unsigned)result->preferredSaveNameKind, (unsigned)result->chosenSaveNameKind);
-	pr("Savegame export: primary save name is /SAVE/%s\n", result->primarySaveName);
-	if (result->fullSaveName[0] && strcmp(result->primarySaveName, result->fullSaveName))
-		pr("Savegame export: old full save name is /SAVE/%s\n", result->fullSaveName);
+	pr("Savegame export: primary save name is %s/%s\n", result->saveDirPath, result->primarySaveName);
 	if (result->fallbackSaveName[0])
-		pr("Savegame export: fallback save name is /SAVE/%s\n", result->fallbackSaveName);
-	if (result->legacySaveName[0] && strcmp(result->legacySaveName, result->primarySaveName) &&
-		strcmp(result->legacySaveName, result->fullSaveName) && strcmp(result->legacySaveName, result->fallbackSaveName))
-		pr("Savegame export: legacy save name is /SAVE/%s\n", result->legacySaveName);
+		pr("Savegame export: fallback save name is %s/%s\n", result->saveDirPath, result->fallbackSaveName);
 
 	if (fatfsFindFileAt(saveDir, result->saveName, &loc)) {
 		result->openPath = "chosen existing";
 		fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 		if (!fil) {
-			pr("Savegame export: cannot open existing /SAVE/%s for writing\n", result->saveName);
+			pr("Savegame export: cannot open existing %s/%s for writing\n", result->saveDirPath, result->saveName);
 			uiPrvSaveExportSetStatus(result, SaveExportStatusOpenExistingFailed);
 			goto out_close_dir;
 		}
 	}
 	else {
-		pr("Savegame export: /SAVE/%s missing, creating it\n", result->saveName);
+		pr("Savegame export: %s/%s missing, creating it\n", result->saveDirPath, result->saveName);
 		fatfsClearLastCreateError();
 		if (fatfsFileCreateAt(saveDir, result->saveName, &loc)) {
 			result->openPath = "chosen created";
 			fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 			if (!fil) {
-				pr("Savegame export: created /SAVE/%s but cannot reopen for writing\n", result->saveName);
+				pr("Savegame export: created %s/%s but cannot reopen for writing\n", result->saveDirPath, result->saveName);
 				uiPrvSaveExportSetStatus(result, SaveExportStatusOpenCreatedFailed);
 				goto out_close_dir;
 			}
@@ -4162,7 +4452,7 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 				uiPrvSaveExportRecordFallbackCreateError(result);
 			else
 				uiPrvSaveExportRecordPrimaryCreateError(result);
-			pr("Savegame export: cannot create /SAVE/%s (FAT stage: %s)\n", result->saveName, result->fatCreateErrorName);
+			pr("Savegame export: cannot create %s/%s (FAT stage: %s)\n", result->saveDirPath, result->saveName, result->fatCreateErrorName);
 			if (!result->fallbackSaveName[0] || uiPrvSaveExportNameMatches(result->saveName, result->fallbackSaveName)) {
 				uiPrvSaveExportSetStatus(result, SaveExportStatusCreateFailed);
 				goto out_close_dir;
@@ -4171,30 +4461,31 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 			uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->fallbackSaveName);
 			result->chosenSaveNameKind = SaveNameKindFallback;
 			result->fallbackUsed = true;
-			pr("Savegame export: trying fallback /SAVE/%s\n", result->fallbackSaveName);
+			pr("Savegame export: trying fallback %s/%s\n", result->saveDirPath, result->fallbackSaveName);
 
 			if (fatfsFindFileAt(saveDir, result->fallbackSaveName, &loc)) {
 				result->openPath = "fallback existing";
 				fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 				if (!fil) {
-					pr("Savegame export: cannot open existing fallback /SAVE/%s for writing\n", result->fallbackSaveName);
+					pr("Savegame export: cannot open existing fallback %s/%s for writing\n", result->saveDirPath, result->fallbackSaveName);
 					uiPrvSaveExportSetStatus(result, SaveExportStatusOpenExistingFailed);
 					goto out_close_dir;
 				}
 			}
 			else {
-				pr("Savegame export: /SAVE/%s missing, creating fallback\n", result->fallbackSaveName);
+				pr("Savegame export: %s/%s missing, creating fallback\n", result->saveDirPath, result->fallbackSaveName);
 				fatfsClearLastCreateError();
 				if (!fatfsFileCreateAt(saveDir, result->fallbackSaveName, &loc)) {
 					uiPrvSaveExportRecordFallbackCreateError(result);
-					pr("Savegame export: cannot create fallback /SAVE/%s (FAT stage: %s)\n", result->fallbackSaveName, result->fallbackCreateErrorName);
+					pr("Savegame export: cannot create fallback %s/%s (FAT stage: %s)\n",
+						result->saveDirPath, result->fallbackSaveName, result->fallbackCreateErrorName);
 					uiPrvSaveExportSetStatus(result, SaveExportStatusCreateFailed);
 					goto out_close_dir;
 				}
 				result->openPath = "fallback created";
 				fil = fatfsFileOpenWithLocator(vol, &loc, OPEN_MODE_WRITE);
 				if (!fil) {
-					pr("Savegame export: created fallback /SAVE/%s but cannot reopen for writing\n", result->fallbackSaveName);
+					pr("Savegame export: created fallback %s/%s but cannot reopen for writing\n", result->saveDirPath, result->fallbackSaveName);
 					uiPrvSaveExportSetStatus(result, SaveExportStatusOpenCreatedFailed);
 					goto out_close_dir;
 				}
@@ -4202,26 +4493,26 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 		}
 	}
 
-	pr("Savegame export: writing /SAVE/%s (hash=%08lx)\n", result->saveName,
+	pr("Savegame export: writing %s/%s (hash=%08lx)\n", result->saveDirPath, result->saveName,
 		(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected));
 	ret = fatfsFileWrite(fil, (const void*)QSPI_RAM_COPY_START, result->bytesExpected, &result->bytesDone);
 	if (!ret || result->bytesDone != result->bytesExpected) {
-		pr("Savegame export: write failed for /SAVE/%s (%u/%u)\n", result->saveName, result->bytesDone, result->bytesExpected);
+		pr("Savegame export: write failed for %s/%s (%u/%u)\n", result->saveDirPath, result->saveName, result->bytesDone, result->bytesExpected);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusWriteFailed);
 	}
 	else if (!fatfsFileTruncate(fil, result->bytesExpected)) {
-		pr("Savegame export: truncate failed for /SAVE/%s to %u bytes\n", result->saveName, result->bytesExpected);
+		pr("Savegame export: truncate failed for %s/%s to %u bytes\n", result->saveDirPath, result->saveName, result->bytesExpected);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusTruncateFailed);
 	}
 
 	if (!fatfsFileClose(fil)) {
-		pr("Savegame export: close failed for /SAVE/%s\n", result->saveName);
+		pr("Savegame export: close failed for %s/%s\n", result->saveDirPath, result->saveName);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusFileCloseFailed);
 	}
 
 out_close_dir:
 	if (!fatfsDirClose(saveDir)) {
-		pr("Savegame export: close failed for /SAVE\n");
+		pr("Savegame export: close failed for %s\n", result->saveDirPath);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusDirCloseFailed);
 	}
 
@@ -4236,22 +4527,23 @@ static bool uiPrvVerifyExportedSavestate(struct FatfsVol *vol, struct SaveExport
 	uint8_t buf[512];
 	uint32_t pos = 0;
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
+	saveDir = uiPrvOpenSaveDirForConsole(vol, result->saveConsole, false);
 	if (!saveDir) {
-		pr("Savegame export: verify cannot open /SAVE\n");
+		pr("Savegame export: verify cannot open %s\n", result->saveDirPath);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifySaveDirFailed);
 		return false;
 	}
 
 	fil = fatfsFileOpenAt(saveDir, result->saveName, OPEN_MODE_READ);
 	if (!fil) {
-		pr("Savegame export: verify cannot reopen /SAVE/%s\n", result->saveName);
+		pr("Savegame export: verify cannot reopen %s/%s\n", result->saveDirPath, result->saveName);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyOpenFailed);
 		goto out_close_dir;
 	}
 
 	if (fatfsFileGetSize(fil) != result->bytesExpected) {
-		pr("Savegame export: verify size mismatch for /SAVE/%s (%u/%u)\n", result->saveName, fatfsFileGetSize(fil), result->bytesExpected);
+		pr("Savegame export: verify size mismatch for %s/%s (%u/%u)\n",
+			result->saveDirPath, result->saveName, fatfsFileGetSize(fil), result->bytesExpected);
 		result->bytesDone = fatfsFileGetSize(fil);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifySizeMismatch);
 		goto out_close_file;
@@ -4263,7 +4555,8 @@ static bool uiPrvVerifyExportedSavestate(struct FatfsVol *vol, struct SaveExport
 		if (now > sizeof(buf))
 			now = sizeof(buf);
 		if (!fatfsFileRead(fil, buf, now, &numRead) || numRead != now) {
-			pr("Savegame export: verify read failed for /SAVE/%s at %u (%u/%u)\n", result->saveName, pos, numRead, now);
+			pr("Savegame export: verify read failed for %s/%s at %u (%u/%u)\n",
+				result->saveDirPath, result->saveName, pos, numRead, now);
 			result->bytesDone = pos + numRead;
 			result->verifyOffset = pos;
 			uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyReadFailed);
@@ -4277,7 +4570,8 @@ static bool uiPrvVerifyExportedSavestate(struct FatfsVol *vol, struct SaveExport
 					result->verifyOffset = pos + i;
 					result->verifyActual = buf[i];
 					result->verifyExpected = expected[pos + i];
-					pr("Savegame export: verify mismatch for /SAVE/%s at %u (sd=%02x flash=%02x)\n", result->saveName, result->verifyOffset, result->verifyActual, result->verifyExpected);
+					pr("Savegame export: verify mismatch for %s/%s at %u (sd=%02x flash=%02x)\n",
+						result->saveDirPath, result->saveName, result->verifyOffset, result->verifyActual, result->verifyExpected);
 					break;
 				}
 			}
@@ -4289,18 +4583,19 @@ static bool uiPrvVerifyExportedSavestate(struct FatfsVol *vol, struct SaveExport
 
 out_close_file:
 	if (!fatfsFileClose(fil)) {
-		pr("Savegame export: verify close failed for /SAVE/%s\n", result->saveName);
+		pr("Savegame export: verify close failed for %s/%s\n", result->saveDirPath, result->saveName);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyFileCloseFailed);
 	}
 
 out_close_dir:
 	if (!fatfsDirClose(saveDir)) {
-		pr("Savegame export: verify close failed for /SAVE\n");
+		pr("Savegame export: verify close failed for %s\n", result->saveDirPath);
 		uiPrvSaveExportSetStatus(result, SaveExportStatusVerifyDirCloseFailed);
 	}
 
 	if (result->status == SaveExportStatusOk)
-		pr("Savegame export: verified /SAVE/%s (%u bytes, hash=%08lx)\n", result->saveName, result->bytesExpected,
+		pr("Savegame export: verified %s/%s (%u bytes, hash=%08lx)\n",
+			result->saveDirPath, result->saveName, result->bytesExpected,
 			(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected));
 	return result->status == SaveExportStatusOk;
 }
@@ -4357,6 +4652,8 @@ static bool uiPrvFlushCurrentSaveToCardAttempt(bool forceReinit, struct SaveExpo
 static bool uiPrvPrepareSaveExportResult(bool force, struct SaveExportResult *result)
 {
 	struct GameSelection selection;
+	char detectedName[ROM_NAME_LEN + 1];
+	enum RomColorSupport colorSupport = RomNoColor;
 
 	uiPrvSaveExportResultInit(result);
 	if (!uiGetGameSelection(&selection) || !selection.saveRamSize)
@@ -4368,23 +4665,31 @@ static bool uiPrvPrepareSaveExportResult(bool force, struct SaveExportResult *re
 	result->forceRequested = force;
 	result->bytesExpected = selection.saveRamSize;
 	result->preferredSaveNameKind = uiPrvSelectedSaveNameKind();
-	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->primarySaveName, sizeof(result->primarySaveName));
-	uiPrvRawSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fullSaveName, sizeof(result->fullSaveName));
-	uiPrvSaveFallbackFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
-	uiPrvCopyStr(result->legacySaveName, sizeof(result->legacySaveName), (const char*)QSPI_FILENAME_START);
+	uiPrvDetectedSaveTitleForSelection(&selection, detectedName, sizeof(detectedName));
+	if (selection.runtime == GameRuntimeGb) {
+		char name[ROM_NAME_LEN + 1];
+		uint32_t romSize, saveRamSize;
+
+		name[ROM_NAME_LEN] = 0;
+		(void)mbcRomAnalyze((const void*)QSPI_ROM_START, &romSize, &saveRamSize, &colorSupport, name);
+	}
+	result->saveConsole = uiPrvSaveConsoleForGame(selection.runtime, colorSupport, (const char*)QSPI_FILENAME_START);
+	uiPrvSaveDirPathForConsole(result->saveConsole, result->saveDirPath, sizeof(result->saveDirPath));
+	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, detectedName, result->primarySaveName, sizeof(result->primarySaveName));
+	uiPrvSaveFallbackFileName(result->primarySaveName, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
 	if (!uiSaveSavestate()) {
 		result->flashCacheFailed = true;
 		pr("Savegame export: failed to copy current save RAM to flash; exporting cached flash copy anyway\n");
 	}
-	pr("Savegame export: cache ready for %s (%lu bytes, qspi=%08lx cart=%08lx owner=%u preferred=%s)\n",
+	pr("Savegame export: cache ready for %s (%lu bytes, qspi=%08lx cart=%08lx owner=%u preferred=%s title=%s)\n",
 		(const char*)QSPI_FILENAME_START, (unsigned long)result->bytesExpected,
 		(unsigned long)uiPrvSaveFingerprint((const void*)QSPI_RAM_COPY_START, result->bytesExpected),
 		(unsigned long)uiPrvSaveFingerprint(CART_RAM_ADDR_IN_RAM, result->bytesExpected),
 		uiPrvCartRamOwnerMatchesSelection(&selection) ? 1u : 0u,
-		uiPrvSaveNameKindName(result->preferredSaveNameKind));
+		uiPrvSaveNameKindName(result->preferredSaveNameKind), detectedName[0] ? detectedName : "(filename)");
 
-	pr("Savegame export: flushing /SAVE/%s to SD (force=%u)\n", result->saveName, force ? 1u : 0u);
+	pr("Savegame export: flushing %s/%s to SD (force=%u)\n", result->saveDirPath, result->saveName, force ? 1u : 0u);
 	return true;
 }
 
@@ -4426,11 +4731,13 @@ bool uiFlushCurrentSaveToCard(bool force)
 	return uiPrvFlushCurrentSaveToCardEx(force, &result);
 }
 	
-	static bool uiPrvSelectRom(struct Canvas *cnv, bool forceSdReinit)	//corrupts GB's RAM, returns true if a selection was made
+	static bool uiPrvSelectRomForConsole(struct Canvas *cnv, bool forceSdReinit, enum UiEmulatorConsole console)	//corrupts GB's RAM, returns true if a selection was made
 	{
 		struct FatFileLocator locator;
 		struct FatfsVol *vol;
 		char name[UI_PICK_FILE_NAME_BUF_SZ];
+		char emptyMsg[128];
+		const char *rootPath = uiPrvRomRootForConsole(console);
 		bool ret = false;
 		
 		// ROM selection reuses cartridge RAM, so export the current save through the normal SD pipeline first.
@@ -4441,13 +4748,18 @@ bool uiFlushCurrentSaveToCard(bool force)
 		if (!vol)
 			return false;
 
-		if (uiPrvPickFile(cnv, vol, "/ROMS", uiPrvRomFileName, "No .gb/.gbc/.nes/.hex/.arduboy files found in /ROMS", false, &locator, name, sizeof(name), NULL, 0))
+		(void)sprintf(emptyMsg, "No %s games found in %s", uiPrvEmulatorConsoleName(console), rootPath);
+		if (uiPrvPickFile(cnv, vol, rootPath, uiPrvRomFilterForConsole(console), emptyMsg, false, &locator, name, sizeof(name), NULL, 0, uiPrvRomDisplayName))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
-	out:
 		(void)uiPrvCardPreUnmount();
 		fatfsUnmount(vol);
 		return ret;
+	}
+
+	static bool uiPrvSelectRom(struct Canvas *cnv, bool forceSdReinit)
+	{
+		return uiPrvSelectRomForConsole(cnv, forceSdReinit, uiPrvCurrentGameConsole());
 	}
 
 static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
@@ -4456,7 +4768,7 @@ static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
 		case SaveExportStatusMountFailed:
 			return "Could not mount the SD card.";
 		case SaveExportStatusSaveDirFailed:
-			return "Could not create or open /SAVE.";
+			return "Could not create or open the save folder.";
 		case SaveExportStatusCreateFailed:
 			return "Could not create the missing save file.";
 		case SaveExportStatusOpenExistingFailed:
@@ -4470,7 +4782,7 @@ static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
 		case SaveExportStatusFileCloseFailed:
 			return "The save file did not close cleanly.";
 		case SaveExportStatusDirCloseFailed:
-			return "The /SAVE directory did not close cleanly.";
+			return "The save folder did not close cleanly.";
 		case SaveExportStatusStreamCloseFailed:
 			return "The SD write stream did not close cleanly.";
 		case SaveExportStatusUnmountFailed:
@@ -4478,7 +4790,7 @@ static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
 		case SaveExportStatusVerifyMountFailed:
 			return "Could not remount the SD card for verification.";
 		case SaveExportStatusVerifySaveDirFailed:
-			return "Could not reopen /SAVE for verification.";
+			return "Could not reopen the save folder for verification.";
 		case SaveExportStatusVerifyOpenFailed:
 			return "Could not reopen the save file for verification.";
 		case SaveExportStatusVerifySizeMismatch:
@@ -4490,7 +4802,7 @@ static const char* uiPrvSaveExportStatusText(enum SaveExportStatus status)
 		case SaveExportStatusVerifyFileCloseFailed:
 			return "The verified save file did not close cleanly.";
 		case SaveExportStatusVerifyDirCloseFailed:
-			return "The verified /SAVE directory did not close cleanly.";
+			return "The verified save folder did not close cleanly.";
 		case SaveExportStatusVerifyStreamCloseFailed:
 			return "The SD read stream did not close cleanly after verification.";
 		case SaveExportStatusVerifyUnmountFailed:
@@ -4561,13 +4873,27 @@ static void uiPrvSaveExportAppend(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const
 	uiPrvCopyStr(msg + pos, SAVE_EXPORT_MSG_BUF_SZ - pos, str);
 }
 
-static void uiPrvSaveExportAppendPath(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const char *label, const char *name)
+static void uiPrvSaveExportPath(const struct SaveExportResult *result, const char *name, char *dst, uint32_t dstLen)
+{
+	if (!dstLen)
+		return;
+	if (name && name[0]) {
+		(void)sprintf(dst, "%s/%s", result->saveDirPath[0] ? result->saveDirPath : "/SAVE", name);
+		return;
+	}
+	uiPrvCopyStr(dst, dstLen, result->saveDirPath[0] ? result->saveDirPath : "/SAVE");
+}
+
+static void uiPrvSaveExportAppendPath(char msg[static SAVE_EXPORT_MSG_BUF_SZ], const char *label,
+	const struct SaveExportResult *result, const char *name)
 {
 	uiPrvSaveExportAppend(msg, "\n");
 	uiPrvSaveExportAppend(msg, label);
 	if (name && name[0]) {
-		uiPrvSaveExportAppend(msg, "/SAVE/");
-		uiPrvSaveExportAppend(msg, name);
+		char path[96];
+
+		uiPrvSaveExportPath(result, name, path, sizeof(path));
+		uiPrvSaveExportAppend(msg, path);
 	}
 	else
 		uiPrvSaveExportAppend(msg, "(none)");
@@ -4619,21 +4945,22 @@ static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, 
 		result->sdError.name ? result->sdError.name : "unknown",
 		(unsigned long)result->sdError.sector, (unsigned long)result->sdError.data);
 	uiPrvSaveExportAppend(msg, tmp);
-	uiPrvSaveExportAppendPath(msg, "Chosen:", result->saveName);
-	uiPrvSaveExportAppendPath(msg, "Primary:", result->primarySaveName);
-	uiPrvSaveExportAppendPath(msg, "Old full:", result->fullSaveName);
-	uiPrvSaveExportAppendPath(msg, "Fallback:", result->fallbackSaveName);
-	uiPrvSaveExportAppendPath(msg, "Legacy:", result->legacySaveName);
+	uiPrvSaveExportAppendPath(msg, "Chosen:", result, result->saveName);
+	uiPrvSaveExportAppendPath(msg, "Primary:", result, result->primarySaveName);
+	uiPrvSaveExportAppendPath(msg, "Fallback:", result, result->fallbackSaveName);
 }
 
 static void uiPrvSaveExportShowSuccess(struct Canvas *cnv, const struct SaveExportResult *result, bool showSuccess,
 	char msg[static SAVE_EXPORT_MSG_BUF_SZ])
 {
+	char path[96];
+
+	uiPrvSaveExportPath(result, result->saveName, path, sizeof(path));
 	if (result->flashCacheFailed) {
 		if (result->saveName[0])
-			(void)sprintf(msg, "Save written to /SAVE/%s from cached flash.\nLatest emulator RAM could not be copied first.", result->saveName);
+			(void)sprintf(msg, "Save written to %s from cached flash.\nLatest emulator RAM could not be copied first.", path);
 		else
-			(void)sprintf(msg, "Save written to /SAVE from cached flash.\nLatest emulator RAM could not be copied first.");
+			(void)sprintf(msg, "Save written to %s from cached flash.\nLatest emulator RAM could not be copied first.", path);
 		uiAlert(cnv, msg, DialogTypeOk);
 		return;
 	}
@@ -4648,9 +4975,9 @@ static void uiPrvSaveExportShowSuccess(struct Canvas *cnv, const struct SaveExpo
 	}
 
 	if (result->saveName[0])
-		(void)sprintf(msg, "Save written to /SAVE/%s", result->saveName);
+		(void)sprintf(msg, "Save written to %s", path);
 	else
-		(void)sprintf(msg, "Save written to /SAVE");
+		(void)sprintf(msg, "Save written to %s", path);
 	uiAlert(cnv, msg, DialogTypeOk);
 }
 
@@ -6266,7 +6593,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		if (!vol)
 			return false;
 
-		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", true, &locator, fileName, sizeof(fileName), NULL, 0))
+		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", true, &locator, fileName, sizeof(fileName), NULL, 0, NULL))
 			goto out_unmount;
 
 		ret = uiPrvIrButtonSpamLocator(cnv, vol, &locator, fileName);
@@ -7310,7 +7637,7 @@ reload_dir:
 			return false;
 
 		while (!uiPrvToolExitRequested()) {
-			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", false, &locator, name, sizeof(name), NULL, 0))
+			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", false, &locator, name, sizeof(name), NULL, 0, NULL))
 				break;
 
 			ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name) || ok;
@@ -8699,33 +9026,47 @@ static void uiPrvCurrentGameTitle(char *dst, uint32_t dstLen, const char *fallba
 	uiPrvCopyGameTitleFallback(dst, dstLen, fallbackName);
 }
 
-static const char *uiPrvCurrentGameConsoleName(void)
+static enum UiEmulatorConsole uiPrvCurrentGameConsole(void)
 {
 	struct GameSelection selection;
-	struct Settings settings;
 	enum RomColorSupport colorSupport;
 
 	if (uiGetGameSelection(&selection)) {
 		if (selection.runtime == GameRuntimeNes)
-			return "NES";
+			return UiEmulatorConsoleNes;
 		if (selection.runtime == GameRuntimeArduboy)
-			return "ARDUBOY";
+			return UiEmulatorConsoleArduboy;
 		if (selection.runtime == GameRuntimeGb) {
+			if (uiPrvStrEndsWithNoCase((const char*)QSPI_FILENAME_START, ".gbc"))
+				return UiEmulatorConsoleGameboyColor;
 			if (!uiPrvHaveValidRom(NULL, &colorSupport, NULL))
-				return "GB";
+				return UiEmulatorConsoleGameboy;
 			if (colorSupport == RomColorRequired)
-				return "GBC";
-			if (colorSupport == RomColorEnhanced) {
-				settingsGet(&settings);
-				return settings.actLikeGBC ? "GBC" : "GB";
-			}
+				return UiEmulatorConsoleGameboyColor;
+			if (colorSupport == RomColorEnhanced)
+				return UiEmulatorConsoleGameboyColor;
 			if (colorSupport == RomNoColor)
-				return "GB";
-			return "GB";
+				return UiEmulatorConsoleGameboy;
+			return UiEmulatorConsoleGameboy;
 		}
 	}
 
-	return "GB";
+	return UiEmulatorConsoleGameboy;
+}
+
+static const char *uiPrvCurrentGameConsoleName(void)
+{
+	switch (uiPrvCurrentGameConsole()) {
+		case UiEmulatorConsoleNes:
+			return "NES";
+		case UiEmulatorConsoleArduboy:
+			return "ARDUBOY";
+		case UiEmulatorConsoleGameboyColor:
+			return "GBC";
+		case UiEmulatorConsoleGameboy:
+		default:
+			return "GB";
+	}
 }
 
 static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *title, bool resume)
@@ -8733,7 +9074,7 @@ static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *ti
 	char label[96];
 
 	if (resume)
-		(void)sprintf(label, "Resume %s (%s)", title, uiPrvCurrentGameConsoleName());
+		(void)sprintf(label, "Resume %s", title);
 	else
 		(void)sprintf(label, "Play '%s'", title);
 
@@ -8753,6 +9094,7 @@ enum UiToolId {
 	UiToolMusic,
 	UiToolImage,
 	UiToolGames,
+	UiToolPorts,
 	UiToolGame,
 	UiToolSettings,
 	UiToolPowerOff,
@@ -8775,9 +9117,10 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 		case UiToolMusic: return "Music";
 		case UiToolImage: return "Image Viewer";
 		case UiToolGames: return "Games";
+		case UiToolPorts: return "Ports";
 		case UiToolGame:
 		case UiToolRunGame:
-			return "Emulation";
+			return "Emulators";
 		case UiToolSettings: return "Settings";
 		case UiToolPowerOff: return "Power Off";
 		default: return "Main Menu";
@@ -8789,6 +9132,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 	switch (tool) {
 		case UiToolGame:
 		case UiToolGames:
+		case UiToolPorts:
 		case UiToolRunGame:
 			return BootGuardModeGame;
 
@@ -9106,7 +9450,8 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		[UiToolMusic] = "Music",
 		[UiToolImage] = "Image Viewer",
 		[UiToolGames] = "Games",
-		[UiToolGame] = "Emulation",
+		[UiToolPorts] = "Ports",
+		[UiToolGame] = "Emulators",
 		[UiToolSettings] = "Settings",
 		[UiToolPowerOff] = "Power Off",
 	};
@@ -9160,7 +9505,7 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 	}
 	if (uiPrvRomFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenGame;
-		labels[numOptions++] = "Emulation";
+		labels[numOptions++] = "Emulators";
 	}
 	if (uiPrvImageFileName(ref->name)) {
 		ids[numOptions] = UiBrowserOpenImage;
@@ -9234,6 +9579,19 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	case DcAppIdSpiro:
 	case DcAppIdCube:
 		return UiToolMedia;
+	case DcAppIdPong:
+	case DcAppIdTetris:
+	case DcAppIdArkanoid:
+	case DcAppIdFlappy:
+	case DcAppIdLabyrinth:
+	case DcAppIdTrex:
+	case DcAppIdDoom:
+	case DcAppIdChips:
+	case DcAppIdScorch:
+	case DcAppIdPipe:
+	case DcAppIdCave:
+	case DcAppIdSokoban:
+		return UiToolPorts;
 	default:
 		return entry->launcherVisible ? UiToolGames : UiToolBrowser;
 	}
@@ -9310,7 +9668,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 			return UiToolBrowser;
 		}
 		if (uiPrvBrowserDcAppIsRuntimeEngine(entry->appId)) {
-			uiAlert(cnv, "Open Emulation from Games to run ROMs.", DialogTypeOk);
+			uiAlert(cnv, "Open Emulators from Games to run ROMs.", DialogTypeOk);
 			return UiToolBrowser;
 		}
 		if (entry->appId == DcAppIdToolMusic && !uiPrvMusicBatteryOkToLaunch(cnv))
@@ -9363,7 +9721,7 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 
 	while (1) {
 		uiPrvSetHeaderTitle("File Browser");
-		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", false, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ)) {
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", false, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ, NULL)) {
 			break;
 		}
 		memset(&ref, 0, sizeof(ref));
@@ -9400,7 +9758,7 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No image files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath)))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No image files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
 	}
@@ -9669,11 +10027,17 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 	while (1) {
 		enum {
 			GameToolOptionRun,
-			GameToolOptionSelect,
-			GameToolOptionSettings,
+			GameToolOptionConsole,
 		};
-		uint_fast8_t optionIds[3], numOptions = 0, selOption, i;
-		const char *labels[3];
+		static const enum UiEmulatorConsole consoles[] = {
+			UiEmulatorConsoleArduboy,
+			UiEmulatorConsoleGameboy,
+			UiEmulatorConsoleGameboyColor,
+			UiEmulatorConsoleNes,
+		};
+		uint_fast8_t optionIds[6], numOptions = 0, selOption, i;
+		enum UiEmulatorConsole optionConsoles[6];
+		const char *labels[6];
 		char name[ROM_NAME_LEN + 1];
 		char title[UI_GAME_TITLE_BUF_SZ];
 		bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
@@ -9682,24 +10046,26 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 		if (uiPrvToolExitRequested())
 			return UiToolGame;
 
-		uiPrvSetHeaderTitle("Emulation");
+		uiPrvSetHeaderTitle("Emulators");
 		uiPrvReset(cnv, false);
 
 		if (validRom) {
 			labels[numOptions] = NULL;
+			optionConsoles[numOptions] = uiPrvCurrentGameConsole();
 			optionIds[numOptions++] = GameToolOptionRun;
 		}
 	#ifndef NO_SD_CARD
-		labels[numOptions] = validRom ? "Select game" : "Load game";
-		optionIds[numOptions++] = GameToolOptionSelect;
+		for (i = 0; i < sizeof(consoles) / sizeof(*consoles); i++) {
+			labels[numOptions] = uiPrvEmulatorConsoleName(consoles[i]);
+			optionConsoles[numOptions] = consoles[i];
+			optionIds[numOptions++] = GameToolOptionConsole;
+		}
 	#endif
-		labels[numOptions] = "Game Settings";
-		optionIds[numOptions++] = GameToolOptionSettings;
 
 		for (i = 0; i < numOptions; i++) {
 			if (optionIds[i] == GameToolOptionRun) {
 				uiPrvCurrentGameTitle(title, sizeof(title), name);
-				uiPrvDrawGameAction(cnv, uiPrvMenuRow(cnv, i), title, false);
+				uiPrvDrawGameAction(cnv, uiPrvMenuRow(cnv, i), title, true);
 			}
 			else
 				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
@@ -9715,8 +10081,8 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 				return UiToolGame;
 		}
 	#ifndef NO_SD_CARD
-		else if (optionIds[selOption] == GameToolOptionSelect) {
-			if (uiPrvSelectRom(cnv, false)) {
+		else if (optionIds[selOption] == GameToolOptionConsole) {
+			if (uiPrvSelectRomForConsole(cnv, false, optionConsoles[selOption])) {
 				if (uiPrvRunLoadedGame(cnv, runGameF, userData) == UiGameActionSwitchTool)
 					return UiToolGame;
 			}
@@ -9724,11 +10090,6 @@ static enum UiToolId uiPrvGameTool(struct Canvas *cnv, UiRunGameF runGameF, void
 				return UiToolGame;
 		}
 	#endif
-		else if (optionIds[selOption] == GameToolOptionSettings) {
-			(void)uiPrvEditGameSettings(cnv);
-			if (uiPrvToolExitRequested())
-				return UiToolGame;
-		}
 	}
 }
 
@@ -9749,7 +10110,7 @@ enum UiGameAction uiGameMenu(void)
 	bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
 	uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 	
-	uiPrvSetHeaderTitle("Emulation");
+	uiPrvSetHeaderTitle("Emulators");
 	uiPrvReset(cnv, false);
 
 	if (validRom && !uiSaveSavestate())
@@ -9767,7 +10128,7 @@ enum UiGameAction uiGameMenu(void)
 		optionIds[numOptions++] = GameMenuOptionSaveToSd;
 	}
 #endif
-	labels[numOptions] = "Settings";
+	labels[numOptions] = uiPrvEmulatorSettingsName(uiPrvCurrentGameConsole());
 	optionIds[numOptions++] = GameMenuOptionSettings;
 	labels[numOptions] = "Main Menu";
 	optionIds[numOptions++] = GameMenuOptionSwitch;
@@ -9825,7 +10186,7 @@ enum UiGameAction uiGameMenu(void)
 	}
 #endif
 	if (optionIds[selOption] == GameMenuOptionSettings) {
-		mLastGameMenuAction = uiPrvSettings(cnv, true) ? UiGameActionRestart : UiGameActionResume;
+		mLastGameMenuAction = uiPrvEditGameSettings(cnv, uiPrvCurrentGameConsole()) ? UiGameActionRestart : UiGameActionResume;
 		if (uiPrvToolExitRequested())
 			mLastGameMenuAction = UiGameActionSwitchTool;
 		return mLastGameMenuAction;
@@ -9849,6 +10210,8 @@ struct UiCategoryEntry {
 	enum UiToolId tool;
 	enum DcAppId appId;
 };
+
+static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData);
 
 static void uiPrvCategoryReturnFence(void)
 {
@@ -9935,6 +10298,10 @@ static void uiPrvRunCategoryToolEntry(struct Canvas *cnv, enum UiToolId tool, Ui
 			uiPrvExitTool(tool);
 			break;
 
+		case UiToolPorts:
+			(void)uiPrvPortsCategoryTool(cnv, runGameF, userData);
+			break;
+
 		default:
 			break;
 	}
@@ -10012,22 +10379,31 @@ static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 	return uiPrvCategoryTool(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
 }
 
+static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry entries[] = {
+		{"Pong", UiCategoryEntrySdApp, UiToolPorts, DcAppIdPong},
+		{"Tetris", UiCategoryEntrySdApp, UiToolPorts, DcAppIdTetris},
+		{"Arkanoid", UiCategoryEntrySdApp, UiToolPorts, DcAppIdArkanoid},
+		{"Flappy Bird", UiCategoryEntrySdApp, UiToolPorts, DcAppIdFlappy},
+		{"Labyrinth", UiCategoryEntrySdApp, UiToolPorts, DcAppIdLabyrinth},
+		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolPorts, DcAppIdTrex},
+		{"DOOM (shareware)", UiCategoryEntrySdApp, UiToolPorts, DcAppIdDoom},
+		{"Chip's Challenge", UiCategoryEntrySdApp, UiToolPorts, DcAppIdChips},
+		{"Scorched Earth", UiCategoryEntrySdApp, UiToolPorts, DcAppIdScorch},
+		{"Pipe Dream", UiCategoryEntrySdApp, UiToolPorts, DcAppIdPipe},
+		{"Cave Story", UiCategoryEntrySdApp, UiToolPorts, DcAppIdCave},
+		{"Sokoban", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSokoban},
+	};
+
+	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+}
+
 static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
 	static const struct UiCategoryEntry entries[] = {
-		{"Emulation", UiCategoryEntryTool, UiToolGame, 0},
-		{"Pong", UiCategoryEntrySdApp, UiToolGames, DcAppIdPong},
-		{"Tetris", UiCategoryEntrySdApp, UiToolGames, DcAppIdTetris},
-		{"Arkanoid", UiCategoryEntrySdApp, UiToolGames, DcAppIdArkanoid},
-		{"Flappy Bird", UiCategoryEntrySdApp, UiToolGames, DcAppIdFlappy},
-		{"Labyrinth", UiCategoryEntrySdApp, UiToolGames, DcAppIdLabyrinth},
-		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolGames, DcAppIdTrex},
-		{"DOOM (shareware)", UiCategoryEntrySdApp, UiToolGames, DcAppIdDoom},
-		{"Chip's Challenge", UiCategoryEntrySdApp, UiToolGames, DcAppIdChips},
-		{"Scorched Earth", UiCategoryEntrySdApp, UiToolGames, DcAppIdScorch},
-		{"Pipe Dream", UiCategoryEntrySdApp, UiToolGames, DcAppIdPipe},
-		{"Cave Story", UiCategoryEntrySdApp, UiToolGames, DcAppIdCave},
-		{"Sokoban", UiCategoryEntrySdApp, UiToolGames, DcAppIdSokoban},
+		{"Emulators", UiCategoryEntryTool, UiToolGame, 0},
+		{"Ports", UiCategoryEntryTool, UiToolPorts, 0},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
@@ -10147,6 +10523,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 
 			case UiToolGames:
 				activeTool = uiPrvGamesCategoryTool(cnv, runGameF, userData);
+				break;
+
+			case UiToolPorts:
+				activeTool = uiPrvPortsCategoryTool(cnv, runGameF, userData);
 				break;
 
 			case UiToolGame:

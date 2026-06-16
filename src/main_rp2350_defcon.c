@@ -773,10 +773,15 @@ static uint32_t __attribute__((noinline)) desiredFramerate(void)
 {
         static const uint8_t fpsVals[] = DISP_SPEED_SETTINGS;
         struct Settings settings;
+        uint_fast8_t speed;
         
         settingsGet(&settings);
-                
-        return fpsVals[settings.speed];
+
+        speed = settings.gbSpeed;
+        if (speed >= sizeof(fpsVals) / sizeof(*fpsVals))
+                speed = settings.speed;
+
+        return fpsVals[speed];
 }
 
 static uint32_t __attribute__((noinline)) desiredContrast(void)
@@ -799,11 +804,7 @@ static uint32_t __attribute__((noinline)) desiredBrightness(void)
 
 static bool __attribute__((noinline)) shouldActAsCgb(void)
 {
-        struct Settings settings;
-        
-        settingsGet(&settings);
-        
-        return settings.actLikeGBC;
+        return true;
 }
 
 static uint8_t __attribute__((noinline)) desiredGbPalette(void)
@@ -815,13 +816,52 @@ static uint8_t __attribute__((noinline)) desiredGbPalette(void)
         return settings.gbPalette;
 }
 
+static bool mainPrvStrEndsWithNoCase(const char *str, const char *suffix)
+{
+        uint32_t strLen = strlen(str), suffixLen = strlen(suffix), i;
+
+        if (strLen < suffixLen)
+                return false;
+
+        str += strLen - suffixLen;
+        for (i = 0; i < suffixLen; i++) {
+                char a = str[i], b = suffix[i];
+
+                if (a >= 'A' && a <= 'Z')
+                        a += 'a' - 'A';
+                if (b >= 'A' && b <= 'Z')
+                        b += 'a' - 'A';
+                if (a != b)
+                        return false;
+        }
+
+        return true;
+}
+
+static bool selectedGameboyUsesGbcSettings(const struct GameSelection *selection)
+{
+        uint32_t romSzExpected, ramSzExpected;
+        enum RomColorSupport colorSupport;
+
+        if (!selection || selection->runtime != GameRuntimeGb)
+                return false;
+        if (mainPrvStrEndsWithNoCase((const char*)QSPI_FILENAME_START, ".gbc"))
+                return true;
+        if (!mbcRomAnalyze((const void*)QSPI_ROM_START, &romSzExpected, &ramSzExpected, &colorSupport, NULL))
+                return false;
+        return colorSupport != RomNoColor;
+}
+
 static bool __attribute__((noinline)) shouldUpscale(void)
 {
         struct Settings settings;
+        struct GameSelection selection;
         
         settingsGet(&settings);
-        
-        return settings.upscale;
+
+        if (uiGetGameSelection(&selection) && selectedGameboyUsesGbcSettings(&selection))
+                return settings.gbcUpscale;
+        return settings.gbUpscale;
 }
 
 static bool __attribute__((noinline)) shouldRotateGame(void)

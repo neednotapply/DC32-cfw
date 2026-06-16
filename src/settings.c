@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			16
+#define SETTINGS_CUR_VER			17
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
@@ -67,8 +67,15 @@ static const union SettingsPage* settingsLocate(void)
 
 static void settingsPrvNormalize(struct Settings *settings)
 {
+	settings->actLikeGBC = 1;
 	if (settings->speed >= SETTINGS_NUM_SPEEDS)
 		settings->speed = 1;
+	if (settings->gbSpeed >= SETTINGS_NUM_SPEEDS)
+		settings->gbSpeed = settings->speed;
+	if (settings->gbcSpeed >= SETTINGS_NUM_SPEEDS)
+		settings->gbcSpeed = settings->speed;
+	if (settings->nesSpeed >= SETTINGS_NUM_SPEEDS)
+		settings->nesSpeed = settings->speed;
 	if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
 		settings->ledMode = LedModeReactive;
 	else if (settings->ledMode >= LedModeNumModes)
@@ -203,6 +210,16 @@ void settingsGet(struct Settings *settings)
 
 		case 15:			//add Game Boy palette selection
 			settings->gbPalette = GameBoyPaletteGbcPreferred;
+			//fallthrough
+
+		case 16:			//split shared emulator display settings by console
+			settings->actLikeGBC = 1;
+			settings->gbSpeed = settings->speed;
+			settings->gbUpscale = settings->upscale;
+			settings->gbcSpeed = settings->speed;
+			settings->gbcUpscale = settings->upscale;
+			settings->nesSpeed = settings->speed;
+			settings->nesUpscale = settings->upscale;
 			//fallthrough
 
 		//other cases here, in increasing order

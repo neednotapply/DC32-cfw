@@ -88,6 +88,13 @@ struct Settings {
 	uint8_t autoclickerButton	:	2;
 	uint8_t autoclickerCps		:	6;
 	uint8_t gbPalette;
+	uint8_t gbSpeed		:	2;
+	uint8_t gbUpscale	:	1;
+	uint8_t gbcSpeed	:	2;
+	uint8_t gbcUpscale	:	1;
+	uint8_t nesSpeed	:	2;
+	uint8_t nesUpscale	:	1;
+	uint8_t emulatorReserved : 7;
 };
 
 

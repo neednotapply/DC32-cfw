@@ -193,11 +193,13 @@ static uint32_t nesPortDesiredFramerate(enum NesRegion region)
 	static const uint8_t fpsVals[] = DISP_SPEED_SETTINGS;
 	struct Settings settings;
 	uint32_t base = (region == NesRegionNtsc) ? NES_FRAME_BASE_NTSC : NES_FRAME_BASE_PAL;
+	uint_fast8_t speed;
 
 	settingsGet(&settings);
-	if (settings.speed >= sizeof(fpsVals) / sizeof(*fpsVals))
-		settings.speed = 1;
-	return (base * fpsVals[settings.speed] + NES_FRAME_BASE_NTSC / 2) / NES_FRAME_BASE_NTSC;
+	speed = settings.nesSpeed;
+	if (speed >= sizeof(fpsVals) / sizeof(*fpsVals))
+		speed = settings.speed;
+	return (base * fpsVals[speed] + NES_FRAME_BASE_NTSC / 2) / NES_FRAME_BASE_NTSC;
 }
 
 static void nesPortUpdateDrawOptions(void)
@@ -208,8 +210,8 @@ static void nesPortUpdateDrawOptions(void)
 	uint32_t i;
 
 	settingsGet(&settings);
-	mDrawWidth = settings.upscale ? NES_PRESENT_UPSCALED_WIDTH : NES_PRESENT_NORMAL_WIDTH;
-	mDrawHeight = settings.upscale ? NES_PRESENT_UPSCALED_HEIGHT : NES_PRESENT_NORMAL_HEIGHT;
+	mDrawWidth = settings.nesUpscale ? NES_PRESENT_UPSCALED_WIDTH : NES_PRESENT_NORMAL_WIDTH;
+	mDrawHeight = settings.nesUpscale ? NES_PRESENT_UPSCALED_HEIGHT : NES_PRESENT_NORMAL_HEIGHT;
 	mDrawLeft = (logicalW - mDrawWidth) / 2;
 	mDrawTop = (logicalH - mDrawHeight) / 2;
 	mDrawFlipped = settings.rotation;
@@ -257,6 +259,7 @@ static void nesPortUpdateDrawOptions(void)
 
 void nesRefreshDisplayOptions(void)
 {
+	dispSetFramerate(nesPortDesiredFramerate(mRegion));
 	nesPortUpdateDrawOptions();
 }
 

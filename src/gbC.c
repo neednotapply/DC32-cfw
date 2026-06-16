@@ -216,6 +216,9 @@ void gbRun(bool presentAsCgb)
 
 		for(T = 0; T < 16; T++)
 			hram[0x30 + T] = (presentAsCgb ? initWaveDataCGB : initWaveDataDMG)[T];
+		gbIoWrite(0x47, hram[0x47]);
+		gbIoWrite(0x48, hram[0x48]);
+		gbIoWrite(0x49, hram[0x49]);
 	}
 	
 	while(1){

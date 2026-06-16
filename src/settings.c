@@ -202,7 +202,7 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 15:			//add Game Boy palette selection
-			settings->gbPalette = GameBoyPaletteBw;
+			settings->gbPalette = GameBoyPaletteGbcPreferred;
 			//fallthrough
 
 		//other cases here, in increasing order

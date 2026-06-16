@@ -56,6 +56,7 @@ enum GameBoyPalette {
 	GameBoyPaletteGbcr,
 	GameBoyPaletteGbceuus,
 	GameBoyPaletteGbcrb,
+	GameBoyPaletteGbcPreferred,
 	GameBoyPaletteNumPalettes,
 };
 

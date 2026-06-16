@@ -9,6 +9,7 @@
 #include <string.h>
 #include "frontend.h"
 #include "printf.h"
+#include "gbCartHeader.h"
 #include "gbCore.h"
 #include "gb.h"
 #include "settings.h"
@@ -34,7 +35,28 @@ enum GbDmgPalettePlane {
 	GbDmgPaletteNumPlanes,
 };
 
-#define GB_DMG_UNIFORM(c0, c1, c2, c3) {{c0, c1, c2, c3}, {c0, c1, c2, c3}, {c0, c1, c2, c3}}
+#define GB_DMG_PAL(c0, c1, c2, c3) {c0, c1, c2, c3}
+#define GB_DMG_UNIFORM(c0, c1, c2, c3) {GB_DMG_PAL(c0, c1, c2, c3), GB_DMG_PAL(c0, c1, c2, c3), GB_DMG_PAL(c0, c1, c2, c3)}
+// GBC boot palette combinations are stored here in BG, OBJ0, OBJ1 plane order.
+#define GB_DMG_PLANES(bg, obj0, obj1) {bg, obj0, obj1}
+
+#define GB_GBC_BOOT_PAL_0 GB_DMG_PAL(0xFFDF, 0xFD4C, 0x8180, 0x0000)
+#define GB_GBC_BOOT_PAL_1 GB_DMG_PAL(0xFF18, 0xCCD0, 0x8345, 0x5981)
+#define GB_GBC_BOOT_PAL_2 GB_DMG_PAL(0xFFDF, 0x8C5B, 0x5291, 0x0000)
+#define GB_GBC_BOOT_PAL_3 GB_DMG_PAL(0xFFDF, 0x7FC6, 0x0400, 0x0000)
+#define GB_GBC_BOOT_PAL_4 GB_DMG_PAL(0xFFDF, 0xFC10, 0x91C7, 0x0000)
+#define GB_GBC_BOOT_PAL_5 GB_DMG_PAL(0xFFDF, 0xA514, 0x528A, 0x0000)
+#define GB_GBC_BOOT_PAL_6 GB_DMG_PAL(0xFFDF, 0xFFC0, 0x7A40, 0x0000)
+#define GB_GBC_BOOT_PAL_12 GB_DMG_PAL(0xFFD4, 0xFC92, 0x949F, 0x0000)
+#define GB_GBC_BOOT_PAL_18 GB_DMG_PAL(0xFFDF, 0x57C0, 0xFA00, 0x0000)
+#define GB_GBC_BOOT_PAL_24 GB_DMG_PAL(0xFFDF, 0xFFC0, 0xF800, 0x0000)
+#define GB_GBC_BOOT_PAL_26 GB_DMG_PAL(0xFFDF, 0xFE40, 0x9B00, 0x0000)
+#define GB_GBC_BOOT_PAL_27 GB_DMG_PAL(0x0000, 0x0410, 0xFEC0, 0xFFDF)
+#define GB_GBC_BOOT_PAL_28 GB_DMG_PAL(0xFFDF, 0x651F, 0x001F, 0x0000)
+#define GB_GBC_BOOT_PAL_29 GB_DMG_PAL(0xFFDF, 0x7FC6, 0x0318, 0x0000)
+
+static uint16_t mActiveDmgPaletteColors[GbDmgPaletteNumPlanes][4] =
+	GB_DMG_UNIFORM(0xFFDF, 0xAD55, 0x528A, 0x0000);
 
 static const uint16_t mGbDmgPaletteColors[GameBoyPaletteNumPalettes][GbDmgPaletteNumPlanes][4] = {
 	[GameBoyPaletteBw] = GB_DMG_UNIFORM(0xFFDF, 0xAD55, 0x528A, 0x0000), // bw: Black & White
@@ -45,31 +67,196 @@ static const uint16_t mGbDmgPaletteColors[GameBoyPaletteNumPalettes][GbDmgPalett
 	[GameBoyPaletteGrafixkidgray] = GB_DMG_UNIFORM(0xE6D9, 0xACD2, 0x734C, 0x2944), // grafixkidgray: Grafixkid Gray
 	[GameBoyPaletteGrafixkidgreen] = GB_DMG_UNIFORM(0xDF96, 0xAE12, 0x7C8F, 0x4B0B), // grafixkidgreen: Grafixkid Green
 	[GameBoyPaletteBlackzero] = GB_DMG_UNIFORM(0x7C02, 0x53C8, 0x3AC9, 0x2A07), // blackzero: Game Boy (Black Zero) palette
-	[GameBoyPaletteGbcjp] = GB_DMG_UNIFORM(0xFFDF, 0xFE40, 0x9B00, 0x0000), // gbcjp: PocketCamera, JP
-	[GameBoyPaletteGbcu] = GB_DMG_UNIFORM(0xFFDF, 0xFD4C, 0x8180, 0x0000), // gbcu: Game Boy Color Splash Up
-	[GameBoyPaletteGbcua] = GB_DMG_UNIFORM(0xFFDF, 0xFC10, 0x91C7, 0x0000), // gbcua: Game Boy Color Splash Up+A
-	[GameBoyPaletteGbcub] = GB_DMG_UNIFORM(0xFF18, 0xCCD0, 0x8345, 0x5981), // gbcub: Game Boy Color Splash Up+B
-	[GameBoyPaletteGbcl] = GB_DMG_UNIFORM(0xFFDF, 0x651F, 0x001F, 0x0000), // gbcl: Game Boy Color Splash Left
-	[GameBoyPaletteGbcla] = GB_DMG_UNIFORM(0xFFDF, 0x8C5B, 0x5291, 0x0000), // gbcla: Game Boy Color Splash Left+A
-	[GameBoyPaletteGbclb] = GB_DMG_UNIFORM(0xFFDF, 0xA514, 0x528A, 0x0000), // gbclb: Game Boy Color Splash Left+B
-	[GameBoyPaletteGbcd] = GB_DMG_UNIFORM(0xFFD4, 0xFC92, 0x949F, 0x0000), // gbcd: Game Boy Color Splash Down
-	[GameBoyPaletteGbcda] = GB_DMG_UNIFORM(0xFFDF, 0xFFC0, 0xF800, 0x0000), // gbcda: Game Boy Color Splash Down+A
-	[GameBoyPaletteGbcdb] = GB_DMG_UNIFORM(0xFFDF, 0xFFC0, 0x7A40, 0x0000), // gbcdb: Game Boy Color Splash Down+B
-	[GameBoyPaletteGbcr] = GB_DMG_UNIFORM(0xFFDF, 0x57C0, 0xFA00, 0x0000), // gbcr: Game Boy Color Splash Right
-	[GameBoyPaletteGbceuus] = GB_DMG_UNIFORM(0xFFDF, 0x7FC6, 0x0318, 0x0000), // gbceuus: Game Boy Color Splash Right+A (Game Boy Camera, EU/US)
-	[GameBoyPaletteGbcrb] = GB_DMG_UNIFORM(0x0000, 0x0410, 0xFEC0, 0xFFDF), // gbcrb: Game Boy Color Splash Right+B
+	[GameBoyPaletteGbcjp] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_26, GB_GBC_BOOT_PAL_26, GB_GBC_BOOT_PAL_26), // gbcjp: Pocket Camera JP
+	[GameBoyPaletteGbcu] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_0, GB_GBC_BOOT_PAL_0, GB_GBC_BOOT_PAL_0), // gbcu: Brown
+	[GameBoyPaletteGbcua] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_4, GB_GBC_BOOT_PAL_3, GB_GBC_BOOT_PAL_28), // gbcua: Red
+	[GameBoyPaletteGbcub] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_1, GB_GBC_BOOT_PAL_0, GB_GBC_BOOT_PAL_0), // gbcub: Dark Brown
+	[GameBoyPaletteGbcl] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_28, GB_GBC_BOOT_PAL_4, GB_GBC_BOOT_PAL_3), // gbcl: Blue
+	[GameBoyPaletteGbcla] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_2, GB_GBC_BOOT_PAL_4, GB_GBC_BOOT_PAL_0), // gbcla: Dark Blue
+	[GameBoyPaletteGbclb] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_5, GB_GBC_BOOT_PAL_5, GB_GBC_BOOT_PAL_5), // gbclb: Gray
+	[GameBoyPaletteGbcd] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_12, GB_GBC_BOOT_PAL_12, GB_GBC_BOOT_PAL_12), // gbcd: Pale Yellow
+	[GameBoyPaletteGbcda] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_24, GB_GBC_BOOT_PAL_24, GB_GBC_BOOT_PAL_24), // gbcda: Orange
+	[GameBoyPaletteGbcdb] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_6, GB_GBC_BOOT_PAL_28, GB_GBC_BOOT_PAL_3), // gbcdb: Yellow
+	[GameBoyPaletteGbcr] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_18, GB_GBC_BOOT_PAL_18, GB_GBC_BOOT_PAL_18), // gbcr: Green
+	[GameBoyPaletteGbceuus] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_29, GB_GBC_BOOT_PAL_4, GB_GBC_BOOT_PAL_4), // gbceuus: Dark Green
+	[GameBoyPaletteGbcrb] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_27, GB_GBC_BOOT_PAL_27, GB_GBC_BOOT_PAL_27), // gbcrb: Reverse
+	[GameBoyPaletteGbcPreferred] = GB_DMG_PLANES(GB_GBC_BOOT_PAL_29, GB_GBC_BOOT_PAL_4, GB_GBC_BOOT_PAL_4), // gbcpreferred: GBC boot ROM default/fallback
 };
 
+static const uint16_t mGbcBootPaletteWords[] = {
+	0xFFDF, 0xFD4C, 0x8180, 0x0000, // 0
+	0xFF18, 0xCCD0, 0x8345, 0x5981, // 1
+	0xFFDF, 0x8C5B, 0x5291, 0x0000, // 2
+	0xFFDF, 0x7FC6, 0x0400, 0x0000, // 3
+	0xFFDF, 0xFC10, 0x91C7, 0x0000, // 4
+	0xFFDF, 0xA514, 0x528A, 0x0000, // 5
+	0xFFDF, 0xFFC0, 0x7A40, 0x0000, // 6
+	0xFFDF, 0x7FC0, 0xB380, 0x0000, // 7
+	0xFFDF, 0xAD50, 0x438F, 0x0000, // 8
+	0xA4DF, 0xFFC0, 0x0300, 0x0000, // 9
+	0xFFD9, 0x675D, 0x9C06, 0x5ACB, // 10
+	0xB59F, 0xFFD2, 0xAAC8, 0x0000, // 11
+	0xFFD4, 0xFC92, 0x949F, 0x0000, // 12
+	0xFFD3, 0x959F, 0x648E, 0x01C7, // 13
+	0x6FC0, 0xFFDF, 0xFA89, 0x0000, // 14
+	0x56C0, 0xFC00, 0xFFC0, 0xFFDF, // 15
+	0xFFDF, 0xFB80, 0x9200, 0x0000, // 16
+	0xFE08, 0xFE80, 0x91C0, 0x4800, // 17
+	0xFFDF, 0x57C0, 0xFA00, 0x0000, // 18
+	0xFB0A, 0xD000, 0x6000, 0x0000, // 19
+	0xFFDF, 0xFCC0, 0xF800, 0x0000, // 20
+	0xFFDF, 0x07C0, 0x3400, 0x0240, // 21
+	0xFFDF, 0x5DDF, 0xF800, 0x001F, // 22
+	0xFFDF, 0xFFCF, 0x041F, 0xF800, // 23
+	0xFFDF, 0xFFC0, 0xF800, 0x0000, // 24
+	0xFFC0, 0xF800, 0x6000, 0x0000, // 25
+	0xFFDF, 0xFE40, 0x9B00, 0x0000, // 26
+	0x0000, 0x0410, 0xFEC0, 0xFFDF, // 27
+	0xFFDF, 0x651F, 0x001F, 0x0000, // 28
+	0xFFDF, 0x7FC6, 0x0318, 0x0000, // 29
+};
+
+static const uint8_t mGbcBootPaletteCombinationOffsets[] = {
+	16, 16, 116, 72, 72, 72, 80, 80, 80, 96, 96, 96,
+	36, 36, 36, 0, 0, 0, 108, 108, 108, 20, 20, 20,
+	48, 48, 48, 104, 104, 104, 64, 32, 32, 16, 112, 112,
+	16, 8, 8, 12, 16, 16, 16, 116, 116, 112, 16, 112,
+	8, 68, 8, 64, 64, 32, 16, 16, 28, 16, 16, 72,
+	16, 16, 80, 76, 76, 36, 15, 15, 44, 68, 68, 8,
+	16, 16, 8, 16, 16, 12, 112, 112, 0, 12, 12, 0,
+	0, 0, 4, 72, 88, 72, 80, 88, 80, 96, 88, 96,
+	64, 88, 32, 68, 16, 52, 111, 0, 56, 111, 16, 60,
+	76, 91, 36, 64, 112, 40, 16, 92, 112, 68, 88, 8,
+	16, 0, 8, 16, 112, 12, 112, 12, 0, 12, 112, 16,
+	84, 112, 16, 12, 112, 0, 100, 12, 112, 0, 112, 32,
+	16, 12, 112, 112, 12, 24, 16, 112, 116,
+};
+
+static const uint8_t mGbcBootTitleChecksums[] = {
+	0x00, 0x88, 0x16, 0x36, 0xD1, 0xDB, 0xF2, 0x3C, 0x8C, 0x92, 0x3D, 0x5C, 0x58, 0xC9, 0x3E, 0x70,
+	0x1D, 0x59, 0x69, 0x19, 0x35, 0xA8, 0x14, 0xAA, 0x75, 0x95, 0x99, 0x34, 0x6F, 0x15, 0xFF, 0x97,
+	0x4B, 0x90, 0x17, 0x10, 0x39, 0xF7, 0xF6, 0xA2, 0x49, 0x4E, 0x43, 0x68, 0xE0, 0x8B, 0xF0, 0xCE,
+	0x0C, 0x29, 0xE8, 0xB7, 0x86, 0x9A, 0x52, 0x01, 0x9D, 0x71, 0x9C, 0xBD, 0x5D, 0x6D, 0x67, 0x3F,
+	0x6B, 0xB3, 0x46, 0x28, 0xA5, 0xC6, 0xD3, 0x27, 0x61, 0x18, 0x66, 0x6A, 0xBF, 0x0D, 0xF4, 0xB3,
+	0x46, 0x28, 0xA5, 0xC6, 0xD3, 0x27, 0x61, 0x18, 0x66, 0x6A, 0xBF, 0x0D, 0xF4, 0xB3,
+};
+
+static const uint8_t mGbcBootPaletteByTitleChecksum[] = {
+	0x00, 0x04, 0x05, 0x23, 0x22, 0x03, 0x1F, 0x0F, 0x0A, 0x05, 0x13, 0x24, 0x87, 0x25, 0x1E, 0x2C,
+	0x15, 0x20, 0x1F, 0x14, 0x05, 0x21, 0x0D, 0x0E, 0x05, 0x1D, 0x05, 0x12, 0x09, 0x03, 0x02, 0x1A,
+	0x19, 0x19, 0x29, 0x2A, 0x1A, 0x2D, 0x2A, 0x2D, 0x24, 0x26, 0x9A, 0x2A, 0x1E, 0x29, 0x22, 0x22,
+	0x05, 0x2A, 0x06, 0x05, 0x21, 0x19, 0x2A, 0x2A, 0x28, 0x02, 0x10, 0x19, 0x2A, 0x2A, 0x05, 0x00,
+	0x27, 0x24, 0x16, 0x19, 0x06, 0x20, 0x0C, 0x24, 0x0B, 0x27, 0x12, 0x27, 0x18, 0x1F, 0x32, 0x11,
+	0x2E, 0x06, 0x1B, 0x00, 0x2F, 0x29, 0x29, 0x00, 0x00, 0x13, 0x22, 0x17, 0x12, 0x1D,
+};
+
+#define GB_GBC_BOOT_FIRST_DUPLICATE_CHECKSUM 65u
+static const char mGbcBootDuplicateFourthLetters[] = "BEFAARBEKEK R-URAR INAILICE R";
+
+#undef GB_GBC_BOOT_PAL_29
+#undef GB_GBC_BOOT_PAL_28
+#undef GB_GBC_BOOT_PAL_27
+#undef GB_GBC_BOOT_PAL_26
+#undef GB_GBC_BOOT_PAL_24
+#undef GB_GBC_BOOT_PAL_18
+#undef GB_GBC_BOOT_PAL_12
+#undef GB_GBC_BOOT_PAL_6
+#undef GB_GBC_BOOT_PAL_5
+#undef GB_GBC_BOOT_PAL_4
+#undef GB_GBC_BOOT_PAL_3
+#undef GB_GBC_BOOT_PAL_2
+#undef GB_GBC_BOOT_PAL_1
+#undef GB_GBC_BOOT_PAL_0
+#undef GB_DMG_PLANES
 #undef GB_DMG_UNIFORM
+#undef GB_DMG_PAL
 
 void gbIoInit(void)
 {
 	divOfst = 0;
 }
 
+static void gbPrvLoadDmgPaletteColors(const uint16_t colors[GbDmgPaletteNumPlanes][4])
+{
+	memcpy(mActiveDmgPaletteColors, colors, sizeof(mActiveDmgPaletteColors));
+}
+
+static void gbPrvLoadGbcBootPalette(uint_fast8_t combinationOffset)
+{
+	uint_fast8_t bg, obj0, obj1;
+
+	if (combinationOffset + 2u >= sizeof(mGbcBootPaletteCombinationOffsets))
+		combinationOffset = 0;
+
+	obj0 = mGbcBootPaletteCombinationOffsets[combinationOffset];
+	obj1 = mGbcBootPaletteCombinationOffsets[combinationOffset + 1u];
+	bg = mGbcBootPaletteCombinationOffsets[combinationOffset + 2u];
+	if (bg + 3u >= sizeof(mGbcBootPaletteWords) / sizeof(*mGbcBootPaletteWords) ||
+		obj0 + 3u >= sizeof(mGbcBootPaletteWords) / sizeof(*mGbcBootPaletteWords) ||
+		obj1 + 3u >= sizeof(mGbcBootPaletteWords) / sizeof(*mGbcBootPaletteWords)) {
+		bg = 116;
+		obj0 = 16;
+		obj1 = 16;
+	}
+
+	memcpy(mActiveDmgPaletteColors[GbDmgPaletteBg],
+		mGbcBootPaletteWords + bg,
+		sizeof(mActiveDmgPaletteColors[GbDmgPaletteBg]));
+	memcpy(mActiveDmgPaletteColors[GbDmgPaletteObj0],
+		mGbcBootPaletteWords + obj0,
+		sizeof(mActiveDmgPaletteColors[GbDmgPaletteObj0]));
+	memcpy(mActiveDmgPaletteColors[GbDmgPaletteObj1],
+		mGbcBootPaletteWords + obj1,
+		sizeof(mActiveDmgPaletteColors[GbDmgPaletteObj1]));
+}
+
+static uint_fast8_t gbPrvGbcBootPaletteForRom(const void *rom, uint32_t romSize)
+{
+	const struct CartHeader *hdr = (const struct CartHeader*)rom;
+	uint_fast8_t i, titleChecksum = 0;
+
+	if (!rom || romSize < sizeof(struct CartHeader))
+		return 0;
+	if (hdr->oldLicenseeCode == 0x33) {
+		if (hdr->newLicenseeCode[0] != '0' || hdr->newLicenseeCode[1] != '1')
+			return 0;
+	} else if (hdr->oldLicenseeCode != 0x01) {
+		return 0;
+	}
+
+	for (i = 0; i < sizeof(hdr->titleDMG); i++)
+		titleChecksum += hdr->titleDMG[i];
+
+	for (i = 0; i < sizeof(mGbcBootTitleChecksums); i++) {
+		if (titleChecksum != mGbcBootTitleChecksums[i])
+			continue;
+		if (i >= GB_GBC_BOOT_FIRST_DUPLICATE_CHECKSUM &&
+			hdr->titleDMG[3] != mGbcBootDuplicateFourthLetters[i - GB_GBC_BOOT_FIRST_DUPLICATE_CHECKSUM])
+			continue;
+		return mGbcBootPaletteByTitleChecksum[i] & 0x7f;
+	}
+
+	return 0;
+}
+
 void gbSetDmgPalette(uint_fast8_t palette)
 {
 	mDmgPalette = palette < GameBoyPaletteNumPalettes ? palette : GameBoyPaletteBw;
+	if (mDmgPalette == GameBoyPaletteGbcPreferred)
+		gbPrvLoadGbcBootPalette(0);
+	else
+		gbPrvLoadDmgPaletteColors(mGbDmgPaletteColors[mDmgPalette]);
+}
+
+void gbSetDmgPaletteForRom(const void *rom, uint32_t romSize, uint_fast8_t palette)
+{
+	if (palette == GameBoyPaletteGbcPreferred) {
+		mDmgPalette = GameBoyPaletteGbcPreferred;
+		gbPrvLoadGbcBootPalette(gbPrvGbcBootPaletteForRom(rom, romSize));
+		return;
+	}
+
+	gbSetDmgPalette(palette);
 }
 
 uint8_t gbIoRead(uint16_t addr)
@@ -191,7 +378,7 @@ static void gbPrvRecalcCgbPal(CachedCgbPal dstPal, const uint8_t *srcPal, uint_f
 
 static void gbPrvRecalcDmgPal(CachedDmgPal dst, uint_fast8_t regVal, uint_fast8_t plane)
 {
-	const uint16_t *colors = mGbDmgPaletteColors[mDmgPalette][plane];
+	const uint16_t *colors = mActiveDmgPaletteColors[plane];
 	
 	dst[0] = colors[(regVal >> 0) & 3];
 	dst[1] = colors[(regVal >> 2) & 3];

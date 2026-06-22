@@ -50,6 +50,7 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdPipe, "Pipe Dream", "/APPS/pipe.DC32", true},
 	{DcAppIdCave, "Cave Story", "/APPS/cave.DC32", true},
 	{DcAppIdSokoban, "Sokoban", "/APPS/sokoban.DC32", true},
+	{DcAppIdOpenJazz, "Jazz Jackrabbit", "/APPS/openjazz.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
 	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
@@ -436,6 +437,17 @@ bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP)
 		return false;
 	if (spanP)
 		*spanP = mActiveScratch;
+	return true;
+}
+
+bool dcAppGetAuxScratch(struct ToolWorkspaceSpan *spanP)
+{
+	if (!mActiveScratchValid)
+		return false;
+	if (spanP) {
+		spanP->ptr = (void*)DCAPP_AUX_RAM_START;
+		spanP->size = DCAPP_AUX_RAM_SIZE;
+	}
 	return true;
 }
 

@@ -133,7 +133,8 @@ def main() -> int:
            "Ardens runtime exposes readable boot/perf diagnostics", failures)
     expect("ARDUBOY_SIM_SCRATCH_SIZE=0x18000" in cmake_text and
            "QSPI_RAM_SIZE_MAX=65536" in cmake_text and
-           "ORIGIN = 0x2002B000" in linker_text and "first 172K" in linker_text,
+           "ORIGIN = 0x2002B000, LENGTH = 0x2B000" in linker_text and
+           "__ramvec_end <= 0x20056000" in linker_text,
            "global save RAM limit remains 64 KiB while the Ardens scratch window is reserved", failures)
     expect("ARDUBOY_HLE_ALLOW_HEURISTIC" in hybrid_text and "ArduboyHleMemset" in hybrid_text,
            "ProjectABE-style hybrid runtime remains present for experimental work", failures)

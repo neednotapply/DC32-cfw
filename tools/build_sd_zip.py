@@ -50,6 +50,8 @@ ARDUBOY_GENRE_DIRS = (
 DOOM_REPO = "https://github.com/kilograham/rp2040-doom.git"
 DOOM_RELEASE = "defcon32_v1"
 DOOM_WHX_SOURCE = REPO_ROOT / "third_party" / "rp2040-doom" / "doom1.whx"
+OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
+OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
 CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
 PIPEDREAMER_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "pipe-pipedreamer.pak"
 XSCORCH_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "scorch-xscorch.pak"
@@ -88,12 +90,14 @@ APP_BINARIES = (
     "pipe.DC32",
     "cave.DC32",
     "sokoban.DC32",
+    "openjazz.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
 )
 APP_DATA_FILES = {
     "APPS/doom1.whx": DOOM_WHX_SOURCE,
+    "APPS/JAZZ.ZIP": OPENJAZZ_SHAREWARE_SOURCE,
     "APPS/chips-tworld.pak": CHIPS_TWORLD_PACK_SOURCE,
     "APPS/pipe-pipedreamer.pak": PIPEDREAMER_PACK_SOURCE,
     "APPS/scorch-xscorch.pak": XSCORCH_PACK_SOURCE,
@@ -189,6 +193,13 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "paths": ["doom1.whx"],
                 "sd_path": "APPS/",
             },
+            "openjazz_shareware": {
+                "publisher": "Epic MegaGames",
+                "archive": "JAZZ.ZIP",
+                "sha256": OPENJAZZ_SHAREWARE_SHA256,
+                "sd_path": "APPS/",
+                "notes": "Original unmodified Jazz Jackrabbit shareware archive; converted to openjazz.pak on first launch, then fully decoded and sealed read-only in the shared 3 MiB ROM staging window before the menu.",
+            },
             "period_ports": {
                 "reserved_ids": {},
                 "accepted_ids": {
@@ -197,9 +208,10 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                     "pipe": 209,
                     "cave": 210,
                     "sokoban": 211,
+                    "openjazz": 212,
                 },
                 "sd_path": "APPS/",
-                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Cave Story is an NXEngine/doukutsu data-compatible loader port that requires user-provided Cave data, and Sokoban is an XSokoban-derived port. No placeholder binaries or proprietary user data are packaged.",
+                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Cave Story is an NXEngine/doukutsu data-compatible loader port that requires user-provided Cave data, Sokoban is an XSokoban-derived port, and Jazz Jackrabbit is an OpenJazz-derived port bundled with Epic MegaGames' unmodified shareware archive.",
             },
         },
     }
@@ -519,6 +531,13 @@ def collect_app_hashes(apps_dir: Path) -> dict[str, str]:
     missing_data = [name for name, src in APP_DATA_FILES.items() if not src.is_file()]
     if missing_data:
         raise FileNotFoundError(f"Missing app data files: {', '.join(missing_data)}")
+    shareware_source = APP_DATA_FILES.get("APPS/JAZZ.ZIP")
+    if (
+        shareware_source
+        and shareware_source.resolve() == OPENJAZZ_SHAREWARE_SOURCE.resolve()
+        and sha256_file(shareware_source) != OPENJAZZ_SHAREWARE_SHA256
+    ):
+        raise ValueError("Bundled JAZZ.ZIP does not match the recorded original shareware archive")
     hashes = {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
     hashes.update({name: sha256_file(src) for name, src in APP_DATA_FILES.items()})
     return hashes
@@ -549,15 +568,17 @@ def write_period_ports_readme(apps_dir: Path) -> None:
         "- 209 Pipe Dream: /APPS/pipe.DC32 plus /APPS/pipe-pipedreamer.pak\n"
         "- 210 Cave Story: /APPS/cave.DC32; user builds /APPS/cave.pak from freeware Cave Story data\n"
         "- 211 Sokoban: /APPS/sokoban.DC32 plus /APPS/sokoban-xsokoban.pak\n"
+        "- 212 Jazz Jackrabbit: /APPS/openjazz.DC32 plus the original Epic MegaGames /APPS/JAZZ.ZIP shareware archive; first launch creates /APPS/openjazz.pak and a validated XIP graphics cache\n"
         "\n"
         "Required user data:\n"
         "- Cave Story: /APPS/cave.pak\n"
         "- Chip's Challenge: /APPS/chips.pak\n"
         "\n"
-        "Cave Story freeware data, CHIPS.DAT, and proprietary original Chip's graphics are not redistributed. Build those packs locally by running:\n"
+        "Cave Story freeware data, CHIPS.DAT, and proprietary original Chip's graphics are not redistributed. Build optional packs locally by running:\n"
         "- python tools/build_cave_pack.py\n"
         "- python tools/build_chips_pack.py\n"
-        "Both scripts prompt for paths and write the badge-ready pak. The Chip's packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
+        "Jazz Jackrabbit shareware remains copyright Epic MegaGames. JAZZ.ZIP is distributed unchanged under the terms in its LICENSE.DOC; SHA-256: 385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e.\n"
+        "OpenJazz uses the same 3 MiB staging window as DOOM, so switching between them can trigger a one-time cache rebuild. The Cave and Chip's scripts prompt for paths and write the badge-ready pak. The Chip's packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
         "\n"
         "The firmware menu exposes only period titles whose source-derived ports have passed acceptance.\n",
         encoding="utf-8",
@@ -638,9 +659,10 @@ def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
 These app binaries were built from this repository and are loaded by the
 resident firmware shell from /APPS. DOOM also includes the WHX data payload
 from the rp2040-doom DEF CON 32 release under /APPS. Chip's Challenge,
-Scorched Earth, Pipe Dream, Cave Story, and Sokoban are included as
-source-derived/data-compatible period ports; no placeholder binaries or
-proprietary user data are included.
+Scorched Earth, Pipe Dream, Cave Story, Sokoban, and Jazz Jackrabbit are included as
+source-derived/data-compatible period ports. Jazz Jackrabbit includes Epic
+MegaGames' original unmodified shareware ZIP. This build accepts that
+shareware data only.
 
 ## APPS
 
@@ -656,11 +678,19 @@ proprietary user data are included.
 - SD path: APPS/
 - Notes: Shareware DOOM1.WAD data is staged from APPS/doom1.whx at launch; raw WAD loading is not part of this build.
 
+## Jazz Jackrabbit Shareware
+
+- Publisher: Epic MegaGames
+- Archive: JAZZ.ZIP
+- SHA-256: {OPENJAZZ_SHAREWARE_SHA256}
+- SD path: APPS/
+- Notes: The original archive is copied unchanged. OpenJazz creates openjazz.pak locally on first launch, then builds and validates the complete shareware graphics cache before the menu. Gameplay performs no QSPI writes. The 3 MiB staging window is shared with DOOM and emulator ROM staging, so overwrites trigger an automatic rebuild.
+
 ## Faithful Period Ports
 
-- Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 210 Cave Story, data-compatible with freeware Cave Story packs and informed by NXEngine-evo/doukutsu-rs formats; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps
-- Data helpers: tools/build_cave_pack.py, tools/build_chips_pack.py, tools/build_period_assets.py
-- Notes: Cave Story freeware data, CHIPS.DAT, and unclear proprietary original graphics are user-provided only.
+- Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 210 Cave Story, data-compatible with freeware Cave Story packs and informed by NXEngine-evo/doukutsu-rs formats; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps; 212 Jazz Jackrabbit, derived from GPL OpenJazz and bundled with the original Epic MegaGames shareware archive
+- Data helpers: tools/build_cave_pack.py, tools/build_chips_pack.py, tools/build_openjazz_pack.py, tools/build_period_assets.py
+- Notes: Cave Story freeware data, CHIPS.DAT, and unclear proprietary original graphics are user-provided only. The current Jazz Jackrabbit port supports the bundled shareware data.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

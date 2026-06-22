@@ -14,20 +14,33 @@ extern "C" {
 
 #define DC32_PORT_SCREEN_W 320u
 #define DC32_PORT_SCREEN_H 240u
+#define DC32_PORT_OPENJAZZ_CANVAS_START ((void*)0x20000000u)
+#define DC32_PORT_OPENJAZZ_CANVAS_SIZE  0x00012c00u
+#define DC32_PORT_OPENJAZZ_LEVEL_START  ((void*)0x20012c00u)
+#define DC32_PORT_OPENJAZZ_LEVEL_SIZE   0x00018400u
+#define DC32_PORT_OPENJAZZ_AUX_START    ((void*)0x20056000u)
+#define DC32_PORT_OPENJAZZ_AUX_SIZE     0x00009000u
 #define DC32_PORT_CART_HEAP_START ((void*)0x20000000u)
 #define DC32_PORT_CART_HEAP_SIZE 0x0002b000u
 
 struct Dc32PortPak {
 	struct FatfsFil *file;
 	uint32_t size;
+	uint32_t position;
+	bool positionValid;
 };
 
 void dc32PortHeapInit(void *base, uint32_t size);
+bool dc32PortHeapAddRegion(void *base, uint32_t size);
 void dc32PortHeapInitDefault(void);
 void *dc32PortMalloc(size_t size);
 void *dc32PortCalloc(size_t nmemb, size_t size);
 void *dc32PortRealloc(void *ptr, size_t size);
 void dc32PortFree(void *ptr);
+uint32_t dc32PortHeapBytesUsed(void);
+uint32_t dc32PortHeapPeakBytesUsed(void);
+uint32_t dc32PortHeapBytesFree(void);
+uint32_t dc32PortHeapLargestFreeBlock(void);
 
 uint16_t dc32PortRgb332ToRgb565(uint8_t color);
 void dc32PortPresentRgb332(struct DcAppDrawCtx *draw, const uint8_t *src, uint32_t w, uint32_t h);

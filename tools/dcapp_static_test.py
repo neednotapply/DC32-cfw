@@ -42,6 +42,7 @@ DOOM_WHX_CURRENT_VPATCH_COUNT = 385
 BADUSB_SCRATCH_MIN = 2048 + 2048 + 128
 IMAGE_TRANSFER_MIN = 32768
 PICOWARE_APP_SCRATCH_MIN = 4096
+OPENJAZZ_ACTIVE_SCRATCH_MIN = 56 * 1024
 APPS = {
     "gb.DC32": 1,
     "nes.DC32": 2,
@@ -64,6 +65,7 @@ APPS = {
     "pipe.DC32": 209,
     "cave.DC32": 210,
     "sokoban.DC32": 211,
+    "openjazz.DC32": 212,
     "starfield.DC32": 220,
     "spiro.DC32": 221,
     "cube.DC32": 222,
@@ -303,6 +305,9 @@ def check_loader_source() -> None:
     expect("QSPI exposes uncached XIP reads", "flashUncachedPtr" in qspi_h and "XIP_NOCACHE_NOALLOC_BASE" in qspi_c)
     expect("QSPI exposes XIP cache flush helper", "flashFlushXipCacheRange" in qspi_h and "XIP_MAINTENANCE_BASE" in qspi_c and "QSPI_XIP_MAINT_INVALIDATE" in qspi_c)
     expect("QSPI exposes executable sync helper", "flashSyncExecutableRange" in qspi_h and "SCB->ICIALLU" in qspi_c and "SCB->BPIALL" in qspi_c)
+    expect("QSPI program and erase waits are bounded", all(token in qspi_c for token in ("QSPI_PROGRAM_TIMEOUT_USEC", "QSPI_ERASE_TIMEOUT_USEC", "timer0_hw->timerawl", "flashPrvBusyWait(uint32_t timeoutUsec)")))
+    expect("QSPI timeout resets the flash command state", all(token in qspi_c for token in ("flashPrvCommand(0x66)", "flashPrvCommand(0x99)", "flashPrvReset();", "return false;")))
+    expect("QSPI write propagates failures after restoring XIP", "for (curAddr = addr, i = 0; ret && i < writeSz" in qspi_c and "flashPrvEnterXipMode();" in qspi_c and "return ret;" in qspi_c)
     expect("flash writes sync executable cache after XIP restore", xip_mode_restore != -1 and flash_write_sync != -1 and xip_mode_restore < flash_write_sync)
     expect("loader computes active app scratch", "dcAppPrvBeginActiveRamContext" in text and "dcAppGetActiveScratch" in text)
     expect("tool workspace remaps active app WRAM", "toolWorkspacePrvActiveAppSpan" in workspace and "dcAppGetActiveScratch(NULL)" in workspace)
@@ -445,6 +450,9 @@ def check_artifacts() -> None:
             expect(f"{name} abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "sokoban.DC32":
             expect("Sokoban abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "openjazz.DC32":
+            expect("OpenJazz remains below 256 KiB", image_size < QSPI_APP_CACHE_SIZE)
+            expect("OpenJazz reserves at least 56 KiB active scratch", scratch_size >= OPENJAZZ_ACTIVE_SCRATCH_MIN)
         if name == "chips.DC32":
             expect("Chip's Challenge abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "scorch.DC32":
@@ -453,6 +461,8 @@ def check_artifacts() -> None:
             expect("Pipe Dream abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "cave.DC32":
             expect("Cave Story abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "openjazz.DC32":
+            expect("Jazz Jackrabbit abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         expect(f"{name} CRC", (binascii.crc32(data[HEADER_SIZE:]) & 0xFFFFFFFF) == crc32)
 
 

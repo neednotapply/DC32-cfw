@@ -3,6 +3,7 @@
 #include "2350.h"
 #include "qspi.h"
 #include "hardware/regs/addressmap.h"
+#include "hardware/structs/timer.h"
 
 #pragma GCC optimize ("Os")
 #define __ramcode	__attribute__((section(".fastcode")))
@@ -12,6 +13,8 @@
 #define QSPI_LARGE_ERASE_GRANULARITY		32768
 #define QSPI_XIP_ADDR_MASK			0x03ffffffu
 #define QSPI_XIP_MAINT_INVALIDATE		2u
+#define QSPI_PROGRAM_TIMEOUT_USEC		2000000u
+#define QSPI_ERASE_TIMEOUT_USEC			15000000u
 
 static uint64_t mFlashUid;
 
@@ -82,8 +85,28 @@ static void __ramcode flashPrvEnterXipMode(void)
 	qmi_hw->direct_csr &=~ QMI_DIRECT_CSR_EN_BITS;
 }
 
-static void __ramcode flashPrvBusyWait(void)
+static void __ramcode flashPrvCommand(uint8_t command)
 {
+	qmi_hw->direct_csr |= QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
+	qmi_hw->direct_tx = QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_OE_BITS |
+		(QMI_DIRECT_TX_IWIDTH_VALUE_S << QMI_DIRECT_TX_IWIDTH_LSB) | command;
+	while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS);
+	qmi_hw->direct_csr &=~ QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
+}
+
+static void __ramcode flashPrvReset(void)
+{
+	uint32_t start;
+
+	flashPrvCommand(0x66);
+	flashPrvCommand(0x99);
+	start = timer0_hw->timerawl;
+	while ((uint32_t)(timer0_hw->timerawl - start) < 50u);
+}
+
+static bool __ramcode flashPrvBusyWait(uint32_t timeoutUsec)
+{
+	uint32_t start = timer0_hw->timerawl;
 	uint8_t sta;
 
 	do {
@@ -94,7 +117,12 @@ static void __ramcode flashPrvBusyWait(void)
 		while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS);
 		qmi_hw->direct_csr &=~ QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
 		sta = qmi_hw->direct_rx;
+		if ((uint32_t)(timer0_hw->timerawl - start) >= timeoutUsec) {
+			flashPrvReset();
+			return false;
+		}
 	} while (sta & 0x01);
+	return true;
 }
 
 static void __ramcode flashPrvWel(void)
@@ -125,7 +153,7 @@ static void __ramcode flashPrvReadUid(uint64_t *uidP)
 	*uidP = uid;
 }
 
-static void __ramcode flashPrvProgram(uint32_t addr, const uint8_t *buf, uint32_t len)
+static bool __ramcode flashPrvProgram(uint32_t addr, const uint8_t *buf, uint32_t len)
 {
 	uint32_t send = (addr & 0x00ffffff) | 0x02000000;
 	uint_fast8_t i;
@@ -145,10 +173,10 @@ static void __ramcode flashPrvProgram(uint32_t addr, const uint8_t *buf, uint32_
 	}
 	qmi_hw->direct_csr &=~ QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
 
-	flashPrvBusyWait();
+	return flashPrvBusyWait(QSPI_PROGRAM_TIMEOUT_USEC);
 }
 
-static void __ramcode flashPrvErz(uint32_t addr, uint8_t cmd)
+static bool __ramcode flashPrvErz(uint32_t addr, uint8_t cmd)
 {
 	uint32_t send = (addr & 0x00ffffff) | (((uint32_t)cmd) << 24);
 	uint_fast8_t i;
@@ -163,7 +191,7 @@ static void __ramcode flashPrvErz(uint32_t addr, uint8_t cmd)
 	}
 	qmi_hw->direct_csr &=~ QMI_DIRECT_CSR_ASSERT_CS0N_BITS;
 
-	flashPrvBusyWait();
+	return flashPrvBusyWait(QSPI_ERASE_TIMEOUT_USEC);
 }
 
 const void *flashUncachedPtr(uint32_t addr)
@@ -226,19 +254,23 @@ bool __attribute__((noinline)) __ramcode flashWrite(uint32_t addr, uint32_t erzS
 
 		if (curAddr % QSPI_LARGE_ERASE_GRANULARITY || left < QSPI_LARGE_ERASE_GRANULARITY) {
 
-			flashPrvErz(curAddr, 0x20);
+			ret = flashPrvErz(curAddr, 0x20);
 			now = QSPI_ERASE_GRANULARITY;
 		}
 		else {
 
-			flashPrvErz(curAddr, 0x52);
+			ret = flashPrvErz(curAddr, 0x52);
 			now = QSPI_LARGE_ERASE_GRANULARITY;
 		}
+		if (!ret)
+			break;
 	}
 
 	//write
-	for (curAddr = addr, i = 0; i < writeSz; i += QSPI_WRITE_GRANULARITY, curAddr += QSPI_WRITE_GRANULARITY, buf += QSPI_WRITE_GRANULARITY)
-		flashPrvProgram(curAddr, buf, QSPI_WRITE_GRANULARITY);
+	for (curAddr = addr, i = 0; ret && i < writeSz;
+			i += QSPI_WRITE_GRANULARITY, curAddr += QSPI_WRITE_GRANULARITY,
+			buf += QSPI_WRITE_GRANULARITY)
+		ret = flashPrvProgram(curAddr, buf, QSPI_WRITE_GRANULARITY);
 
 	flashPrvEnterXipMode();
 

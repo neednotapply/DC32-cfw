@@ -13,7 +13,9 @@ set(SIMAVR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/simavr")
 set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
 set(DCAPP_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp.lkr")
+set(DCAPP_EH_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp_eh.lkr")
 set(DCAPP_LARGE_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp_large.lkr")
+set(DCAPP_LARGE_EH_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp_large_eh.lkr")
 set(DCAPP_CACHE_START 0x10080000)
 set(DCAPP_LARGE_LOAD_START 0x10100000)
 set(DCAPP_RAM_START 0x2005F000)
@@ -339,6 +341,7 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=dispSetFramerate
     -Wl,--undefined=dispPrvFrameCtrWait
     -Wl,--undefined=dispPrvWaitForScanoutStart
+    -Wl,--undefined=fatfsFileDelete
     -Wl,--undefined=gbDrawLine
     -Wl,--undefined=gbExtAccelRead
     -Wl,--undefined=gbExtGetKeys
@@ -406,13 +409,21 @@ get_target_property(DC32_FIRMWARE_COMPILE_DEFINITIONS ${APP} COMPILE_DEFINITIONS
 get_target_property(DC32_FIRMWARE_COMPILE_OPTIONS ${APP} COMPILE_OPTIONS)
 
 function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
-    cmake_parse_arguments(DCAPP "LARGE_XIP" "" "" ${ARGN})
+    cmake_parse_arguments(DCAPP "LARGE_XIP;CXX_EXCEPTIONS" "" "" ${ARGN})
     if(DCAPP_LARGE_XIP)
-        set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LARGE_LINKER_SCRIPT}")
+        if(DCAPP_CXX_EXCEPTIONS)
+            set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LARGE_EH_LINKER_SCRIPT}")
+        else()
+            set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LARGE_LINKER_SCRIPT}")
+        endif()
         set(DCAPP_TARGET_LOAD_ADDR "${DCAPP_LARGE_LOAD_START}")
         set(DCAPP_TARGET_FLAGS 1)
     else()
-        set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LINKER_SCRIPT}")
+        if(DCAPP_CXX_EXCEPTIONS)
+            set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_EH_LINKER_SCRIPT}")
+        else()
+            set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LINKER_SCRIPT}")
+        endif()
         set(DCAPP_TARGET_LOAD_ADDR "${DCAPP_CACHE_START}")
         set(DCAPP_TARGET_FLAGS 0)
     endif()
@@ -429,6 +440,12 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
         DCAPP_RUNTIME_ID=${RUNTIME_ID}
     )
     target_compile_options(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_COMPILE_OPTIONS})
+    if(DCAPP_CXX_EXCEPTIONS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-fexceptions>
+            $<$<COMPILE_LANGUAGE:CXX>:-funwind-tables>
+        )
+    endif()
     target_link_options(${TARGET_NAME} PRIVATE
         -Wall
         -Wextra
@@ -443,8 +460,22 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
         -mcpu=cortex-m33
         -mfloat-abi=soft
     )
+    if(DCAPP_CXX_EXCEPTIONS)
+        target_link_options(${TARGET_NAME} PRIVATE -fexceptions)
+    endif()
     set_property(TARGET ${TARGET_NAME} APPEND PROPERTY LINK_DEPENDS ${DCAPP_HOST_SYMBOLS})
     target_link_libraries(${TARGET_NAME} PRIVATE m)
+    set(DCAPP_RAW_SECTIONS -j .dcapp_header -j .text)
+    if(DCAPP_CXX_EXCEPTIONS)
+        list(APPEND DCAPP_RAW_SECTIONS
+            -j .preinit_array
+            -j .init_array
+            -j .fini_array
+            -j .ARM.extab
+            -j .ARM.exidx
+        )
+    endif()
+    list(APPEND DCAPP_RAW_SECTIONS -j .data)
 
     add_custom_command(
         OUTPUT ${DCAPP_FILE}
@@ -452,7 +483,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
         COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.dcapp
         COMMAND ${CMAKE_OBJCOPY} -O binary
-            -j .dcapp_header -j .text -j .data
+            ${DCAPP_RAW_SECTIONS}
             $<TARGET_FILE:${TARGET_NAME}> ${RAW_FILE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_dcapp.py
             --nm ${CMAKE_NM}
@@ -725,6 +756,46 @@ set(SOKOBAN_APP_SOURCES
     ${SRC_DIR}/apps/sokoban/sokoban_port.c
     ${SRC_DIR}/apps/port/port_runtime.c
     ${XSOKOBAN_ASSET_C}
+)
+
+set(OPENJAZZ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openjazz")
+file(GLOB_RECURSE OPENJAZZ_ENGINE_SOURCES CONFIGURE_DEPENDS
+    "${OPENJAZZ_SOURCE_DIR}/src/*.cpp"
+)
+list(FILTER OPENJAZZ_ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]src[/\\\\]io[/\\\\]sound\\.cpp$")
+list(FILTER OPENJAZZ_ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]src[/\\\\]jj2[/\\\\]")
+list(FILTER OPENJAZZ_ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]src[/\\\\]platforms[/\\\\]")
+list(APPEND OPENJAZZ_ENGINE_SOURCES
+    ${OPENJAZZ_SOURCE_DIR}/src/platforms/platform_interface.cpp
+)
+
+set(OPENJAZZ_APP_SOURCES
+    ${SRC_DIR}/apps/openjazz/openjazz_app.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_cache.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_install.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_heap.c
+    ${SRC_DIR}/apps/openjazz/openjazz_memory.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_pack.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_sdl.cpp
+    ${SRC_DIR}/apps/openjazz/openjazz_sound_stub.cpp
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${OPENJAZZ_ENGINE_SOURCES}
+    ${OPENJAZZ_SOURCE_DIR}/ext/argparse/argparse.c
+    ${OPENJAZZ_SOURCE_DIR}/ext/miniz/miniz.c
+    ${OPENJAZZ_SOURCE_DIR}/ext/stb/stb_rect_pack.c
+)
+
+set_source_files_properties(
+    ${OPENJAZZ_SOURCE_DIR}/src/main.cpp
+    PROPERTIES COMPILE_DEFINITIONS "main=openjazz_main"
+)
+
+set_source_files_properties(
+    ${OPENJAZZ_ENGINE_SOURCES}
+    ${OPENJAZZ_SOURCE_DIR}/ext/argparse/argparse.c
+    ${OPENJAZZ_SOURCE_DIR}/ext/miniz/miniz.c
+    ${OPENJAZZ_SOURCE_DIR}/ext/stb/stb_rect_pack.c
+    PROPERTIES COMPILE_OPTIONS "-Wno-error"
 )
 
 set(RP2040_DOOM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rp2040-doom")
@@ -1253,6 +1324,47 @@ target_include_directories(dcapp_sokoban BEFORE PRIVATE
     ${XSOKOBAN_ASSET_DIR}
     ${SRC_DIR}/apps/sokoban
     ${SRC_DIR}/apps/port
+)
+
+add_dcapp(dcapp_openjazz openjazz 212 CXX_EXCEPTIONS
+    ${OPENJAZZ_APP_SOURCES}
+)
+
+target_include_directories(dcapp_openjazz BEFORE PRIVATE
+    ${SRC_DIR}/apps/openjazz
+    ${SRC_DIR}/apps/port
+    ${OPENJAZZ_SOURCE_DIR}/src
+    ${OPENJAZZ_SOURCE_DIR}/ext/argparse
+    ${OPENJAZZ_SOURCE_DIR}/ext/miniz
+    ${OPENJAZZ_SOURCE_DIR}/ext/stb
+)
+
+target_compile_definitions(dcapp_openjazz PRIVATE
+    DC32_OPENJAZZ=1
+    OJ_SDL1=1
+    OJ_SDL2=0
+    OJ_SDL3=0
+    FULLSCREEN_ONLY=1
+    NO_RESIZE=1
+    DEFAULT_SCREEN_WIDTH=320
+    DEFAULT_SCREEN_HEIGHT=240
+    MUSIC_SETTINGS=0
+    MINIZ_NO_ARCHIVE_WRITING_APIS=1
+    MINIZ_NO_STDIO=1
+    MINIZ_NO_TIME=1
+    PORTABLE=1
+    NDEBUG=1
+)
+
+target_compile_options(dcapp_openjazz PRIVATE
+    -Wno-error
+    -Wno-format-truncation
+    -Wno-class-memaccess
+    -Wno-unused-but-set-variable
+    -Wno-unused-variable
+    -Wno-unused-function
+    -Wno-sign-compare
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
 )
 
 add_dcapp(dcapp_starfield starfield 220

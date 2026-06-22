@@ -42,6 +42,7 @@ enum DcAppId {
 	DcAppIdPipe = 209,
 	DcAppIdCave = 210,
 	DcAppIdSokoban = 211,
+	DcAppIdOpenJazz = 212,
 	DcAppIdStarfield = 220,
 	DcAppIdSpiro = 221,
 	DcAppIdCube = 222,
@@ -145,6 +146,7 @@ enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *arg
 void dcAppAbortActive(void);
 void dcAppRefreshActive(void);
 bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP);
+bool dcAppGetAuxScratch(struct ToolWorkspaceSpan *spanP);
 const struct DcAppCatalogEntry *dcAppCatalogEntries(uint_fast8_t *countP);
 const struct DcAppCatalogEntry *dcAppCatalogFind(uint32_t appId);
 const char *dcAppLastError(void);

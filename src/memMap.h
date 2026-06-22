@@ -25,6 +25,11 @@
 #define QSPI_ROM_START				0x10100000
 #define QSPI_ROM_SIZE_MAX			0x00300000
 
+//SRAM excluded from the resident firmware and available to a loaded app
+#define DCAPP_AUX_RAM_START			0x20056000
+#define DCAPP_AUX_RAM_SIZE			0x00009000
+#define DCAPP_AUX_RAM_END			(DCAPP_AUX_RAM_START + DCAPP_AUX_RAM_SIZE)
+
 //main SRAM reserved for one loaded shell-returning app binary
 #define DCAPP_RAM_START				0x2005F000
 #define DCAPP_RAM_SIZE				0x00014000

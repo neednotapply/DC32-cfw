@@ -6,6 +6,67 @@
 #include "gb.h"
 #include "ui.h"
 
+#ifdef DC32_OPENJAZZ
+#include "apps/openjazz/openjazz_heap.h"
+
+void dc32PortHeapInit(void *base, uint32_t size)
+{
+	(void)dc32OjHeapInit(base, size, NULL, 0);
+}
+
+bool dc32PortHeapAddRegion(void *base, uint32_t size)
+{
+	(void)base;
+	(void)size;
+	return false;
+}
+
+void dc32PortHeapInitDefault(void)
+{
+	dc32PortHeapInit(DC32_PORT_CART_HEAP_START, DC32_PORT_CART_HEAP_SIZE);
+}
+
+void *dc32PortMalloc(size_t size)
+{
+	return dc32OjHeapMalloc(size);
+}
+
+void *dc32PortCalloc(size_t nmemb, size_t size)
+{
+	return dc32OjHeapCalloc(nmemb, size);
+}
+
+void *dc32PortRealloc(void *ptr, size_t size)
+{
+	return dc32OjHeapRealloc(ptr, size);
+}
+
+void dc32PortFree(void *ptr)
+{
+	dc32OjHeapFree(ptr);
+}
+
+uint32_t dc32PortHeapBytesUsed(void)
+{
+	return dc32OjHeapBytesUsed(dc32OjHeapSelected());
+}
+
+uint32_t dc32PortHeapPeakBytesUsed(void)
+{
+	return dc32OjHeapPeakBytesUsed(dc32OjHeapSelected());
+}
+
+uint32_t dc32PortHeapBytesFree(void)
+{
+	return dc32OjHeapBytesFree(dc32OjHeapSelected());
+}
+
+uint32_t dc32PortHeapLargestFreeBlock(void)
+{
+	return dc32OjHeapLargestFreeBlock(dc32OjHeapSelected());
+}
+
+#else
 struct Dc32PortBlock {
 	uint32_t size;
 	struct Dc32PortBlock *next;
@@ -13,7 +74,7 @@ struct Dc32PortBlock {
 };
 
 static struct Dc32PortBlock *mPortHeap;
-static uint8_t *mPortHeapEnd;
+static struct Dc32PortBlock *mPortHeapTail;
 
 static uint32_t dc32PortAlignUp(uint32_t value, uint32_t align)
 {
@@ -26,14 +87,30 @@ void dc32PortHeapInit(void *base, uint32_t size)
 	uintptr_t end = ((uint32_t)(uintptr_t)base + size) & ~(uintptr_t)7u;
 
 	mPortHeap = NULL;
-	mPortHeapEnd = NULL;
-	if (end <= start + sizeof(*mPortHeap))
+	mPortHeapTail = NULL;
+	if (end <= start)
 		return;
-	mPortHeap = (struct Dc32PortBlock*)start;
-	mPortHeap->size = (uint32_t)(end - start - sizeof(*mPortHeap));
-	mPortHeap->next = NULL;
-	mPortHeap->free = true;
-	mPortHeapEnd = (uint8_t*)end;
+	(void)dc32PortHeapAddRegion((void*)start, (uint32_t)(end - start));
+}
+
+bool dc32PortHeapAddRegion(void *base, uint32_t size)
+{
+	uintptr_t start = dc32PortAlignUp((uint32_t)(uintptr_t)base, 8u);
+	uintptr_t end = ((uint32_t)(uintptr_t)base + size) & ~(uintptr_t)7u;
+	struct Dc32PortBlock *block;
+
+	if (end <= start + sizeof(*block))
+		return false;
+	block = (struct Dc32PortBlock*)start;
+	block->size = (uint32_t)(end - start - sizeof(*block));
+	block->next = NULL;
+	block->free = true;
+	if (mPortHeapTail)
+		mPortHeapTail->next = block;
+	else
+		mPortHeap = block;
+	mPortHeapTail = block;
+	return true;
 }
 
 void dc32PortHeapInitDefault(void)
@@ -97,9 +174,13 @@ static void dc32PortCoalesce(void)
 	struct Dc32PortBlock *block;
 
 	for (block = mPortHeap; block && block->next;) {
-		if (block->free && block->next->free) {
+		uint8_t *blockEnd = (uint8_t*)(block + 1) + block->size;
+
+		if (block->free && block->next->free && blockEnd == (uint8_t*)block->next) {
 			block->size += sizeof(*block) + block->next->size;
 			block->next = block->next->next;
+			if (!block->next)
+				mPortHeapTail = block;
 		}
 		else {
 			block = block->next;
@@ -113,8 +194,10 @@ void dc32PortFree(void *ptr)
 
 	if (!ptr)
 		return;
-	block = ((struct Dc32PortBlock*)ptr) - 1;
-	if ((uint8_t*)block < (uint8_t*)mPortHeap || (uint8_t*)block >= mPortHeapEnd)
+	for (block = mPortHeap; block; block = block->next)
+		if (block + 1 == ptr)
+			break;
+	if (!block)
 		return;
 	block->free = true;
 	dc32PortCoalesce();
@@ -131,7 +214,11 @@ void *dc32PortRealloc(void *ptr, size_t size)
 		dc32PortFree(ptr);
 		return NULL;
 	}
-	block = ((struct Dc32PortBlock*)ptr) - 1;
+	for (block = mPortHeap; block; block = block->next)
+		if (block + 1 == ptr)
+			break;
+	if (!block)
+		return NULL;
 	if (block->size >= size)
 		return ptr;
 	next = dc32PortMalloc(size);
@@ -141,6 +228,38 @@ void *dc32PortRealloc(void *ptr, size_t size)
 	}
 	return next;
 }
+
+uint32_t dc32PortHeapBytesUsed(void)
+{
+	return 0;
+}
+
+uint32_t dc32PortHeapPeakBytesUsed(void)
+{
+	return 0;
+}
+
+uint32_t dc32PortHeapBytesFree(void)
+{
+	uint32_t freeBytes = 0;
+
+	for (struct Dc32PortBlock *block = mPortHeap; block; block = block->next)
+		if (block->free)
+			freeBytes += block->size;
+	return freeBytes;
+}
+
+uint32_t dc32PortHeapLargestFreeBlock(void)
+{
+	uint32_t largest = 0;
+
+	for (struct Dc32PortBlock *block = mPortHeap; block; block = block->next)
+		if (block->free && block->size > largest)
+			largest = block->size;
+	return largest;
+}
+
+#endif
 
 uint16_t dc32PortRgb332ToRgb565(uint8_t color)
 {
@@ -212,9 +331,18 @@ bool dc32PortReadAssetPack(struct Dc32PortPak *pak, uint32_t offset, void *dst, 
 		return false;
 	if (offset > pak->size || size > pak->size - offset)
 		return false;
-	return fatfsFileSeek(pak->file, offset) &&
-		fatfsFileRead(pak->file, dst, size, &got) &&
-		got == size;
+	if ((!pak->positionValid || pak->position != offset) &&
+			!fatfsFileSeek(pak->file, offset)) {
+		pak->positionValid = false;
+		return false;
+	}
+	if (!fatfsFileRead(pak->file, dst, size, &got)) {
+		pak->positionValid = false;
+		return false;
+	}
+	pak->position = offset + got;
+	pak->positionValid = true;
+	return got == size;
 }
 
 void dc32PortCloseAssetPack(struct Dc32PortPak *pak)

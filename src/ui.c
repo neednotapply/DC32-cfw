@@ -9591,6 +9591,7 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	case DcAppIdPipe:
 	case DcAppIdCave:
 	case DcAppIdSokoban:
+	case DcAppIdOpenJazz:
 		return UiToolPorts;
 	default:
 		return entry->launcherVisible ? UiToolGames : UiToolBrowser;
@@ -10394,6 +10395,7 @@ static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Pipe Dream", UiCategoryEntrySdApp, UiToolPorts, DcAppIdPipe},
 		{"Cave Story", UiCategoryEntrySdApp, UiToolPorts, DcAppIdCave},
 		{"Sokoban", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSokoban},
+		{"Jazz Jackrabbit", UiCategoryEntrySdApp, UiToolPorts, DcAppIdOpenJazz},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

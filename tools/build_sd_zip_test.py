@@ -63,6 +63,8 @@ def main() -> int:
             (apps / name).write_bytes(f"{name}\n".encode("ascii"))
         fake_doom_whx = tmp_path / "doom1.whx"
         fake_doom_whx.write_bytes(b"IWHX-test")
+        fake_jazz_zip = tmp_path / "JAZZ.ZIP"
+        fake_jazz_zip.write_bytes(b"PK-test")
         fake_chips_tworld_pak = tmp_path / "chips-tworld.pak"
         fake_chips_tworld_pak.write_bytes(b"DC32TWORLD-test")
         fake_pipedreamer_pak = tmp_path / "pipe-pipedreamer.pak"
@@ -72,6 +74,7 @@ def main() -> int:
         fake_sokoban_pak = tmp_path / "sokoban-xsokoban.pak"
         fake_sokoban_pak.write_bytes(b"DC32XSOKO-test")
         builder.APP_DATA_FILES["APPS/doom1.whx"] = fake_doom_whx
+        builder.APP_DATA_FILES["APPS/JAZZ.ZIP"] = fake_jazz_zip
         builder.APP_DATA_FILES["APPS/chips-tworld.pak"] = fake_chips_tworld_pak
         builder.APP_DATA_FILES["APPS/pipe-pipedreamer.pak"] = fake_pipedreamer_pak
         builder.APP_DATA_FILES["APPS/scorch-xscorch.pak"] = fake_xscorch_pak
@@ -112,6 +115,7 @@ def main() -> int:
             app_files == sorted((*builder.APP_BINARIES, *expected_app_data, "README-period-ports.txt")),
         )
         expect("DOOM WHX is copied to /APPS", (stage / "APPS" / "doom1.whx").is_file())
+        expect("Jazz shareware ZIP is copied to /APPS", (stage / "APPS" / "JAZZ.ZIP").is_file())
         expect("Tile World pack is copied to /APPS", (stage / "APPS" / "chips-tworld.pak").is_file())
         expect("xscorch pack is copied to /APPS", (stage / "APPS" / "scorch-xscorch.pak").is_file())
         expect("PipeDreamer pack is copied to /APPS", (stage / "APPS" / "pipe-pipedreamer.pak").is_file())
@@ -122,6 +126,7 @@ def main() -> int:
         manifest = builder.app_source_manifest(app_hashes)
         expect("App hashes appear in app manifest", manifest["sources"]["apps"]["files"] == app_hashes)
         expect("DOOM app source metadata is present", manifest["sources"]["doom"]["sd_path"] == "APPS/")
+        expect("Jazz shareware source metadata is present", manifest["sources"]["openjazz_shareware"]["sha256"] == builder.OPENJAZZ_SHAREWARE_SHA256)
         expect("Period port metadata is present", manifest["sources"]["period_ports"]["sd_path"] == "APPS/")
         expect("Chip's Challenge accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["chips"] == 207)
         expect("Scorched Earth accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["scorch"] == 208)
@@ -137,6 +142,7 @@ def main() -> int:
         expect("SD-apps.zip contains SOURCES.md", "SOURCES.md" in names)
         expect("SD-apps.zip contains /APPS binaries", all(f"APPS/{name}" in names for name in builder.APP_BINARIES))
         expect("SD-apps.zip contains DOOM WHX", "APPS/doom1.whx" in names)
+        expect("SD-apps.zip contains Jazz shareware ZIP", "APPS/JAZZ.ZIP" in names)
         expect("SD-apps.zip contains Tile World pack", "APPS/chips-tworld.pak" in names)
         expect("SD-apps.zip contains xscorch pack", "APPS/scorch-xscorch.pak" in names)
         expect("SD-apps.zip contains PipeDreamer pack", "APPS/pipe-pipedreamer.pak" in names)

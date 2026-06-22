@@ -296,6 +296,7 @@ set_source_files_properties(
     ${SRC_DIR}/raster.c
     ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/apps/picoware_ports.c
+    ${SRC_DIR}/apps/trex/trex_port.c
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
 
@@ -560,6 +561,32 @@ add_dcapp(dcapp_gamepad gamepad 105
 set(PICOWARE_APP_SOURCES
     ${SRC_DIR}/apps/picoware_app.c
     ${SRC_DIR}/apps/picoware_ports.c
+)
+
+set(TREX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/t-rex-runner")
+set(TREX_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/trex")
+set(TREX_ASSET_C "${TREX_ASSET_DIR}/trex_assets.c")
+set(TREX_ASSET_H "${TREX_ASSET_DIR}/trex_assets.h")
+set(TREX_SPRITE "${TREX_SOURCE_DIR}/assets/default_100_percent/100-offline-sprite.png")
+add_custom_command(
+    OUTPUT ${TREX_ASSET_C} ${TREX_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trex_assets.py
+        ${TREX_SPRITE}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TREX_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trex_assets.py
+        --input ${TREX_SPRITE}
+        --output-c ${TREX_ASSET_C}
+        --output-h ${TREX_ASSET_H}
+    VERBATIM
+)
+add_custom_target(trex_assets DEPENDS ${TREX_ASSET_C} ${TREX_ASSET_H})
+
+set(TREX_APP_SOURCES
+    ${SRC_DIR}/apps/trex/trex_app.c
+    ${SRC_DIR}/apps/trex/trex_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${TREX_ASSET_C}
 )
 
 set(TWORLD_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tworld")
@@ -1221,7 +1248,15 @@ add_dcapp(dcapp_labyrinth labyrinth 204
 )
 
 add_dcapp(dcapp_trex trex 205
-    ${PICOWARE_APP_SOURCES}
+    ${TREX_APP_SOURCES}
+)
+
+add_dependencies(dcapp_trex trex_assets)
+
+target_include_directories(dcapp_trex BEFORE PRIVATE
+    ${TREX_ASSET_DIR}
+    ${SRC_DIR}/apps/trex
+    ${SRC_DIR}/apps/port
 )
 
 add_dcapp(dcapp_chips chips 207 LARGE_XIP

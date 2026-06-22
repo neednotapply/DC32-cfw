@@ -15,7 +15,6 @@ PICOWARE_APPS = {
     "Arkanoid": (202, "arkanoid.DC32"),
     "Flappy Bird": (203, "flappy.DC32"),
     "Labyrinth": (204, "labyrinth.DC32"),
-    "T-Rex Runner": (205, "trex.DC32"),
     "Starfield": (220, "starfield.DC32"),
     "Spiro": (221, "spiro.DC32"),
     "Cube": (222, "cube.DC32"),
@@ -119,7 +118,7 @@ def main() -> int:
     expect("USB category contains BadUSB", '{"BadUSB", UiCategoryEntryTool, UiToolBadUsb, 0}' in ui)
     expect("category return waits for key release", "uiPrvCategoryReturnFence" in ui and "uiPrvWaitKeysReleased();" in ui)
     expect("media category contains screensavers", all(token in ui for token in ("DcAppIdStarfield", "DcAppIdSpiro", "DcAppIdCube")))
-    expect("games category contains Picoware games", all(token in ui for token in ("DcAppIdPong", "DcAppIdTetris", "DcAppIdArkanoid", "DcAppIdFlappy", "DcAppIdLabyrinth", "DcAppIdTrex")))
+    expect("games category contains small ports", all(token in ui for token in ("DcAppIdPong", "DcAppIdTetris", "DcAppIdArkanoid", "DcAppIdFlappy", "DcAppIdLabyrinth", "DcAppIdTrex")))
     expect("Picoware wrapper uses runtime-specific header", "DCAPP_RUNTIME_ID" in wrapper and "picowareAppRun" in wrapper)
     expect("Picoware source list is named for the port, not the registry", "PICOWARE_APP_SOURCES" in cmake and old_source_var not in cmake)
     for label, (runtime, filename) in PICOWARE_APPS.items():
@@ -130,6 +129,8 @@ def main() -> int:
         expect(f"{label} CMake target", f" {target} {runtime}" in cmake)
         expect(f"{label} packaged", f'"{filename}"' in builder)
         expect(f"{label} dispatch present", f"DCAPP_RUNTIME_ID == {runtime}" in port)
+    expect("T-Rex is no longer dispatched by the Picoware placeholder", "DCAPP_RUNTIME_ID == 205" not in port and "pwRunTrex" not in port)
+    expect("T-Rex has a dedicated source-derived target", "TREX_APP_SOURCES" in cmake and "${TREX_APP_SOURCES}" in cmake)
 
     for token in BANNED_TOKENS:
         expect(f"Picoware ports avoid {token}", token not in combined_port)

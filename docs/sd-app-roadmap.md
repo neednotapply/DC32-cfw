@@ -20,7 +20,7 @@ This document tracks SD-loaded `/APPS` registry candidates. Existing small apps 
 | Arkanoid | `/APPS/arkanoid.DC32` | 202 | Picoware-inspired local app | Implemented |
 | Flappy Bird | `/APPS/flappy.DC32` | 203 | Picoware-inspired local app | Implemented |
 | Labyrinth | `/APPS/labyrinth.DC32` | 204 | Picoware-inspired local app | Implemented |
-| T-Rex Runner | `/APPS/trex.DC32` | 205 | Picoware-inspired local app | Implemented |
+| T-Rex Runner | `/APPS/trex.DC32` | 205 | Source-derived Wayou/Chromium runner port with original sprites and persistent high score | Implemented |
 | DOOM | `/APPS/doom.DC32` plus `/APPS/doom1.whx` | 206 | `kilograham/rp2040-doom` DEF CON 32 release | Implemented prototype |
 | Chip's Challenge | `/APPS/chips.DC32` plus `/APPS/chips-tworld.pak`; user-built `/APPS/chips.pak` for original levels | 207 | Tile World rules/rendering locked to the Win 3.1/MS rules path | Implemented |
 | Scorched Earth | `/APPS/scorch.DC32` plus `/APPS/scorch-xscorch.pak` | 208 | xscorch weapon tables/assets with badge terrain/AI/shop loop | Implemented |

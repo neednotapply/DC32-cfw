@@ -79,7 +79,6 @@ PICOWARE_APPS = {
     "arkanoid.DC32",
     "flappy.DC32",
     "labyrinth.DC32",
-    "trex.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
@@ -448,6 +447,9 @@ def check_artifacts() -> None:
         if name in PICOWARE_APPS:
             expect(f"{name} Picoware app active WRAM scratch", active_wram_size(scratch_size) >= PICOWARE_APP_SCRATCH_MIN)
             expect(f"{name} abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "trex.DC32":
+            expect("T-Rex remains below 256 KiB", image_size < QSPI_APP_CACHE_SIZE)
+            expect("T-Rex abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "sokoban.DC32":
             expect("Sokoban abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "openjazz.DC32":

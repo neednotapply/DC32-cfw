@@ -97,6 +97,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
 | `src/dcApp.c`, `src/dcAppDraw.c`, `src/apps/` | Resident SD app loader, shared SD app drawing helpers, and app entry wrappers for emulators, tools, and standalone apps. The loader supports both small app-cache `.DC32` images and flagged large-XIP app images staged at `QSPI_ROM_START`. |
 | `src/apps/port/` | Shared support for faithful source-derived ports: scratch heap, RGB332/paletted renderer bridge, FAT pack reads, save helpers, and center-button exit handling. |
+| `src/apps/trex/` | Wayou/Chromium T-Rex Runner port with generated original sprite assets, source-matched physics and obstacle timing, night mode, and `/SAVE/trex.sav` high-score persistence. |
 | `src/apps/chips/` | Tile World-derived Chip's Challenge port locked to the Win 3.1/MS rules path, generated Tile World tile rendering, optional original tile-pack loading, `/APPS/chips.pak` user data loading, reset, saves, and clean center exit. |
 | `src/apps/scorch/` | xscorch-derived Scorched Earth port with generated xscorch weapon tables, terrain deformation, AI turns, shop buys, saves, and clean center exit. |
 | `src/apps/pipe/` | PipeDreamer-derived Pipe Dream port with queue, ooze source/meter, bombs, score carryover, fast-forward, saves, and clean center exit. |
@@ -111,6 +112,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `tools/build_cave_pack.py` | Interactive packer for a user-supplied Cave Story freeware data directory; writes the `/APPS/cave.pak` payload without redistributing Cave Story data. |
 | `tools/build_chips_pack.py` | Interactive packer for user-provided Win 3.1 `CHIPS.DAT` plus `CHIPS.EXE` embedded tile graphics; also accepts explicit Tile World-style, regular-grid, or `DC32CHIPTIL` graphics; writes `/APPS/chips.pak`. |
 | `tools/build_period_assets.py` | Interactive/defaulted builder for redistributable period-port `.pak` files from checked-out upstream source trees when licensing permits redistribution. |
+| `tools/build_trex_assets.py` | Validates the pinned Wayou sprite PNG and generates the grayscale T-Rex runtime asset. |
 | `tools/build_tworld_assets.py` | Converts the vendored Tile World tile bitmap into compact badge RGB332 tiles. |
 | `tools/build_xscorch_assets.py` | Converts vendored xscorch `weapons.def` into the compact badge Scorched Earth weapon table. |
 | `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages `SD-assets.zip` and `SD-apps.zip`. |
@@ -183,7 +185,7 @@ Adjust the programmer command, permissions, or path for your setup.
 - OpenJazz remains a standard 256 KiB app at `0x10080000`. Before showing its menu it builds and validates a complete bundled-shareware graphics cache in the shared 3 MiB `QSPI_ROM_START` staging window, then seals that cache read-only for gameplay. DOOM and emulator ROM staging may overwrite this window, so the next OpenJazz launch automatically rebuilds it from `/APPS/openjazz.pak`.
 - OpenJazz reserves fixed SRAM arenas for its 320×240 indexed canvas and normal/bonus level union, plus a 36 KiB auxiliary heap above resident firmware RAM. The firmware link fails if it grows into that auxiliary arena.
 - OpenJazz uses badge-native controls: A selects in menus, B goes back, Start toggles quick pause, Select cycles weapons, and FN opens the in-game Continue/Save/Load/Setup/Quit menu. JJ1 save slots preserve the selected level and difficulty; loading a save restarts that level rather than restoring an exact mid-level position.
-- Chip's Challenge, Scorched Earth, Pipe Dream, Cave Story, and Sokoban now ship as source-derived/data-compatible ports. Cave Story freeware data and `CHIPS.DAT` remain user-provided and are not redistributed.
+- T-Rex Runner, Chip's Challenge, Scorched Earth, Pipe Dream, Cave Story, and Sokoban now ship as source-derived/data-compatible ports. T-Rex uses the pinned Wayou/Chromium LDPI sprite and persists its high score in `/SAVE/trex.sav`; Cave Story freeware data and `CHIPS.DAT` remain user-provided and are not redistributed.
 - The NES runtime intentionally enables only mappers 0, 1, 2, 3, 4, and 7 in `src/nes/InfoNES_Mapper.cpp`.
 - Arduboy support defaults to an Ardens-derived runtime for classic ATmega32u4 `.hex` games. The runtime keeps the corrected landscape presenter, throttles EEPROM mirroring, polls the center-menu path inside long emulation batches, and disables Arduboy audio work entirely for v1.
 - The ProjectABE-inspired hybrid compatibility runtime and the older Arduous/simavr-derived runtime are kept as experimental build options. Configure with `-DARDUBOY_HYBRID_EXPERIMENTAL=ON` or `-DARDUBOY_SIMAVR_EXPERIMENTAL=ON` to build one of them instead of the default Ardens path.
@@ -200,3 +202,4 @@ Issues and pull requests are welcome. Please include your toolchain version, bad
 - Firmware lead: Dmitry Grinberg (DmitryGR) - <https://dmitry.gr/>
 - Hardware partner: Entropic Engineering - <https://www.entropicengineering.com/>
 - Arduboy runtime references and dependencies: Ardens, Arduous, simavr, ProjectABE, Arduboy2, and the Arduboy community.
+- T-Rex Runner reference: Wayou's BSD-licensed Chromium runner extraction at pinned commit `5455bfa408ec6b707c7300ff194b7390733a766d`.

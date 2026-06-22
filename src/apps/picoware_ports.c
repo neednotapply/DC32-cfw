@@ -513,46 +513,6 @@ static int pwRunLabyrinth(struct PicowareAppCtx *ctx)
 	return 0;
 }
 
-static int pwRunTrex(struct PicowareAppCtx *ctx)
-{
-	int32_t y = 1900, v = 0, obsX[3] = {360, 520, 700};
-	uint32_t score = 0;
-
-	while (pwFrame(ctx)) {
-		if ((ctx->pressed & (KEY_BIT_A | KEY_BIT_UP)) && y >= 1900)
-			v = -82;
-		v += 5;
-		y += v;
-		if (y > 1900) {
-			y = 1900;
-			v = 0;
-		}
-		for (int32_t i = 0; i < 3; i++) {
-			obsX[i] -= 5 + (int32_t)(score / 80u);
-			if (obsX[i] < -20) {
-				obsX[i] = 360 + (int32_t)(pwRand(ctx) % 80u);
-				score += 10;
-			}
-			if (obsX[i] >= 36 && obsX[i] <= 58 && y / 10 > 172) {
-				y = 1900;
-				v = 0;
-				score = 0;
-				obsX[0] = 360;
-				obsX[1] = 520;
-				obsX[2] = 700;
-			}
-		}
-		pwClear(ctx, pwRgb(235, 235, 220));
-		pwFill(ctx, 0, 206, 320, 2, pwRgb(90, 90, 80));
-		pwFill(ctx, 38, y / 10 - 24, 20, 24, pwRgb(70, 70, 70));
-		pwFill(ctx, 54, y / 10 - 30, 14, 12, pwRgb(70, 70, 70));
-		for (int32_t i = 0; i < 3; i++)
-			pwFill(ctx, obsX[i], 184, 14, 22, pwRgb(30, 120, 40));
-		pwDrawScore(ctx, score++);
-	}
-	return 0;
-}
-
 static int pwRunStarfield(struct PicowareAppCtx *ctx)
 {
 	static int16_t sx[96], sy[96], sz[96];
@@ -679,8 +639,6 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	ret = pwRunFlappy(&ctx);
 #elif DCAPP_RUNTIME_ID == 204
 	ret = pwRunLabyrinth(&ctx);
-#elif DCAPP_RUNTIME_ID == 205
-	ret = pwRunTrex(&ctx);
 #elif DCAPP_RUNTIME_ID == 220
 	ret = pwRunStarfield(&ctx);
 #elif DCAPP_RUNTIME_ID == 221

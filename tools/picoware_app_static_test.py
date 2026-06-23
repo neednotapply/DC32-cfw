@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PICOWARE_APPS = {
-    "Pong": (200, "pong.DC32"),
     "Tetris": (201, "tetris.DC32"),
     "Flappy Bird": (203, "flappy.DC32"),
     "Labyrinth": (204, "labyrinth.DC32"),
@@ -120,6 +119,13 @@ def main() -> int:
     expect("games category contains small ports", all(token in ui for token in ("DcAppIdPong", "DcAppIdTetris", "DcAppIdArkanoid", "DcAppIdFlappy", "DcAppIdLabyrinth", "DcAppIdTrex")))
     expect("Picoware wrapper uses runtime-specific header", "DCAPP_RUNTIME_ID" in wrapper and "picowareAppRun" in wrapper)
     expect("Picoware source list is named for the port, not the registry", "PICOWARE_APP_SOURCES" in cmake and old_source_var not in cmake)
+    expect("Pong uses its dedicated source tree", "PONG_APP_SOURCES" in cmake and "${PONG_APP_SOURCES}" in cmake)
+    expect("Pong id declared", "DcAppIdPong = 200" in dcapp_h)
+    expect("Pong app path", '"/APPS/pong.DC32"' in dcapp_c)
+    expect("Pong launcher visible", '"Pong"' in dcapp_c)
+    expect("Pong CMake target", "dcapp_pong pong 200" in cmake)
+    expect("Pong packaged", '"pong.DC32"' in builder)
+    expect("Pong is removed from the Picoware placeholder", "DCAPP_RUNTIME_ID == 200" not in port and "pwRunPong" not in port)
     for label, (runtime, filename) in PICOWARE_APPS.items():
         target = filename.removesuffix(".DC32")
         expect(f"{label} id declared", f"= {runtime}" in dcapp_h)

@@ -563,6 +563,23 @@ set(PICOWARE_APP_SOURCES
     ${SRC_DIR}/apps/picoware_ports.c
 )
 
+set(PONG_APP_SOURCES
+    ${SRC_DIR}/apps/pong/pong_app.c
+    ${SRC_DIR}/apps/pong/main/pong_main.c
+    ${SRC_DIR}/apps/pong/core/pong_core.c
+    ${SRC_DIR}/apps/pong/platform/pong_dc32.c
+    ${SRC_DIR}/apps/pong/modes/pong_modes.c
+    ${SRC_DIR}/apps/pong/modes/pong_mode_common.c
+    ${SRC_DIR}/apps/pong/modes/mode_classic.c
+    ${SRC_DIR}/apps/pong/modes/mode_doubles.c
+    ${SRC_DIR}/apps/pong/modes/mode_quadrapong.c
+    ${SRC_DIR}/apps/pong/modes/mode_super.c
+    ${SRC_DIR}/apps/pong/modes/mode_rebound.c
+    ${SRC_DIR}/apps/pong/modes/mode_breakout.c
+    ${SRC_DIR}/apps/pong/modes/mode_warlords.c
+    ${SRC_DIR}/apps/pong/modes/mode_power.c
+)
+
 set(ARKANOID_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/arkanoid")
 set(ARKANOID_ASSET_C "${ARKANOID_ASSET_DIR}/arkanoid_assets.c")
 set(ARKANOID_ASSET_H "${ARKANOID_ASSET_DIR}/arkanoid_assets.h")
@@ -1252,7 +1269,7 @@ target_compile_options(dcapp_doom PRIVATE
 )
 
 add_dcapp(dcapp_pong pong 200
-    ${PICOWARE_APP_SOURCES}
+    ${PONG_APP_SOURCES}
 )
 
 add_dcapp(dcapp_tetris tetris 201

@@ -29,11 +29,6 @@ static uint32_t pwMinU32(uint32_t a, uint32_t b)
 	return a < b ? a : b;
 }
 
-static int32_t pwAbsI32(int32_t v)
-{
-	return v < 0 ? -v : v;
-}
-
 static uint32_t pwRand(struct PicowareAppCtx *ctx)
 {
 	ctx->rng = ctx->rng * 1664525u + 1013904223u;
@@ -152,59 +147,6 @@ static bool pwInit(struct PicowareAppCtx *ctx, const struct DcAppHostApi *host, 
 	ctx->host = host;
 	ctx->rng = (uint32_t)(now ^ (now >> 32));
 	return dcAppDrawInit(&ctx->draw, host, args, mPicowareBackbuffer, PICOWARE_SCREEN_W, PICOWARE_SCREEN_H);
-}
-
-static int pwRunPong(struct PicowareAppCtx *ctx)
-{
-	int32_t p1 = 90, p2 = 90, bx = 160, by = 120, vx = 3, vy = 2;
-	uint32_t score = 0;
-
-	while (pwFrame(ctx)) {
-		if (ctx->keys & KEY_BIT_UP)
-			p1 -= 6;
-		if (ctx->keys & KEY_BIT_DOWN)
-			p1 += 6;
-		if (p1 < 10)
-			p1 = 10;
-		if (p1 > 180)
-			p1 = 180;
-		if (by < p2 + 25)
-			p2 -= 3;
-		if (by > p2 + 35)
-			p2 += 3;
-		if (p2 < 10)
-			p2 = 10;
-		if (p2 > 180)
-			p2 = 180;
-
-		bx += vx;
-		by += vy;
-		if (by <= 4 || by >= 236)
-			vy = -vy;
-		if (bx <= 24 && bx >= 16 && by >= p1 && by <= p1 + 60) {
-			vx = pwAbsI32(vx) + (score > 8 ? 1 : 0);
-			vy += (by - (p1 + 30)) / 12;
-			score++;
-		}
-		if (bx >= 292 && bx <= 300 && by >= p2 && by <= p2 + 60)
-			vx = -pwAbsI32(vx);
-		if (bx < 0 || bx > 319) {
-			bx = 160;
-			by = 120;
-			vx = bx < 0 ? 3 : -3;
-			vy = (pwRand(ctx) & 3u) ? 2 : -2;
-			score = 0;
-		}
-
-		pwClear(ctx, pwRgb(0, 0, 20));
-		for (int32_t y = 8; y < 240; y += 14)
-			pwFill(ctx, 159, y, 2, 7, pwRgb(70, 80, 120));
-		pwFill(ctx, 14, p1, 8, 60, pwRgb(240, 240, 255));
-		pwFill(ctx, 298, p2, 8, 60, pwRgb(255, 180, 100));
-		pwFill(ctx, bx - 4, by - 4, 8, 8, pwRgb(120, 240, 160));
-		pwDrawScore(ctx, score);
-	}
-	return 0;
 }
 
 #define TET_W 10
@@ -572,9 +514,7 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	}
 	pwWaitRelease(&ctx);
 
-#if DCAPP_RUNTIME_ID == 200
-	ret = pwRunPong(&ctx);
-#elif DCAPP_RUNTIME_ID == 201
+#if DCAPP_RUNTIME_ID == 201
 	ret = pwRunTetris(&ctx);
 #elif DCAPP_RUNTIME_ID == 203
 	ret = pwRunFlappy(&ctx);

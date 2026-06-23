@@ -149,55 +149,6 @@ static bool pwInit(struct PicowareAppCtx *ctx, const struct DcAppHostApi *host, 
 	return dcAppDrawInit(&ctx->draw, host, args, mPicowareBackbuffer, PICOWARE_SCREEN_W, PICOWARE_SCREEN_H);
 }
 
-static int pwRunFlappy(struct PicowareAppCtx *ctx)
-{
-	int32_t birdY = 1100, birdV = 0, pipeX[3] = {360, 500, 640}, gapY[3] = {80, 130, 100};
-	uint32_t score = 0;
-
-	while (pwFrame(ctx)) {
-		if (ctx->pressed & (KEY_BIT_A | KEY_BIT_UP))
-			birdV = -72;
-		birdV += 5;
-		birdY += birdV;
-		for (int32_t i = 0; i < 3; i++) {
-			pipeX[i] -= 4;
-			if (pipeX[i] < -32) {
-				pipeX[i] = 392;
-				gapY[i] = 44 + (int32_t)(pwRand(ctx) % 118u);
-			}
-			if (pipeX[i] == 40)
-				score++;
-			if (pipeX[i] < 64 && pipeX[i] + 30 > 34) {
-				int32_t by = birdY / 10;
-
-				if (by < gapY[i] || by > gapY[i] + 56) {
-					birdY = 1100;
-					birdV = 0;
-					score = 0;
-					pipeX[0] = 360;
-					pipeX[1] = 500;
-					pipeX[2] = 640;
-				}
-			}
-		}
-		if (birdY < 0 || birdY > 2240) {
-			birdY = 1100;
-			birdV = 0;
-			score = 0;
-		}
-		pwClear(ctx, pwRgb(70, 185, 230));
-		pwFill(ctx, 0, 224, 320, 16, pwRgb(80, 190, 80));
-		for (int32_t i = 0; i < 3; i++) {
-			pwFill(ctx, pipeX[i], 0, 30, gapY[i], pwRgb(20, 130, 70));
-			pwFill(ctx, pipeX[i], gapY[i] + 58, 30, 224 - gapY[i] - 58, pwRgb(20, 130, 70));
-		}
-		pwFill(ctx, 38, birdY / 10, 18, 14, pwRgb(255, 220, 60));
-		pwFill(ctx, 50, birdY / 10 + 4, 6, 4, pwRgb(255, 130, 40));
-		pwDrawScore(ctx, score);
-	}
-	return 0;
-}
-
 static const char mMaze[12][17] = {
 	"################",
 	"#S   #     #   #",
@@ -382,9 +333,7 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	}
 	pwWaitRelease(&ctx);
 
-#if DCAPP_RUNTIME_ID == 203
-	ret = pwRunFlappy(&ctx);
-#elif DCAPP_RUNTIME_ID == 204
+#if DCAPP_RUNTIME_ID == 204
 	ret = pwRunLabyrinth(&ctx);
 #elif DCAPP_RUNTIME_ID == 220
 	ret = pwRunStarfield(&ctx);

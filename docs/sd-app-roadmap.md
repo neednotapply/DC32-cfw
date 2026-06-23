@@ -18,7 +18,7 @@ This document tracks SD-loaded `/APPS` registry candidates. Existing small apps 
 | Pong | `/APPS/pong.DC32` | 200 | Picoware-inspired local app | Implemented |
 | Tetris | `/APPS/tetris.DC32` | 201 | NullpoMino-derived Marathon/Line Race/Ultra port with Standard, Fast-B, and Nintendo-R rules plus persistent records | Implemented |
 | Arkanoid | `/APPS/arkanoid.DC32` | 202 | Source-derived wkeeling/arkanoid port with five rounds, enemies, power-ups, original scaled sprites, and persistent high score | Implemented |
-| Flappy Bird | `/APPS/flappy.DC32` | 203 | Picoware-inspired local app | Implemented |
+| Flappy Bird | `/APPS/flappy.DC32` | 203 | Source-derived VadimBoev/FlappyBird `v1.9.2` landscape port with generated visible sprites and persistent best score | Implemented |
 | Labyrinth | `/APPS/labyrinth.DC32` | 204 | Picoware-inspired local app | Implemented |
 | T-Rex Runner | `/APPS/trex.DC32` | 205 | Source-derived Wayou/Chromium runner port with original sprites and persistent high score | Implemented |
 | DOOM | `/APPS/doom.DC32` plus `/APPS/doom1.whx` | 206 | `kilograham/rp2040-doom` DEF CON 32 release | Implemented prototype |

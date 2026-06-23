@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PICOWARE_APPS = {
-    "Flappy Bird": (203, "flappy.DC32"),
     "Labyrinth": (204, "labyrinth.DC32"),
     "Starfield": (220, "starfield.DC32"),
     "Spiro": (221, "spiro.DC32"),
@@ -132,6 +131,8 @@ def main() -> int:
     expect("Tetris launcher visible", '"Tetris"' in dcapp_c)
     expect("Tetris CMake target", "dcapp_tetris tetris 201" in cmake)
     expect("Tetris packaged", '"tetris.DC32"' in builder)
+    expect("Flappy Bird is removed from the Picoware placeholder", "pwRunFlappy" not in port and "DCAPP_RUNTIME_ID == 203" not in port)
+    expect("Flappy Bird uses its dedicated source-derived target", "FLAPPY_APP_SOURCES" in cmake and "${FLAPPY_APP_SOURCES}" in cmake and "flappy_assets" in cmake)
     for label, (runtime, filename) in PICOWARE_APPS.items():
         target = filename.removesuffix(".DC32")
         expect(f"{label} id declared", f"= {runtime}" in dcapp_h)

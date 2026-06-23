@@ -54,6 +54,10 @@ NULLPOMINO_REPO = "https://github.com/nullpomino/nullpomino"
 NULLPOMINO_COMMIT = "4de098dd0b48d991247313d8dba30b9721e6f9d9"
 NULLPOMINO_LICENSE = REPO_ROOT / "third_party" / "nullpomino" / "LICENSE"
 NULLPOMINO_ENGINE_LICENSE = REPO_ROOT / "third_party" / "nullpomino" / "LICENSE-NULLNONAME"
+FLAPPY_REPO = "https://github.com/VadimBoev/FlappyBird"
+FLAPPY_COMMIT = "3b3060cdf6b38b819e5a649bc92d11776decd0b4"
+FLAPPY_TAG = "v1.9.2"
+FLAPPY_ARCHIVE_SHA256 = "e06e8553e747be5851edfe90486dda3afcb5b2a9ddac4827f4a7911a6fb39d51"
 OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
 OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
 CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
@@ -206,6 +210,14 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 ],
                 "sd_path": "APPS/tetris.DC32",
                 "notes": "Native C adaptation of the upstream piece, rule, randomizer, timing, and scoring behavior.",
+            },
+            "flappy": {
+                "repository": FLAPPY_REPO,
+                "tag": FLAPPY_TAG,
+                "commit": FLAPPY_COMMIT,
+                "archive_sha256": FLAPPY_ARCHIVE_SHA256,
+                "sd_path": "APPS/flappy.DC32",
+                "notes": "Native silent DC32 adaptation of the upstream C/OpenGL ES game flow using generated pre-scaled RGB332 sprites from the pinned PNG assets.",
             },
             "openjazz_shareware": {
                 "publisher": "Epic MegaGames",
@@ -677,7 +689,9 @@ resident firmware shell from /APPS. DOOM also includes the WHX data payload
 from the rp2040-doom DEF CON 32 release under /APPS. Tetris is derived from
 NullpoMino commit {NULLPOMINO_COMMIT}. Arkanoid is derived from
 wkeeling/arkanoid commit 7e0e876cd034ebd62890e65352c7ef0b12b45df5 and
-contains a generated scaled copy of that source's graphics. Chip's Challenge,
+contains a generated scaled copy of that source's graphics. Flappy Bird is
+derived from VadimBoev/FlappyBird {FLAPPY_TAG} commit {FLAPPY_COMMIT} and
+contains generated pre-scaled RGB332 copies of that source's visible PNG sprites. Chip's Challenge,
 Scorched Earth, Pipe Dream, Cave Story, Sokoban, and Jazz Jackrabbit are included as
 source-derived/data-compatible period ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
@@ -704,6 +718,15 @@ shareware data only.
 - SD path: APPS/arkanoid.DC32
 - Notes: The five-round gameplay is ported to native C. The pinned source archive is SHA-256 verified and its PNG
   graphics are scaled into an RGB332 atlas linked directly into the app.
+
+## Flappy Bird
+
+- Repository: {FLAPPY_REPO}
+- Tag: {FLAPPY_TAG}
+- Commit: {FLAPPY_COMMIT}
+- Archive SHA-256: {FLAPPY_ARCHIVE_SHA256}
+- SD path: APPS/flappy.DC32
+- Notes: The Android Native Activity, OpenGL ES, OpenSLES, APK build scripts, and MP3 playback are not included. The badge app ports the source game states, physics, scoring, result panel, and visible PNG sprites into a silent native DC32 app.
 
 ## Tetris
 

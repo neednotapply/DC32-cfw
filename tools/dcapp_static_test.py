@@ -76,7 +76,6 @@ GAME_APPS = {"gb.DC32", "nes.DC32", "arduboy.DC32"}
 PICOWARE_APPS = {
     "pong.DC32",
     "tetris.DC32",
-    "flappy.DC32",
     "labyrinth.DC32",
     "starfield.DC32",
     "spiro.DC32",
@@ -452,6 +451,9 @@ def check_artifacts() -> None:
         if name == "arkanoid.DC32":
             expect("Arkanoid remains below 256 KiB", image_size < QSPI_APP_CACHE_SIZE)
             expect("Arkanoid abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "flappy.DC32":
+            expect("Flappy Bird remains below 256 KiB", image_size < QSPI_APP_CACHE_SIZE)
+            expect("Flappy Bird abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "sokoban.DC32":
             expect("Sokoban abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "openjazz.DC32":

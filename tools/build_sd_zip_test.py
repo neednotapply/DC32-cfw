@@ -130,6 +130,9 @@ def main() -> int:
                manifest["sources"]["tetris"]["commit"] == builder.NULLPOMINO_COMMIT)
         expect("Tetris license paths are recorded",
                len(manifest["sources"]["tetris"]["licenses"]) == 2)
+        expect("Flappy source metadata is present",
+               manifest["sources"]["flappy"]["commit"] == builder.FLAPPY_COMMIT
+               and manifest["sources"]["flappy"]["archive_sha256"] == builder.FLAPPY_ARCHIVE_SHA256)
         expect("Jazz shareware source metadata is present", manifest["sources"]["openjazz_shareware"]["sha256"] == builder.OPENJAZZ_SHAREWARE_SHA256)
         expect("Period port metadata is present", manifest["sources"]["period_ports"]["sd_path"] == "APPS/")
         expect("Chip's Challenge accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["chips"] == 207)
@@ -155,6 +158,8 @@ def main() -> int:
         expect("SD-apps.zip omits proprietary Cave data", "APPS/cave.pak" not in names and "APPS/cave.dat" not in names)
         expect("SD-apps.zip excludes /ROMS/DOOM", not any(name.startswith("ROMS/DOOM/") for name in names))
         expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in expected_hash_files))
+        expect("SD-apps.zip SOURCES records Flappy attribution",
+               builder.FLAPPY_REPO in sources_md and builder.FLAPPY_COMMIT in sources_md and "APPS/flappy.DC32" in sources_md)
         expect("SD-apps.zip reproduces both Tetris license notices",
                builder.NULLPOMINO_LICENSE.read_text(encoding="utf-8").strip() in sources_md
                and builder.NULLPOMINO_ENGINE_LICENSE.read_text(encoding="utf-8").strip() in sources_md)

@@ -304,6 +304,11 @@ set_source_files_properties(
 )
 
 set_source_files_properties(
+    ${SRC_DIR}/apps/flappy/flappy_port.c
+    PROPERTIES COMPILE_OPTIONS "-O2"
+)
+
+set_source_files_properties(
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
@@ -589,6 +594,30 @@ set(TETRIS_APP_SOURCES
     ${SRC_DIR}/apps/tetris/tetris_rules.c
     ${SRC_DIR}/apps/tetris/tetris_port.c
     ${SRC_DIR}/apps/port/port_runtime.c
+)
+
+set(FLAPPY_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/flappy")
+set(FLAPPY_ASSET_C "${FLAPPY_ASSET_DIR}/flappy_assets.c")
+set(FLAPPY_ASSET_H "${FLAPPY_ASSET_DIR}/flappy_assets.h")
+set(FLAPPY_SOURCE_CACHE "${FLAPPY_ASSET_DIR}/upstream.zip")
+add_custom_command(
+    OUTPUT ${FLAPPY_ASSET_C} ${FLAPPY_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_flappy_assets.py
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${FLAPPY_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_flappy_assets.py
+        --cache ${FLAPPY_SOURCE_CACHE}
+        --output-c ${FLAPPY_ASSET_C}
+        --output-h ${FLAPPY_ASSET_H}
+    VERBATIM
+)
+add_custom_target(flappy_assets DEPENDS ${FLAPPY_ASSET_C} ${FLAPPY_ASSET_H})
+
+set(FLAPPY_APP_SOURCES
+    ${SRC_DIR}/apps/flappy/flappy_app.c
+    ${SRC_DIR}/apps/flappy/flappy_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${FLAPPY_ASSET_C}
 )
 
 set(ARKANOID_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/arkanoid")
@@ -1305,7 +1334,15 @@ target_include_directories(dcapp_arkanoid BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_flappy flappy 203
-    ${PICOWARE_APP_SOURCES}
+    ${FLAPPY_APP_SOURCES}
+)
+
+add_dependencies(dcapp_flappy flappy_assets)
+
+target_include_directories(dcapp_flappy BEFORE PRIVATE
+    ${FLAPPY_ASSET_DIR}
+    ${SRC_DIR}/apps/flappy
+    ${SRC_DIR}/apps/port
 )
 
 add_dcapp(dcapp_labyrinth labyrinth 204

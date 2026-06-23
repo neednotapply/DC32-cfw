@@ -16,7 +16,7 @@ This document tracks SD-loaded `/APPS` registry candidates. Existing small apps 
 | Autoclicker | `/APPS/autoclicker.DC32` | 104 | Local USB HID app | Implemented |
 | USB Gamepad | `/APPS/gamepad.DC32` | 105 | Local USB HID/XInput-style app | Implemented |
 | Pong | `/APPS/pong.DC32` | 200 | Picoware-inspired local app | Implemented |
-| Tetris | `/APPS/tetris.DC32` | 201 | Picoware-inspired local app | Implemented |
+| Tetris | `/APPS/tetris.DC32` | 201 | NullpoMino-derived Marathon/Line Race/Ultra port with Standard, Fast-B, and Nintendo-R rules plus persistent records | Implemented |
 | Arkanoid | `/APPS/arkanoid.DC32` | 202 | Source-derived wkeeling/arkanoid port with five rounds, enemies, power-ups, original scaled sprites, and persistent high score | Implemented |
 | Flappy Bird | `/APPS/flappy.DC32` | 203 | Picoware-inspired local app | Implemented |
 | Labyrinth | `/APPS/labyrinth.DC32` | 204 | Picoware-inspired local app | Implemented |

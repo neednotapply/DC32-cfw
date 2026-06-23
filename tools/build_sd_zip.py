@@ -50,6 +50,10 @@ ARDUBOY_GENRE_DIRS = (
 DOOM_REPO = "https://github.com/kilograham/rp2040-doom.git"
 DOOM_RELEASE = "defcon32_v1"
 DOOM_WHX_SOURCE = REPO_ROOT / "third_party" / "rp2040-doom" / "doom1.whx"
+NULLPOMINO_REPO = "https://github.com/nullpomino/nullpomino"
+NULLPOMINO_COMMIT = "4de098dd0b48d991247313d8dba30b9721e6f9d9"
+NULLPOMINO_LICENSE = REPO_ROOT / "third_party" / "nullpomino" / "LICENSE"
+NULLPOMINO_ENGINE_LICENSE = REPO_ROOT / "third_party" / "nullpomino" / "LICENSE-NULLNONAME"
 OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
 OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
 CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
@@ -192,6 +196,16 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "release": DOOM_RELEASE,
                 "paths": ["doom1.whx"],
                 "sd_path": "APPS/",
+            },
+            "tetris": {
+                "repository": NULLPOMINO_REPO,
+                "commit": NULLPOMINO_COMMIT,
+                "licenses": [
+                    "third_party/nullpomino/LICENSE",
+                    "third_party/nullpomino/LICENSE-NULLNONAME",
+                ],
+                "sd_path": "APPS/tetris.DC32",
+                "notes": "Native C adaptation of the upstream piece, rule, randomizer, timing, and scoring behavior.",
             },
             "openjazz_shareware": {
                 "publisher": "Epic MegaGames",
@@ -654,11 +668,14 @@ their upstream projects.
 
 def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
     app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in (*APP_BINARIES, *APP_DATA_FILES))
+    nullpomino_license = NULLPOMINO_LICENSE.read_text(encoding="utf-8").rstrip()
+    nullpomino_engine_license = NULLPOMINO_ENGINE_LICENSE.read_text(encoding="utf-8").rstrip()
     text = f"""# SD-apps.zip Sources
 
 These app binaries were built from this repository and are loaded by the
 resident firmware shell from /APPS. DOOM also includes the WHX data payload
-from the rp2040-doom DEF CON 32 release under /APPS. Arkanoid is derived from
+from the rp2040-doom DEF CON 32 release under /APPS. Tetris is derived from
+NullpoMino commit {NULLPOMINO_COMMIT}. Arkanoid is derived from
 wkeeling/arkanoid commit 7e0e876cd034ebd62890e65352c7ef0b12b45df5 and
 contains a generated scaled copy of that source's graphics. Chip's Challenge,
 Scorched Earth, Pipe Dream, Cave Story, Sokoban, and Jazz Jackrabbit are included as
@@ -687,6 +704,22 @@ shareware data only.
 - SD path: APPS/arkanoid.DC32
 - Notes: The five-round gameplay is ported to native C. The pinned source archive is SHA-256 verified and its PNG
   graphics are scaled into an RGB332 atlas linked directly into the app.
+
+## Tetris
+
+- Repository: {NULLPOMINO_REPO}
+- Commit: {NULLPOMINO_COMMIT}
+- License: BSD 3-Clause
+- SD path: APPS/tetris.DC32
+- Notes: The native C port adapts the upstream piece, rule, randomizer, timing, and scoring behavior for three single-player modes. No upstream graphics, music, or sound assets are included.
+
+### NullpoMino project license
+
+{nullpomino_license}
+
+### Adapted engine-source license
+
+{nullpomino_engine_license}
 
 ## Jazz Jackrabbit Shareware
 

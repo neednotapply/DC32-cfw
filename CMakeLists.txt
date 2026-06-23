@@ -296,6 +296,9 @@ set_source_files_properties(
     ${SRC_DIR}/raster.c
     ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/apps/picoware_ports.c
+    ${SRC_DIR}/apps/tetris/tetris_core.c
+    ${SRC_DIR}/apps/tetris/tetris_rules.c
+    ${SRC_DIR}/apps/tetris/tetris_port.c
     ${SRC_DIR}/apps/trex/trex_port.c
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
@@ -578,6 +581,14 @@ set(PONG_APP_SOURCES
     ${SRC_DIR}/apps/pong/modes/mode_breakout.c
     ${SRC_DIR}/apps/pong/modes/mode_warlords.c
     ${SRC_DIR}/apps/pong/modes/mode_power.c
+)
+
+set(TETRIS_APP_SOURCES
+    ${SRC_DIR}/apps/tetris/tetris_app.c
+    ${SRC_DIR}/apps/tetris/tetris_core.c
+    ${SRC_DIR}/apps/tetris/tetris_rules.c
+    ${SRC_DIR}/apps/tetris/tetris_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
 )
 
 set(ARKANOID_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/arkanoid")
@@ -1273,7 +1284,12 @@ add_dcapp(dcapp_pong pong 200
 )
 
 add_dcapp(dcapp_tetris tetris 201
-    ${PICOWARE_APP_SOURCES}
+    ${TETRIS_APP_SOURCES}
+)
+
+target_include_directories(dcapp_tetris BEFORE PRIVATE
+    ${SRC_DIR}/apps/tetris
+    ${SRC_DIR}/apps/port
 )
 
 add_dcapp(dcapp_arkanoid arkanoid 202

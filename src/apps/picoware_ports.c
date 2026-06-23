@@ -149,138 +149,6 @@ static bool pwInit(struct PicowareAppCtx *ctx, const struct DcAppHostApi *host, 
 	return dcAppDrawInit(&ctx->draw, host, args, mPicowareBackbuffer, PICOWARE_SCREEN_W, PICOWARE_SCREEN_H);
 }
 
-#define TET_W 10
-#define TET_H 18
-#define TET_CELL 12
-static const uint16_t mTetrominoes[7][4] = {
-	{0x0f00, 0x2222, 0x00f0, 0x4444},
-	{0x0660, 0x0660, 0x0660, 0x0660},
-	{0x0e40, 0x4c40, 0x4e00, 0x4640},
-	{0x0c60, 0x2640, 0x0c60, 0x2640},
-	{0x06c0, 0x4620, 0x06c0, 0x4620},
-	{0x08e0, 0x6440, 0x0e20, 0x44c0},
-	{0x02e0, 0x4460, 0x0e80, 0xc440},
-};
-static const uint16_t mTetColors[7] = {
-	0x67ff, 0xffe0, 0xf81f, 0x07e0, 0xf800, 0xfd20, 0x001f,
-};
-
-static bool tetCell(uint16_t mask, int32_t x, int32_t y)
-{
-	return (mask & (1u << (15 - (y * 4 + x)))) != 0;
-}
-
-static bool tetCollides(uint8_t board[TET_H][TET_W], int32_t px, int32_t py, uint8_t piece, uint8_t rot)
-{
-	uint16_t mask = mTetrominoes[piece][rot & 3u];
-
-	for (int32_t y = 0; y < 4; y++) {
-		for (int32_t x = 0; x < 4; x++) {
-			int32_t bx, by;
-
-			if (!tetCell(mask, x, y))
-				continue;
-			bx = px + x;
-			by = py + y;
-			if (bx < 0 || bx >= TET_W || by >= TET_H)
-				return true;
-			if (by >= 0 && board[by][bx])
-				return true;
-		}
-	}
-	return false;
-}
-
-static void tetPlace(uint8_t board[TET_H][TET_W], int32_t px, int32_t py, uint8_t piece, uint8_t rot)
-{
-	uint16_t mask = mTetrominoes[piece][rot & 3u];
-
-	for (int32_t y = 0; y < 4; y++)
-		for (int32_t x = 0; x < 4; x++)
-			if (tetCell(mask, x, y) && py + y >= 0 && py + y < TET_H && px + x >= 0 && px + x < TET_W)
-				board[py + y][px + x] = piece + 1u;
-}
-
-static uint32_t tetClearLines(uint8_t board[TET_H][TET_W])
-{
-	uint32_t lines = 0;
-
-	for (int32_t y = TET_H - 1; y >= 0; y--) {
-		bool full = true;
-
-		for (int32_t x = 0; x < TET_W; x++)
-			if (!board[y][x])
-				full = false;
-		if (!full)
-			continue;
-		for (int32_t row = y; row > 0; row--)
-			memcpy(board[row], board[row - 1], TET_W);
-		memset(board[0], 0, TET_W);
-		y++;
-		lines++;
-	}
-	return lines;
-}
-
-static void tetDraw(struct PicowareAppCtx *ctx, uint8_t board[TET_H][TET_W], int32_t px, int32_t py, uint8_t piece, uint8_t rot, uint32_t score)
-{
-	int32_t left = 74, top = 18;
-	uint16_t mask = mTetrominoes[piece][rot & 3u];
-
-	pwClear(ctx, pwRgb(6, 10, 18));
-	pwFill(ctx, left - 3, top - 3, TET_W * TET_CELL + 6, TET_H * TET_CELL + 6, pwRgb(45, 55, 70));
-	pwFill(ctx, left, top, TET_W * TET_CELL, TET_H * TET_CELL, pwRgb(0, 0, 0));
-	for (int32_t y = 0; y < TET_H; y++)
-		for (int32_t x = 0; x < TET_W; x++)
-			if (board[y][x])
-				pwFill(ctx, left + x * TET_CELL + 1, top + y * TET_CELL + 1, TET_CELL - 2, TET_CELL - 2, mTetColors[board[y][x] - 1]);
-	for (int32_t y = 0; y < 4; y++)
-		for (int32_t x = 0; x < 4; x++)
-			if (tetCell(mask, x, y) && py + y >= 0)
-				pwFill(ctx, left + (px + x) * TET_CELL + 1, top + (py + y) * TET_CELL + 1, TET_CELL - 2, TET_CELL - 2, mTetColors[piece]);
-	pwText(ctx, 220, 40, "Tetris", FontLarge, pwRgb(255, 255, 255));
-	pwDrawScore(ctx, score);
-}
-
-static int pwRunTetris(struct PicowareAppCtx *ctx)
-{
-	static uint8_t board[TET_H][TET_W];
-	int32_t px = 3, py = -1;
-	uint8_t piece = 0, rot = 0;
-	uint32_t score = 0, drop = 0;
-
-	memset(board, 0, sizeof(board));
-	piece = (uint8_t)(pwRand(ctx) % 7u);
-	while (pwFrame(ctx)) {
-		if ((ctx->pressed & KEY_BIT_LEFT) && !tetCollides(board, px - 1, py, piece, rot))
-			px--;
-		if ((ctx->pressed & KEY_BIT_RIGHT) && !tetCollides(board, px + 1, py, piece, rot))
-			px++;
-		if ((ctx->pressed & KEY_BIT_A) && !tetCollides(board, px, py, piece, rot + 1u))
-			rot++;
-		if ((ctx->keys & KEY_BIT_DOWN) || ++drop >= pwMinU32(18u, 28u - score / 8u)) {
-			drop = 0;
-			if (!tetCollides(board, px, py + 1, piece, rot)) {
-				py++;
-			}
-			else {
-				tetPlace(board, px, py, piece, rot);
-				score += 10u + tetClearLines(board) * 100u;
-				px = 3;
-				py = -1;
-				rot = 0;
-				piece = (uint8_t)(pwRand(ctx) % 7u);
-				if (tetCollides(board, px, py, piece, rot)) {
-					memset(board, 0, sizeof(board));
-					score = 0;
-				}
-			}
-		}
-		tetDraw(ctx, board, px, py, piece, rot, score);
-	}
-	return 0;
-}
-
 static int pwRunFlappy(struct PicowareAppCtx *ctx)
 {
 	int32_t birdY = 1100, birdV = 0, pipeX[3] = {360, 500, 640}, gapY[3] = {80, 130, 100};
@@ -514,9 +382,7 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	}
 	pwWaitRelease(&ctx);
 
-#if DCAPP_RUNTIME_ID == 201
-	ret = pwRunTetris(&ctx);
-#elif DCAPP_RUNTIME_ID == 203
+#if DCAPP_RUNTIME_ID == 203
 	ret = pwRunFlappy(&ctx);
 #elif DCAPP_RUNTIME_ID == 204
 	ret = pwRunLabyrinth(&ctx);

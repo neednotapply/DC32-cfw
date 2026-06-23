@@ -339,63 +339,6 @@ static int pwRunTetris(struct PicowareAppCtx *ctx)
 	return 0;
 }
 
-static int pwRunArkanoid(struct PicowareAppCtx *ctx)
-{
-	static uint8_t bricks[5][8];
-	int32_t paddle = 130, bx = 16000, by = 16000, vx = 250, vy = -220;
-	uint32_t score = 0;
-
-	memset(bricks, 1, sizeof(bricks));
-	while (pwFrame(ctx)) {
-		if (ctx->keys & KEY_BIT_LEFT)
-			paddle -= 7;
-		if (ctx->keys & KEY_BIT_RIGHT)
-			paddle += 7;
-		if (paddle < 0)
-			paddle = 0;
-		if (paddle > 260)
-			paddle = 260;
-		bx += vx;
-		by += vy;
-		if (bx < 500 || bx > 31500)
-			vx = -vx;
-		if (by < 500)
-			vy = -vy;
-		if (by / 100 >= 206 && by / 100 <= 214 && bx / 100 >= paddle && bx / 100 <= paddle + 60) {
-			vy = -pwAbsI32(vy);
-			vx += ((bx / 100) - (paddle + 30)) * 4;
-		}
-		for (int32_t y = 0; y < 5; y++) {
-			for (int32_t x = 0; x < 8; x++) {
-				int32_t rx = 18 + x * 38, ry = 24 + y * 16;
-
-				if (bricks[y][x] && bx / 100 >= rx && bx / 100 < rx + 32 && by / 100 >= ry && by / 100 < ry + 10) {
-					bricks[y][x] = 0;
-					vy = -vy;
-					score += 10;
-				}
-			}
-		}
-		if (by > 25000) {
-			bx = 16000;
-			by = 16000;
-			vx = 220;
-			vy = -220;
-			score = 0;
-			memset(bricks, 1, sizeof(bricks));
-		}
-		pwClear(ctx, pwRgb(4, 8, 16));
-		for (int32_t y = 0; y < 5; y++)
-			for (int32_t x = 0; x < 8; x++)
-				if (bricks[y][x])
-					pwFill(ctx, 18 + x * 38, 24 + y * 16, 32, 10, pwRgb(80 + y * 30, 180 - y * 20, 240));
-		pwFill(ctx, paddle, 212, 60, 7, pwRgb(255, 230, 100));
-		pwFill(ctx, bx / 100 - 4, by / 100 - 4, 8, 8, pwRgb(255, 255, 255));
-		pwDrawScore(ctx, score);
-	}
-	return 0;
-}
-
 static int pwRunFlappy(struct PicowareAppCtx *ctx)
 {
 	int32_t birdY = 1100, birdV = 0, pipeX[3] = {360, 500, 640}, gapY[3] = {80, 130, 100};
@@ -633,8 +576,6 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	ret = pwRunPong(&ctx);
 #elif DCAPP_RUNTIME_ID == 201
 	ret = pwRunTetris(&ctx);
-#elif DCAPP_RUNTIME_ID == 202
-	ret = pwRunArkanoid(&ctx);
 #elif DCAPP_RUNTIME_ID == 203
 	ret = pwRunFlappy(&ctx);
 #elif DCAPP_RUNTIME_ID == 204

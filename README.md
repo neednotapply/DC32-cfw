@@ -97,6 +97,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `src/sd*.c`, `src/fatfs.c` | SD-card and FAT filesystem integration. |
 | `src/dcApp.c`, `src/dcAppDraw.c`, `src/apps/` | Resident SD app loader, shared SD app drawing helpers, and app entry wrappers for emulators, tools, and standalone apps. The loader supports both small app-cache `.DC32` images and flagged large-XIP app images staged at `QSPI_ROM_START`. |
 | `src/apps/port/` | Shared support for faithful source-derived ports: scratch heap, RGB332/paletted renderer bridge, FAT pack reads, save helpers, and center-button exit handling. |
+| `src/apps/arkanoid/` | wkeeling/arkanoid-derived five-round port with a centered portrait arena, split side HUD, original scaled sprites, enemies, power-ups, and `/SAVE/arkanoid.sav` high-score persistence. |
 | `src/apps/trex/` | Wayou/Chromium T-Rex Runner port with generated original sprite assets, source-matched physics and obstacle timing, night mode, and `/SAVE/trex.sav` high-score persistence. |
 | `src/apps/chips/` | Tile World-derived Chip's Challenge port locked to the Win 3.1/MS rules path, generated Tile World tile rendering, optional original tile-pack loading, `/APPS/chips.pak` user data loading, reset, saves, and clean center exit. |
 | `src/apps/scorch/` | xscorch-derived Scorched Earth port with generated xscorch weapon tables, terrain deformation, AI turns, shop buys, saves, and clean center exit. |
@@ -113,6 +114,7 @@ Credit and licensing for bundled external assets remain with their upstream proj
 | `tools/build_chips_pack.py` | Interactive packer for user-provided Win 3.1 `CHIPS.DAT` plus `CHIPS.EXE` embedded tile graphics; also accepts explicit Tile World-style, regular-grid, or `DC32CHIPTIL` graphics; writes `/APPS/chips.pak`. |
 | `tools/build_period_assets.py` | Interactive/defaulted builder for redistributable period-port `.pak` files from checked-out upstream source trees when licensing permits redistribution. |
 | `tools/build_trex_assets.py` | Validates the pinned Wayou sprite PNG and generates the grayscale T-Rex runtime asset. |
+| `tools/build_arkanoid_assets.py` | Fetches and verifies the pinned wkeeling/arkanoid source archive, then generates the scaled RGB332 sprite atlas linked into `arkanoid.DC32`. |
 | `tools/build_tworld_assets.py` | Converts the vendored Tile World tile bitmap into compact badge RGB332 tiles. |
 | `tools/build_xscorch_assets.py` | Converts vendored xscorch `weapons.def` into the compact badge Scorched Earth weapon table. |
 | `tools/build_sd_zip.py` | Fetches upstream SD-card assets and packages `SD-assets.zip` and `SD-apps.zip`. |

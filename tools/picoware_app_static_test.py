@@ -12,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PICOWARE_APPS = {
     "Pong": (200, "pong.DC32"),
     "Tetris": (201, "tetris.DC32"),
-    "Arkanoid": (202, "arkanoid.DC32"),
     "Flappy Bird": (203, "flappy.DC32"),
     "Labyrinth": (204, "labyrinth.DC32"),
     "Starfield": (220, "starfield.DC32"),
@@ -131,6 +130,8 @@ def main() -> int:
         expect(f"{label} dispatch present", f"DCAPP_RUNTIME_ID == {runtime}" in port)
     expect("T-Rex is no longer dispatched by the Picoware placeholder", "DCAPP_RUNTIME_ID == 205" not in port and "pwRunTrex" not in port)
     expect("T-Rex has a dedicated source-derived target", "TREX_APP_SOURCES" in cmake and "${TREX_APP_SOURCES}" in cmake)
+    expect("Arkanoid is no longer dispatched by the Picoware placeholder", "DCAPP_RUNTIME_ID == 202" not in port and "pwRunArkanoid" not in port)
+    expect("Arkanoid has a dedicated source-derived target", "ARKANOID_APP_SOURCES" in cmake and "${ARKANOID_APP_SOURCES}" in cmake)
 
     for token in BANNED_TOKENS:
         expect(f"Picoware ports avoid {token}", token not in combined_port)

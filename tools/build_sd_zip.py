@@ -658,7 +658,9 @@ def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
 
 These app binaries were built from this repository and are loaded by the
 resident firmware shell from /APPS. DOOM also includes the WHX data payload
-from the rp2040-doom DEF CON 32 release under /APPS. Chip's Challenge,
+from the rp2040-doom DEF CON 32 release under /APPS. Arkanoid is derived from
+wkeeling/arkanoid commit 7e0e876cd034ebd62890e65352c7ef0b12b45df5 and
+contains a generated scaled copy of that source's graphics. Chip's Challenge,
 Scorched Earth, Pipe Dream, Cave Story, Sokoban, and Jazz Jackrabbit are included as
 source-derived/data-compatible period ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
@@ -677,6 +679,14 @@ shareware data only.
 - Source paths: doom1.whx
 - SD path: APPS/
 - Notes: Shareware DOOM1.WAD data is staged from APPS/doom1.whx at launch; raw WAD loading is not part of this build.
+
+## Arkanoid
+
+- Repository: https://github.com/wkeeling/arkanoid
+- Commit: 7e0e876cd034ebd62890e65352c7ef0b12b45df5
+- SD path: APPS/arkanoid.DC32
+- Notes: The five-round gameplay is ported to native C. The pinned source archive is SHA-256 verified and its PNG
+  graphics are scaled into an RGB332 atlas linked directly into the app.
 
 ## Jazz Jackrabbit Shareware
 

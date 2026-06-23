@@ -563,6 +563,30 @@ set(PICOWARE_APP_SOURCES
     ${SRC_DIR}/apps/picoware_ports.c
 )
 
+set(ARKANOID_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/arkanoid")
+set(ARKANOID_ASSET_C "${ARKANOID_ASSET_DIR}/arkanoid_assets.c")
+set(ARKANOID_ASSET_H "${ARKANOID_ASSET_DIR}/arkanoid_assets.h")
+set(ARKANOID_SOURCE_CACHE "${ARKANOID_ASSET_DIR}/upstream.zip")
+add_custom_command(
+    OUTPUT ${ARKANOID_ASSET_C} ${ARKANOID_ASSET_H}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arkanoid_assets.py
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${ARKANOID_ASSET_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arkanoid_assets.py
+        --cache ${ARKANOID_SOURCE_CACHE}
+        --output-c ${ARKANOID_ASSET_C}
+        --output-h ${ARKANOID_ASSET_H}
+    VERBATIM
+)
+add_custom_target(arkanoid_assets DEPENDS ${ARKANOID_ASSET_C} ${ARKANOID_ASSET_H})
+
+set(ARKANOID_APP_SOURCES
+    ${SRC_DIR}/apps/arkanoid/arkanoid_app.c
+    ${SRC_DIR}/apps/arkanoid/arkanoid_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+    ${ARKANOID_ASSET_C}
+)
+
 set(TREX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/t-rex-runner")
 set(TREX_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/trex")
 set(TREX_ASSET_C "${TREX_ASSET_DIR}/trex_assets.c")
@@ -1236,7 +1260,15 @@ add_dcapp(dcapp_tetris tetris 201
 )
 
 add_dcapp(dcapp_arkanoid arkanoid 202
-    ${PICOWARE_APP_SOURCES}
+    ${ARKANOID_APP_SOURCES}
+)
+
+add_dependencies(dcapp_arkanoid arkanoid_assets)
+
+target_include_directories(dcapp_arkanoid BEFORE PRIVATE
+    ${ARKANOID_ASSET_DIR}
+    ${SRC_DIR}/apps/arkanoid
+    ${SRC_DIR}/apps/port
 )
 
 add_dcapp(dcapp_flappy flappy 203

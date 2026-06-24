@@ -355,25 +355,39 @@ void dc32PortCloseAssetPack(struct Dc32PortPak *pak)
 
 bool dc32PortEnsureSaveDir(struct FatfsVol *vol)
 {
-	struct FatfsDir *dir;
+	struct FatfsDir *rootDir, *portDir = NULL;
+	struct FatFileLocator loc;
 
 	if (!vol)
 		return false;
-	dir = fatfsDirOpen(vol, "/SAVE");
-	if (dir) {
-		(void)fatfsDirClose(dir);
-		return true;
+
+	rootDir = fatfsDirOpen(vol, "/SAVE");
+	if (!rootDir) {
+		if (!fatfsDirCreate(vol, "/SAVE", &loc))
+			return false;
+		rootDir = fatfsDirOpenWithLocator(vol, &loc);
 	}
-	return fatfsDirCreate(vol, "/SAVE", NULL);
+	if (!rootDir)
+		return false;
+
+	portDir = fatfsDirOpenAt(rootDir, "PORTS");
+	if (!portDir) {
+		if (fatfsDirCreateAt(rootDir, "PORTS", &loc))
+			portDir = fatfsDirOpenWithLocator(vol, &loc);
+	}
+	(void)fatfsDirClose(rootDir);
+	if (!portDir)
+		return false;
+	(void)fatfsDirClose(portDir);
+	return true;
 }
 
-static bool dc32PortSavePath(char *dst, uint32_t dstLen, const char *appName)
+static bool dc32PortSavePathWithPrefix(char *dst, uint32_t dstLen, const char *prefix, const char *appName)
 {
 	uint32_t pos = 0;
-	static const char prefix[] = "/SAVE/";
 	static const char suffix[] = ".sav";
 
-	if (!dst || !dstLen || !appName || !*appName)
+	if (!dst || !dstLen || !prefix || !appName || !*appName)
 		return false;
 	for (uint32_t i = 0; prefix[i]; i++) {
 		if (pos + 1 >= dstLen)
@@ -398,6 +412,16 @@ static bool dc32PortSavePath(char *dst, uint32_t dstLen, const char *appName)
 	return true;
 }
 
+static bool dc32PortSavePath(char *dst, uint32_t dstLen, const char *appName)
+{
+	return dc32PortSavePathWithPrefix(dst, dstLen, "/SAVE/PORTS/", appName);
+}
+
+static bool dc32PortLegacySavePath(char *dst, uint32_t dstLen, const char *appName)
+{
+	return dc32PortSavePathWithPrefix(dst, dstLen, "/SAVE/", appName);
+}
+
 bool dc32PortSaveRead(struct FatfsVol *vol, const char *appName, void *dst, uint32_t size)
 {
 	char path[48];
@@ -408,6 +432,8 @@ bool dc32PortSaveRead(struct FatfsVol *vol, const char *appName, void *dst, uint
 	if (!vol || !dc32PortSavePath(path, sizeof(path), appName) || !dst)
 		return false;
 	file = fatfsFileOpen(vol, path, OPEN_MODE_READ);
+	if (!file && dc32PortLegacySavePath(path, sizeof(path), appName))
+		file = fatfsFileOpen(vol, path, OPEN_MODE_READ);
 	if (!file)
 		return false;
 	ok = fatfsFileRead(file, dst, size, &got) && got == size;

@@ -45,7 +45,7 @@ The earlier handmade period games were removed. IDs 207-211 are now occupied by 
 
 ## Port Runtime Requirements
 
-- Use `src/apps/port/` for shared scratch-heap allocation, FAT-backed pack reads, `/SAVE/<app>.sav` helpers, RGB332/paletted presentation, and center-button exit.
+- Use `src/apps/port/` for shared scratch-heap allocation, FAT-backed pack reads, `/SAVE/PORTS/<app>.sav` helpers, RGB332/paletted presentation, and center-button exit.
 - Missing required user data must show an in-app diagnostic naming the exact SD path, such as `/APPS/cave.pak` or `/APPS/chips.pak`.
 - Do not redistribute Cave Story freeware data, `CHIPS.DAT`, or proprietary original graphics with unclear licensing.
 - Music can be deferred. Buzzer/PWM SFX are acceptable when the original game used minimal PC speaker-style sound.

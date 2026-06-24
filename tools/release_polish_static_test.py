@@ -70,6 +70,7 @@ def main() -> int:
     save_open = function_body(ui, "uiPrvOpenSaveFile")
     save_subdir = function_body(ui, "uiPrvSaveSubdirForConsole")
     save_name = function_body(ui, "uiPrvSaveFileName")
+    clean_save_name = function_body(ui, "uiPrvCleanSaveFileName")
     game_settings = function_body(ui, "uiPrvGameSettings")
     dmg_palette = function_body(gb, "gbPrvRecalcDmgPal")
     set_dmg_palette = function_body(gb, "gbSetDmgPalette")
@@ -149,8 +150,9 @@ def main() -> int:
     expect("non-manual empty save export stays quiet", "if (result->manualRequest)\n\t\t\tuiAlert(cnv, \"This game has no battery save to export.\"" in save_export_success and "result.manualRequest = force" in save_export_options)
     expect("return to main menu exports current save with popup", "mLastGameMenuAction == UiGameActionSwitchTool" in run_loaded_game and "uiPrvExportCurrentSavestateWithOptions(cnv, false, true)" in run_loaded_game)
     expect("emulator saves use console subfolders", all(token in save_subdir for token in ['"AB"', '"GB"', '"GBC"', '"NES"']) and "uiPrvOpenSaveDirForConsole(vol, console, false)" in save_open and "uiPrvOpenSaveDirForConsole(vol, result->saveConsole, true)" in ui)
-    expect("emulator saves prefer detected titles", "detectedName" in save_name and "uiPrvDetectedSaveTitle" in save_name and "uiPrvDetectedSaveTitleForSelection(&selection, detectedName" in save_export_prepare)
-    expect("legacy ROM-name save lookup is removed", "SaveNameKindLegacy" not in ui and "uiPrvRawSaveFileName" not in ui)
+    expect("emulator saves default to full ROM-derived names", "uiPrvCopyRomStem(stem" in save_name and "SaveNameKindFull" in ui and "saveNameKind = SaveNameKindFull" in ui)
+    expect("emulator saves retain cleaned detected-name compatibility", "uiPrvDetectedSaveTitle" in clean_save_name and "cleanSaveName" in save_open and "uiPrvCleanSaveFileName((const char*)QSPI_FILENAME_START" in save_export_prepare)
+    expect("obsolete no-extension legacy save lookup is removed", "SaveNameKindLegacy" not in ui and "uiPrvRawSaveFileName" not in ui)
 
     print("release polish static tests passed")
     return 0

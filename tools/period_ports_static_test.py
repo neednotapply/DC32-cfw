@@ -83,7 +83,7 @@ def check_port_runtime_scaffold() -> None:
     expect("port runtime uses cart scratch heap", "DC32_PORT_CART_HEAP_START" in header and "dc32PortHeapInitDefault" in source)
     expect("port runtime has free-list allocator", "struct Dc32PortBlock" in source and "dc32PortCoalesce" in source)
     expect("port runtime has FAT asset pack reader", "dc32PortOpenAssetPack" in source and "dc32PortReadAssetPack" in source)
-    expect("port runtime has save helpers", "dc32PortSaveRead" in source and '"/SAVE/"' in source)
+    expect("port runtime has save helpers", "dc32PortSaveRead" in source and '"/SAVE/PORTS/"' in source and "dc32PortLegacySavePath" in source)
     expect("port runtime exits on center", "UI_KEY_BIT_CENTER" in source and "dc32PortCenterExitRequested" in source)
 
 
@@ -285,7 +285,7 @@ def check_openjazz_source_and_packer(tmp: Path) -> None:
     expect("OpenJazz writes config and four save slots", all(token in pack for token in ("OJCFG.DAT", "OJSAVE0.DAT", "OJSAVE3.DAT", "dc32OjFileWrite")))
     expect("OpenJazz upstream file layer uses writable badge files", "dc32OjUserFileOpen" in file_io and "dc32OjFileWrite" in file_io)
     expect("OpenJazz first boot avoids missing config/save exceptions", "File::exists(CONFIG_FILE, PATH_TYPE_CONFIG)" in setup_io and "File::exists(fileName, PATH_TYPE_CONFIG)" in save_io)
-    expect("OpenJazz save lookup uses direct SAVE directory access", "fatfsFindFileAt" in pack and "fatfsFileOpenAt" in pack)
+    expect("OpenJazz save lookup uses port save folder with flat legacy fallback", '"/SAVE/PORTS/OJCFG.DAT"' in pack and '"/SAVE/OJCFG.DAT"' in pack and "dc32PortEnsureSaveDir" in pack)
     expect("OpenJazz SDL shim maps badge-native gameplay controls", all(token in sdl for token in ("KEY_BIT_A", "KEY_BIT_B", "KEY_BIT_START", "KEY_BIT_SEL", "UI_KEY_BIT_CENTER", "return SDLK_p;", "return SDLK_RCTRL;", "return SDLK_ESCAPE;", "SDL_Flip")) and all(token not in sdl for token in ("gOjSelectHeld", "gOjChordActive", "ojChordKey")))
     expect("OpenJazz app has fatal allocation recovery", "setjmp" in app and "longjmp" in app and "HeapPeak" in app)
     expect("OpenJazz splits persistent auxiliary SRAM from transient app scratch", all(token in app for token in ("dcAppGetActiveScratch", "dc32OjHeapInit", "DC32_PORT_OPENJAZZ_AUX_START", "scratch.ptr", "scratch.size")) and "dc32PortHeapAddRegion" not in app)

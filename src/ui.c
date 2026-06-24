@@ -1544,6 +1544,7 @@ struct GameSelectionFlashMeta {
 enum SaveNameKind {
 	SaveNameKindAuto = 0,
 	SaveNameKindClean = 1,
+	SaveNameKindFull = 2,
 	SaveNameKindFallback = 3,
 };
 
@@ -1598,6 +1599,8 @@ static const char *uiPrvRuntimeName(enum GameRuntime runtime)
 static const char *uiPrvSaveNameKindName(enum SaveNameKind kind)
 {
 	switch (kind) {
+		case SaveNameKindFull:
+			return "full";
 		case SaveNameKindClean:
 			return "clean";
 		case SaveNameKindFallback:
@@ -3465,6 +3468,7 @@ bool uiSaveSavestate(void)
 	{
 		return kind == SaveNameKindAuto ||
 			kind == SaveNameKindClean ||
+			kind == SaveNameKindFull ||
 			kind == SaveNameKindFallback;
 	}
 
@@ -3701,6 +3705,16 @@ bool uiSaveSavestate(void)
 	static void uiPrvSaveFileName(const char *romName, enum GameRuntime runtime, const char *detectedName, char *dst, uint32_t dstLen)
 	{
 		char stem[UI_PICK_FILE_NAME_BUF_SZ];
+
+		(void)runtime;
+		(void)detectedName;
+		uiPrvCopyRomStem(stem, sizeof(stem), romName);
+		uiPrvSaveNameFromStem(stem, dst, dstLen);
+	}
+
+	static void uiPrvCleanSaveFileName(const char *romName, enum GameRuntime runtime, const char *detectedName, char *dst, uint32_t dstLen)
+	{
+		char stem[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackStem[UI_PICK_FILE_NAME_BUF_SZ];
 
 		if (!uiPrvDetectedSaveTitle(runtime, detectedName, stem, sizeof(stem))) {
@@ -3813,6 +3827,7 @@ bool uiSaveSavestate(void)
 		struct FatfsDir *dir;
 		struct FatfsFil *fil = NULL;
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char cleanSaveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char saveDirPath[16];
 		char fallbackName[13];
 		const char *foundName = NULL;
@@ -3833,12 +3848,22 @@ bool uiSaveSavestate(void)
 		fil = uiPrvOpenSaveFileIfSizeMatches(dir, saveName, expectedSize, badSizeP);
 		if (fil) {
 			foundName = saveName;
-			foundKind = SaveNameKindClean;
+			foundKind = SaveNameKindFull;
 			if (saveNameKindP)
 				*saveNameKindP = foundKind;
 		}
-		uiPrvSaveFallbackFileName(saveName, runtime, fallbackName, sizeof(fallbackName));
-		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName)) {
+		uiPrvCleanSaveFileName(romName, runtime, detectedName, cleanSaveName, sizeof(cleanSaveName));
+		if (!fil && cleanSaveName[0] && strcmp(saveName, cleanSaveName)) {
+			fil = uiPrvOpenSaveFileIfSizeMatches(dir, cleanSaveName, expectedSize, badSizeP);
+			if (fil) {
+				foundName = cleanSaveName;
+				foundKind = SaveNameKindClean;
+				if (saveNameKindP)
+					*saveNameKindP = foundKind;
+			}
+		}
+		uiPrvSaveFallbackFileName(romName, runtime, fallbackName, sizeof(fallbackName));
+		if (!fil && fallbackName[0] && strcmp(saveName, fallbackName) && strcmp(cleanSaveName, fallbackName)) {
 			fil = uiPrvOpenSaveFileIfSizeMatches(dir, fallbackName, expectedSize, badSizeP);
 			if (fil) {
 				foundName = fallbackName;
@@ -3922,6 +3947,7 @@ bool uiSaveSavestate(void)
 		char saveDirPath[16];
 		char saveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+		char cleanSaveName[UI_PICK_FILE_NAME_BUF_SZ];
 		char fallbackSaveName[13];
 		const char *openPath;
 		uint32_t bytesExpected;
@@ -3995,7 +4021,7 @@ bool uiSaveSavestate(void)
 		struct FatfsFil *filR, *filS = NULL;
 		enum RomColorSupport colorSupport;
 		enum GameRuntime runtime = uiPrvRuntimeForName(romName);
-		enum SaveNameKind saveNameKind = SaveNameKindClean;
+		enum SaveNameKind saveNameKind = SaveNameKindFull;
 		struct NesRomInfo nesInfo;
 		struct ArduboyRomInfo arduboyInfo;
 		struct FatfsDir *dir;
@@ -4292,6 +4318,7 @@ static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
 	enum UiEmulatorConsole saveConsole = result->saveConsole;
 	char saveDirPath[16];
 	char primarySaveName[UI_PICK_FILE_NAME_BUF_SZ];
+	char cleanSaveName[UI_PICK_FILE_NAME_BUF_SZ];
 	char fallbackSaveName[13];
 	uint32_t bytesExpected = result->bytesExpected;
 	uint8_t attemptNo = result->attemptNo;
@@ -4303,11 +4330,13 @@ static void uiPrvSaveExportBeginAttempt(struct SaveExportResult *result)
 
 	uiPrvCopyStr(saveDirPath, sizeof(saveDirPath), result->saveDirPath);
 	uiPrvCopyStr(primarySaveName, sizeof(primarySaveName), result->primarySaveName);
+	uiPrvCopyStr(cleanSaveName, sizeof(cleanSaveName), result->cleanSaveName);
 	uiPrvCopyStr(fallbackSaveName, sizeof(fallbackSaveName), result->fallbackSaveName);
 	uiPrvSaveExportResultInit(result);
 	result->saveConsole = saveConsole;
 	uiPrvCopyStr(result->saveDirPath, sizeof(result->saveDirPath), saveDirPath);
 	uiPrvCopyStr(result->primarySaveName, sizeof(result->primarySaveName), primarySaveName);
+	uiPrvCopyStr(result->cleanSaveName, sizeof(result->cleanSaveName), cleanSaveName);
 	uiPrvCopyStr(result->fallbackSaveName, sizeof(result->fallbackSaveName), fallbackSaveName);
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), primarySaveName);
 	result->bytesExpected = bytesExpected;
@@ -4370,11 +4399,18 @@ static bool uiPrvSaveExportNameMatches(const char *a, const char *b)
 static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExportResult *result)
 {
 	if (uiPrvSaveExportNameExists(saveDir, result->primarySaveName)) {
-		uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindClean);
+		uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindFull);
 		return;
 	}
 
 	switch (result->preferredSaveNameKind) {
+		case SaveNameKindClean:
+			if (uiPrvSaveExportNameExists(saveDir, result->cleanSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->cleanSaveName, SaveNameKindClean);
+				return;
+			}
+			break;
+
 		case SaveNameKindFallback:
 			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
 				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
@@ -4383,18 +4419,33 @@ static void uiPrvChooseSaveExportTarget(struct FatfsDir *saveDir, struct SaveExp
 			break;
 
 		case SaveNameKindAuto:
+			if (uiPrvSaveExportNameExists(saveDir, result->cleanSaveName)) {
+				uiPrvSaveExportSetTarget(result, result->cleanSaveName, SaveNameKindClean);
+				return;
+			}
 			if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
 				uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
 				return;
 			}
 			break;
 
-		case SaveNameKindClean:
+		case SaveNameKindFull:
 		default:
 			break;
 	}
 
-	uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindClean);
+	if (result->preferredSaveNameKind != SaveNameKindFull) {
+		if (uiPrvSaveExportNameExists(saveDir, result->cleanSaveName)) {
+			uiPrvSaveExportSetTarget(result, result->cleanSaveName, SaveNameKindClean);
+			return;
+		}
+		if (uiPrvSaveExportNameExists(saveDir, result->fallbackSaveName)) {
+			uiPrvSaveExportSetTarget(result, result->fallbackSaveName, SaveNameKindFallback);
+			return;
+		}
+	}
+
+	uiPrvSaveExportSetTarget(result, result->primarySaveName, SaveNameKindFull);
 }
 
 static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportResult *result)
@@ -4423,6 +4474,8 @@ static bool uiPrvWriteExportedSavestate(struct FatfsVol *vol, struct SaveExportR
 		result->saveDirPath, result->saveName, result->bytesExpected,
 		(unsigned)result->preferredSaveNameKind, (unsigned)result->chosenSaveNameKind);
 	pr("Savegame export: primary save name is %s/%s\n", result->saveDirPath, result->primarySaveName);
+	if (result->cleanSaveName[0] && strcmp(result->primarySaveName, result->cleanSaveName))
+		pr("Savegame export: clean save name is %s/%s\n", result->saveDirPath, result->cleanSaveName);
 	if (result->fallbackSaveName[0])
 		pr("Savegame export: fallback save name is %s/%s\n", result->saveDirPath, result->fallbackSaveName);
 
@@ -4676,7 +4729,8 @@ static bool uiPrvPrepareSaveExportResult(bool force, struct SaveExportResult *re
 	result->saveConsole = uiPrvSaveConsoleForGame(selection.runtime, colorSupport, (const char*)QSPI_FILENAME_START);
 	uiPrvSaveDirPathForConsole(result->saveConsole, result->saveDirPath, sizeof(result->saveDirPath));
 	uiPrvSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, detectedName, result->primarySaveName, sizeof(result->primarySaveName));
-	uiPrvSaveFallbackFileName(result->primarySaveName, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
+	uiPrvCleanSaveFileName((const char*)QSPI_FILENAME_START, selection.runtime, detectedName, result->cleanSaveName, sizeof(result->cleanSaveName));
+	uiPrvSaveFallbackFileName((const char*)QSPI_FILENAME_START, selection.runtime, result->fallbackSaveName, sizeof(result->fallbackSaveName));
 	uiPrvCopyStr(result->saveName, sizeof(result->saveName), result->primarySaveName);
 	if (!uiSaveSavestate()) {
 		result->flashCacheFailed = true;
@@ -4947,6 +5001,8 @@ static void uiPrvSaveExportFormatFailure(const struct SaveExportResult *result, 
 	uiPrvSaveExportAppend(msg, tmp);
 	uiPrvSaveExportAppendPath(msg, "Chosen:", result, result->saveName);
 	uiPrvSaveExportAppendPath(msg, "Primary:", result, result->primarySaveName);
+	if (result->cleanSaveName[0] && strcmp(result->primarySaveName, result->cleanSaveName))
+		uiPrvSaveExportAppendPath(msg, "Clean:", result, result->cleanSaveName);
 	uiPrvSaveExportAppendPath(msg, "Fallback:", result, result->fallbackSaveName);
 }
 

@@ -29,13 +29,13 @@
 #define BUBBLE_SAVE_SIZE	8192U
 #define WRONG_SIZE_ROM_NAME	"Pokemon - Crystal Version Wrong Size (USA, Europe).gbc"
 #define TEST_SAVE_MAX_SIZE	32768U
+#define TEST_SAVE_DIR		"/SAVE/GB"
 
 enum SaveNameKind {
 	SaveNameKindAuto = 0,
 	SaveNameKindClean = 1,
 	SaveNameKindFull = 2,
 	SaveNameKindFallback = 3,
-	SaveNameKindLegacy = 4,
 };
 
 static uint8_t mDisk[DISK_SECS * FATFS_DISK_SECT_SZ];
@@ -411,6 +411,30 @@ static bool verifyGeneratedSaveBuffer(const uint8_t *buf, uint32_t size, uint8_t
 	return expect(true, msg);
 }
 
+static struct FatfsDir *openGeneratedSaveDir(struct FatfsVol *vol, bool create)
+{
+	struct FatfsDir *dir;
+	struct FatFileLocator loc;
+
+	dir = fatfsDirOpen(vol, TEST_SAVE_DIR);
+	if (dir || !create)
+		return dir;
+
+	dir = fatfsDirOpen(vol, "/SAVE");
+	if (!dir) {
+		if (!fatfsDirCreate(vol, "/SAVE", &loc))
+			return NULL;
+		dir = fatfsDirOpenWithLocator(vol, &loc);
+	}
+	if (!dir)
+		return NULL;
+	(void)fatfsDirClose(dir);
+
+	if (fatfsDirCreate(vol, TEST_SAVE_DIR, &loc))
+		return fatfsDirOpenWithLocator(vol, &loc);
+	return fatfsDirOpen(vol, TEST_SAVE_DIR);
+}
+
 static struct FatfsFil* openGeneratedSaveForExport(struct FatfsVol *vol, struct FatfsDir *saveDir, const char *name,
 	const char *fallbackName, bool simulatePrimaryCreateFailure, char *chosenName, uint32_t chosenNameLen)
 {
@@ -487,18 +511,16 @@ static bool verifyGeneratedSaveLoadLookup(struct FatfsVol *vol, const char *clea
 	bool badSize = false;
 	bool ok = true;
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
-	if (!expect(saveDir != NULL, "open /SAVE for load lookup"))
+	(void)legacyName;
+	saveDir = openGeneratedSaveDir(vol, false);
+	if (!expect(saveDir != NULL, "open console save folder for load lookup"))
 		return false;
 
-	fil = openGeneratedSaveIfSizeMatches(saveDir, cleanName, size, chosenName, sizeof(chosenName), &badSize);
-	if (!fil && fullName && fullName[0] && strcmp(cleanName, fullName))
-		fil = openGeneratedSaveIfSizeMatches(saveDir, fullName, size, chosenName, sizeof(chosenName), &badSize);
-	if (!fil && fallbackName && fallbackName[0] && strcmp(cleanName, fallbackName) && (!fullName || strcmp(fullName, fallbackName)))
+	fil = openGeneratedSaveIfSizeMatches(saveDir, fullName, size, chosenName, sizeof(chosenName), &badSize);
+	if (!fil && cleanName && cleanName[0] && strcmp(cleanName, fullName))
+		fil = openGeneratedSaveIfSizeMatches(saveDir, cleanName, size, chosenName, sizeof(chosenName), &badSize);
+	if (!fil && fallbackName && fallbackName[0] && strcmp(fullName, fallbackName) && (!cleanName || strcmp(cleanName, fallbackName)))
 		fil = openGeneratedSaveIfSizeMatches(saveDir, fallbackName, size, chosenName, sizeof(chosenName), &badSize);
-	if (!fil && legacyName && legacyName[0] && strcmp(cleanName, legacyName) && (!fullName || strcmp(fullName, legacyName)) &&
-		(!fallbackName || strcmp(fallbackName, legacyName)))
-		fil = openGeneratedSaveIfSizeMatches(saveDir, legacyName, size, chosenName, sizeof(chosenName), &badSize);
 
 	if (expectedName) {
 		ok = expect(fil != NULL, "load lookup found save") && ok;
@@ -510,7 +532,7 @@ static bool verifyGeneratedSaveLoadLookup(struct FatfsVol *vol, const char *clea
 	}
 	if (fil)
 		ok = expect(fatfsFileClose(fil), "close load lookup save file") && ok;
-	ok = expect(fatfsDirClose(saveDir), "close /SAVE after load lookup") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close console save folder after load lookup") && ok;
 	return ok;
 }
 
@@ -525,30 +547,25 @@ static bool importGeneratedSaveByLookup(struct FatfsVol *vol, const char *cleanN
 	bool badSize = false;
 	bool ok = true;
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
-	if (!expect(saveDir != NULL, "open /SAVE for lifecycle import"))
+	(void)legacyName;
+	saveDir = openGeneratedSaveDir(vol, false);
+	if (!expect(saveDir != NULL, "open console save folder for lifecycle import"))
 		return false;
 
-	fil = openGeneratedSaveIfSizeMatches(saveDir, cleanName, size, chosenName, sizeof(chosenName), &badSize);
+	fil = openGeneratedSaveIfSizeMatches(saveDir, fullName, size, chosenName, sizeof(chosenName), &badSize);
 	if (fil) {
 		if (kindP)
-			*kindP = SaveNameKindClean;
-	}
-	if (!fil && fullName && fullName[0] && strcmp(cleanName, fullName)) {
-		fil = openGeneratedSaveIfSizeMatches(saveDir, fullName, size, chosenName, sizeof(chosenName), &badSize);
-		if (fil && kindP)
 			*kindP = SaveNameKindFull;
 	}
-	if (!fil && fallbackName && fallbackName[0] && strcmp(cleanName, fallbackName) && (!fullName || strcmp(fullName, fallbackName))) {
+	if (!fil && cleanName && cleanName[0] && strcmp(cleanName, fullName)) {
+		fil = openGeneratedSaveIfSizeMatches(saveDir, cleanName, size, chosenName, sizeof(chosenName), &badSize);
+		if (fil && kindP)
+			*kindP = SaveNameKindClean;
+	}
+	if (!fil && fallbackName && fallbackName[0] && strcmp(fullName, fallbackName) && (!cleanName || strcmp(cleanName, fallbackName))) {
 		fil = openGeneratedSaveIfSizeMatches(saveDir, fallbackName, size, chosenName, sizeof(chosenName), &badSize);
 		if (fil && kindP)
 			*kindP = SaveNameKindFallback;
-	}
-	if (!fil && legacyName && legacyName[0] && strcmp(cleanName, legacyName) && (!fullName || strcmp(fullName, legacyName)) &&
-		(!fallbackName || strcmp(fallbackName, legacyName))) {
-		fil = openGeneratedSaveIfSizeMatches(saveDir, legacyName, size, chosenName, sizeof(chosenName), &badSize);
-		if (fil && kindP)
-			*kindP = SaveNameKindLegacy;
 	}
 
 	ok = expect(fil != NULL, "lifecycle import found save") && ok;
@@ -563,7 +580,7 @@ static bool importGeneratedSaveByLookup(struct FatfsVol *vol, const char *cleanN
 		ok = expect(!memcmp(qspi, cart, size), "lifecycle cart RAM hydrated from QSPI") && ok;
 		ok = expect(fatfsFileClose(fil), "close lifecycle import save") && ok;
 	}
-	ok = expect(fatfsDirClose(saveDir), "close /SAVE after lifecycle import") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close console save folder after lifecycle import") && ok;
 	return ok;
 }
 
@@ -573,17 +590,12 @@ static bool exportGeneratedSave(struct FatfsVol **volP, const char *name, const 
 	struct FatfsVol *vol = *volP;
 	struct FatfsDir *saveDir;
 	struct FatfsFil *fil;
-	struct FatFileLocator loc;
 	char chosenName[96];
 	char path[128];
 	bool ok = true;
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
-	if (!saveDir) {
-		ok = expect(fatfsDirCreate(vol, "/SAVE", &loc), "create /SAVE directory") && ok;
-		saveDir = fatfsDirOpenWithLocator(vol, &loc);
-	}
-	if (!expect(saveDir != NULL, "open /SAVE directory"))
+	saveDir = openGeneratedSaveDir(vol, true);
+	if (!expect(saveDir != NULL, "open console save directory"))
 		return false;
 
 	fil = openGeneratedSaveForExport(vol, saveDir, name, fallbackName, simulatePrimaryCreateFailure, chosenName, sizeof(chosenName));
@@ -593,11 +605,11 @@ static bool exportGeneratedSave(struct FatfsVol **volP, const char *name, const 
 	}
 	if (chosenNameOut)
 		copyStr(chosenNameOut, chosenNameOutLen, chosenName);
-	(void)sprintf(path, "/SAVE/%s", chosenName);
+	(void)sprintf(path, "%s/%s", TEST_SAVE_DIR, chosenName);
 	ok = expect(writeGeneratedSave(fil, size, seed), "write generated save") && ok;
 	ok = expect(fatfsFileTruncate(fil, size), "truncate generated save to exact size") && ok;
 	ok = expect(fatfsFileClose(fil), "close generated save export") && ok;
-	ok = expect(fatfsDirClose(saveDir), "close /SAVE directory") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close console save directory") && ok;
 	ok = remountAndVerifyGeneratedSave(volP, path, size, seed) && ok;
 	return ok;
 }
@@ -612,65 +624,53 @@ static bool generatedSaveNameExists(struct FatfsDir *saveDir, const char *name)
 static void chooseGeneratedSaveExportName(struct FatfsDir *saveDir, const char *cleanName, const char *fullName,
 	const char *fallbackName, const char *legacyName, enum SaveNameKind preferredKind, char *chosenName, uint32_t chosenNameLen)
 {
-	if (generatedSaveNameExists(saveDir, cleanName)) {
-		copyStr(chosenName, chosenNameLen, cleanName);
+	(void)legacyName;
+	if (generatedSaveNameExists(saveDir, fullName)) {
+		copyStr(chosenName, chosenNameLen, fullName);
 		return;
 	}
 
 	switch (preferredKind) {
-		case SaveNameKindFull:
-			if (generatedSaveNameExists(saveDir, fullName)) {
-				copyStr(chosenName, chosenNameLen, fullName);
+		case SaveNameKindClean:
+			if (generatedSaveNameExists(saveDir, cleanName)) {
+				copyStr(chosenName, chosenNameLen, cleanName);
 				return;
 			}
 			break;
+
 		case SaveNameKindFallback:
 			if (generatedSaveNameExists(saveDir, fallbackName)) {
 				copyStr(chosenName, chosenNameLen, fallbackName);
 				return;
 			}
 			break;
-		case SaveNameKindLegacy:
-			if (generatedSaveNameExists(saveDir, legacyName)) {
-				copyStr(chosenName, chosenNameLen, legacyName);
-				return;
-			}
-			break;
 		case SaveNameKindAuto:
-			if (generatedSaveNameExists(saveDir, fullName)) {
-				copyStr(chosenName, chosenNameLen, fullName);
+			if (generatedSaveNameExists(saveDir, cleanName)) {
+				copyStr(chosenName, chosenNameLen, cleanName);
 				return;
 			}
 			if (generatedSaveNameExists(saveDir, fallbackName)) {
 				copyStr(chosenName, chosenNameLen, fallbackName);
 				return;
 			}
-			if (generatedSaveNameExists(saveDir, legacyName)) {
-				copyStr(chosenName, chosenNameLen, legacyName);
-				return;
-			}
 			break;
-		case SaveNameKindClean:
+		case SaveNameKindFull:
 		default:
 			break;
 	}
 
-	if (preferredKind != SaveNameKindAuto && preferredKind != SaveNameKindClean) {
-		if (generatedSaveNameExists(saveDir, fullName)) {
-			copyStr(chosenName, chosenNameLen, fullName);
+	if (preferredKind != SaveNameKindFull) {
+		if (generatedSaveNameExists(saveDir, cleanName)) {
+			copyStr(chosenName, chosenNameLen, cleanName);
 			return;
 		}
 		if (generatedSaveNameExists(saveDir, fallbackName)) {
 			copyStr(chosenName, chosenNameLen, fallbackName);
 			return;
 		}
-		if (generatedSaveNameExists(saveDir, legacyName)) {
-			copyStr(chosenName, chosenNameLen, legacyName);
-			return;
-		}
 	}
 
-	copyStr(chosenName, chosenNameLen, cleanName);
+	copyStr(chosenName, chosenNameLen, fullName);
 }
 
 static bool exportGeneratedSaveResolved(struct FatfsVol **volP, const char *cleanName, const char *fullName,
@@ -680,18 +680,13 @@ static bool exportGeneratedSaveResolved(struct FatfsVol **volP, const char *clea
 	struct FatfsVol *vol = *volP;
 	struct FatfsDir *saveDir;
 	struct FatfsFil *fil;
-	struct FatFileLocator loc;
 	char targetName[96];
 	char chosenName[96];
 	char path[128];
 	bool ok = true;
 
-	saveDir = fatfsDirOpen(vol, "/SAVE");
-	if (!saveDir) {
-		ok = expect(fatfsDirCreate(vol, "/SAVE", &loc), "create /SAVE directory for resolved export") && ok;
-		saveDir = fatfsDirOpenWithLocator(vol, &loc);
-	}
-	if (!expect(saveDir != NULL, "open /SAVE directory for resolved export"))
+	saveDir = openGeneratedSaveDir(vol, true);
+	if (!expect(saveDir != NULL, "open console save directory for resolved export"))
 		return false;
 
 	chooseGeneratedSaveExportName(saveDir, cleanName, fullName, fallbackName, legacyName, preferredKind, targetName, sizeof(targetName));
@@ -702,11 +697,11 @@ static bool exportGeneratedSaveResolved(struct FatfsVol **volP, const char *clea
 	}
 	if (chosenNameOut)
 		copyStr(chosenNameOut, chosenNameOutLen, chosenName);
-	(void)sprintf(path, "/SAVE/%s", chosenName);
+	(void)sprintf(path, "%s/%s", TEST_SAVE_DIR, chosenName);
 	ok = expect(writeGeneratedSave(fil, size, seed), "write resolved generated save") && ok;
 	ok = expect(fatfsFileTruncate(fil, size), "truncate resolved generated save to exact size") && ok;
 	ok = expect(fatfsFileClose(fil), "close resolved generated save export") && ok;
-	ok = expect(fatfsDirClose(saveDir), "close /SAVE directory after resolved export") && ok;
+	ok = expect(fatfsDirClose(saveDir), "close console save directory after resolved export") && ok;
 	ok = remountAndVerifyGeneratedSave(volP, path, size, seed) && ok;
 	return ok;
 }
@@ -826,21 +821,21 @@ static bool testSaveExportRewriteVerify(struct FatfsVol **volP)
 	makeFallbackSaveName(TETRIS_ROM_NAME, fallbackName);
 	if (!expect(!strcmp(fallbackName, "TETRI933.SAV"), "deterministic fallback name for Tetris DX"))
 		return false;
-	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, SaveNameKindClean, true, 16384, 55, chosenName, sizeof(chosenName)), "fallback generated save export when primary create fails"))
+	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, SaveNameKindFull, true, 16384, 55, chosenName, sizeof(chosenName)), "fallback generated save export when primary create fails"))
 		return false;
 	if (!expect(!strcmp(chosenName, fallbackName), "simulated primary create failure uses fallback name"))
 		return false;
 	if (!expect(verifyGeneratedSaveLoadLookup(*volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, fallbackName, 16384, false), "load lookup falls back to 8.3 save"))
 		return false;
-	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, SaveNameKindClean, false, 16384, 66, chosenName, sizeof(chosenName)), "primary cleaned generated save export"))
+	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, SaveNameKindFull, false, 16384, 66, chosenName, sizeof(chosenName)), "primary full-name generated save export"))
 		return false;
-	if (!expect(!strcmp(chosenName, TETRIS_SAVE_NAME), "primary cleaned save is preferred when creatable"))
+	if (!expect(!strcmp(chosenName, TETRIS_FULL_SAVE_NAME), "primary full-name save is preferred when creatable"))
 		return false;
-	if (!expect(verifyGeneratedSaveLoadLookup(*volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, TETRIS_SAVE_NAME, 16384, false), "load lookup prefers primary cleaned save"))
+	if (!expect(verifyGeneratedSaveLoadLookup(*volP, cleanName, fullName, fallbackName, TETRIS_ROM_NAME, TETRIS_FULL_SAVE_NAME, 16384, false), "load lookup prefers primary full-name save"))
 		return false;
 	if (!expect(exportGeneratedSave(volP, "Pokemon Blue.sav", NULL, false, 32768, 11, NULL, 0), "create missing generated save export"))
 		return false;
-	if (!expect(exportGeneratedSave(volP, "Pokemon Red.sav", NULL, false, 8192, 33, NULL, 0), "create missing generated save in existing /SAVE"))
+	if (!expect(exportGeneratedSave(volP, "Pokemon Red.sav", NULL, false, 8192, 33, NULL, 0), "create missing generated save in existing console save folder"))
 		return false;
 	if (!expect(exportGeneratedSave(volP, "Pokemon Blue.sav", NULL, false, 8192, 77, NULL, 0), "rewrite, shrink, and verify generated save export"))
 		return false;
@@ -901,7 +896,7 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 	if (!expect(!strcmp(chosenName, crystalFallback), "lifecycle fallback-imported Crystal exports back to fallback"))
 		return false;
-	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle select-game auto-export persisted Crystal before loading Bubble"))
+	if (!expect(verifyGeneratedSaveFile(*volP, TEST_SAVE_DIR "/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle select-game auto-export persisted Crystal before loading Bubble"))
 		return false;
 
 	fillGeneratedSaveBuffer(cart, TEST_SAVE_MAX_SIZE, 0xe1);
@@ -913,15 +908,15 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 
 	if (!expect(exportGeneratedSaveResolved(volP, bubbleClean, bubbleFull, bubbleFallback, BUBBLE_ROM_NAME,
-		SaveNameKindClean, false, BUBBLE_SAVE_SIZE, 7, chosenName, sizeof(chosenName)), "lifecycle create Bubble cleaned save"))
+		SaveNameKindFull, false, BUBBLE_SAVE_SIZE, 7, chosenName, sizeof(chosenName)), "lifecycle create Bubble full-name save"))
 		return false;
-	if (!expect(!strcmp(chosenName, bubbleClean), "lifecycle Bubble uses cleaned primary"))
+	if (!expect(!strcmp(chosenName, bubbleFull), "lifecycle Bubble uses full-name primary"))
 		return false;
 	bubbleSeed = 7;
 	if (!expect(importGeneratedSaveByLookup(*volP, bubbleClean, bubbleFull, bubbleFallback, BUBBLE_ROM_NAME,
-		bubbleClean, BUBBLE_SAVE_SIZE, bubbleSeed, qspi, cart, &selectedKind), "lifecycle import Bubble save"))
+		bubbleFull, BUBBLE_SAVE_SIZE, bubbleSeed, qspi, cart, &selectedKind), "lifecycle import Bubble save"))
 		return false;
-	if (!expect(selectedKind == SaveNameKindClean, "lifecycle Bubble source is cleaned primary"))
+	if (!expect(selectedKind == SaveNameKindFull, "lifecycle Bubble source is full-name primary"))
 		return false;
 
 	fillGeneratedSaveBuffer(cart, BUBBLE_SAVE_SIZE, 66);
@@ -930,9 +925,9 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		"lifecycle export played Bubble save"))
 		return false;
 	bubbleSeed = exportedSeed;
-	if (!expect(!strcmp(chosenName, bubbleClean), "lifecycle Bubble exports to cleaned primary"))
+	if (!expect(!strcmp(chosenName, bubbleFull), "lifecycle Bubble exports to full-name primary"))
 		return false;
-	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/Bubble Bobble.sav", BUBBLE_SAVE_SIZE, bubbleSeed), "lifecycle select-game auto-export persisted Bubble before switching back"))
+	if (!expect(verifyGeneratedSaveFile(*volP, TEST_SAVE_DIR "/Bubble Bobble (USA, Europe).sav", BUBBLE_SAVE_SIZE, bubbleSeed), "lifecycle select-game auto-export persisted Bubble before switching back"))
 		return false;
 
 	fillGeneratedSaveBuffer(cart, TEST_SAVE_MAX_SIZE, 0xd2);
@@ -941,7 +936,7 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 	if (!expect(selectedKind == SaveNameKindFallback, "lifecycle Crystal still imports fallback after switching back"))
 		return false;
-	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle Crystal fallback file survived switch"))
+	if (!expect(verifyGeneratedSaveFile(*volP, TEST_SAVE_DIR "/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle Crystal fallback file survived switch"))
 		return false;
 
 	fillGeneratedSaveBuffer(cart, TEST_SAVE_MAX_SIZE, 55);
@@ -957,7 +952,7 @@ static bool testSaveSwitchLifecycle(struct FatfsVol **volP)
 		return false;
 	if (!expect(exportedSeed == crystalSeed, "lifecycle direct browser path exports cached save when cart owner is stale"))
 		return false;
-	if (!expect(verifyGeneratedSaveFile(*volP, "/SAVE/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle direct browser path leaves Crystal fallback valid"))
+	if (!expect(verifyGeneratedSaveFile(*volP, TEST_SAVE_DIR "/POKEM987.SAV", TEST_SAVE_MAX_SIZE, crystalSeed), "lifecycle direct browser path leaves Crystal fallback valid"))
 		return false;
 
 	return true;
@@ -994,21 +989,21 @@ static bool testCrystalSaveNamingAndCompatibility(struct FatfsVol **volP)
 	if (!expect(!strcmp(chosenName, fallbackName), "fallback-imported Crystal save chooses fallback on export"))
 		return false;
 
-	if (!expect(exportGeneratedSave(volP, cleanName, fallbackName, false, 32768, 88, chosenName, sizeof(chosenName)), "create Crystal cleaned primary save"))
+	if (!expect(exportGeneratedSave(volP, cleanName, fallbackName, false, 32768, 88, chosenName, sizeof(chosenName)), "create Crystal cleaned compatibility save"))
 		return false;
-	if (!expect(!strcmp(chosenName, cleanName), "Crystal cleaned primary save is created"))
+	if (!expect(!strcmp(chosenName, cleanName), "Crystal cleaned compatibility save is created"))
 		return false;
-	if (!expect(verifyGeneratedSaveLoadLookup(*volP, cleanName, fullName, fallbackName, CRYSTAL_ROM_NAME, cleanName, 32768, false), "Crystal cleaned primary wins over fallback"))
+	if (!expect(verifyGeneratedSaveLoadLookup(*volP, cleanName, fullName, fallbackName, CRYSTAL_ROM_NAME, cleanName, 32768, false), "Crystal cleaned compatibility save wins over fallback when full name is absent"))
 		return false;
-	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, CRYSTAL_ROM_NAME, SaveNameKindFallback, false, 32768, 99, chosenName, sizeof(chosenName)), "Crystal cleaned primary wins future fallback exports"))
+	if (!expect(exportGeneratedSaveResolved(volP, cleanName, fullName, fallbackName, CRYSTAL_ROM_NAME, SaveNameKindClean, false, 32768, 99, chosenName, sizeof(chosenName)), "Crystal cleaned imported save exports back to cleaned name"))
 		return false;
-	if (!expect(!strcmp(chosenName, cleanName), "Crystal export switches to cleaned primary after it exists"))
+	if (!expect(!strcmp(chosenName, cleanName), "Crystal export keeps cleaned compatibility target when selected"))
 		return false;
 
 	makeCleanSaveName(WRONG_SIZE_ROM_NAME, wrongCleanName, sizeof(wrongCleanName));
 	makeRawSaveName(WRONG_SIZE_ROM_NAME, wrongFullName, sizeof(wrongFullName));
 	makeFallbackSaveName(WRONG_SIZE_ROM_NAME, wrongFallbackName);
-	if (!expect(exportGeneratedSave(volP, wrongCleanName, NULL, false, 1024, 12, NULL, 0), "create wrong-size save fixture"))
+	if (!expect(exportGeneratedSave(volP, wrongFullName, NULL, false, 1024, 12, NULL, 0), "create wrong-size save fixture"))
 		return false;
 	if (!expect(verifyGeneratedSaveLoadLookup(*volP, wrongCleanName, wrongFullName, wrongFallbackName, WRONG_SIZE_ROM_NAME, NULL, 32768, true), "wrong-size save is rejected"))
 		return false;
@@ -1044,14 +1039,14 @@ int main(void)
 		fprintf(stderr, "FAIL: remount in-memory FAT16 image\n");
 		return 1;
 	}
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon Blue.sav", 32768, 91) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon Red.sav", 8192, 33) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Tetris DX.sav", 16384, 66) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/TETRI933.SAV", 16384, 55) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Bubble Bobble.sav", BUBBLE_SAVE_SIZE, 66) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon - Crystal Version.sav", 32768, 99) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/POKEM987.SAV", 32768, 44) && ok;
-	ok = verifyGeneratedSaveFile(vol, "/SAVE/Pokemon - Crystal Version Wrong Size.sav", 1024, 12) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Pokemon Blue.sav", 32768, 91) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Pokemon Red.sav", 8192, 33) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Tetris DX (World) (SGB Enhanced).sav", 16384, 66) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/TETRI933.SAV", 16384, 55) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Bubble Bobble (USA, Europe).sav", BUBBLE_SAVE_SIZE, 66) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Pokemon - Crystal Version.sav", 32768, 99) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/POKEM987.SAV", 32768, 44) && ok;
+	ok = verifyGeneratedSaveFile(vol, TEST_SAVE_DIR "/Pokemon - Crystal Version Wrong Size (USA, Europe).sav", 1024, 12) && ok;
 	ok = expect(fatfsUnmount(vol), "unmount remounted in-memory FAT16 image") && ok;
 
 	if (!ok)

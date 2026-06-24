@@ -291,6 +291,23 @@ static const char *ojUserPath(const char *name)
 		"OPENJAZZ.CFG", "SAVE.0", "SAVE.1", "SAVE.2", "SAVE.3",
 	};
 	static const char *const target[] = {
+		"/SAVE/PORTS/OJCFG.DAT", "/SAVE/PORTS/OJSAVE0.DAT", "/SAVE/PORTS/OJSAVE1.DAT",
+		"/SAVE/PORTS/OJSAVE2.DAT", "/SAVE/PORTS/OJSAVE3.DAT",
+	};
+
+	name = ojBasename(name);
+	for (uint32_t i = 0; i < sizeof(source) / sizeof(source[0]); i++)
+		if (!ojNameCompare(name, source[i]))
+			return target[i];
+	return NULL;
+}
+
+static const char *ojLegacyUserPath(const char *name)
+{
+	static const char *const source[] = {
+		"OPENJAZZ.CFG", "SAVE.0", "SAVE.1", "SAVE.2", "SAVE.3",
+	};
+	static const char *const target[] = {
 		"/SAVE/OJCFG.DAT", "/SAVE/OJSAVE0.DAT", "/SAVE/OJSAVE1.DAT",
 		"/SAVE/OJSAVE2.DAT", "/SAVE/OJSAVE3.DAT",
 	};
@@ -302,34 +319,28 @@ static const char *ojUserPath(const char *name)
 	return NULL;
 }
 
-static const char *ojUserFileName(const char *path)
-{
-	const char *slash = strrchr(path ? path : "", '/');
-
-	return slash ? slash + 1 : path;
-}
-
 bool dc32OjUserFileExists(const char *name)
 {
 	const char *path = ojUserPath(name);
-	struct FatfsDir *saveDir;
-	struct FatFileLocator locator;
+	const char *legacyPath = ojLegacyUserPath(name);
+	struct FatfsFil *file;
 	bool exists;
 
 	if (!gOjVol || !path)
 		return false;
-	saveDir = fatfsDirOpen(gOjVol, "/SAVE");
-	if (!saveDir)
-		return false;
-	exists = fatfsFindFileAt(saveDir, ojUserFileName(path), &locator);
-	(void)fatfsDirClose(saveDir);
+	file = fatfsFileOpen(gOjVol, path, OPEN_MODE_READ);
+	if (!file && legacyPath)
+		file = fatfsFileOpen(gOjVol, legacyPath, OPEN_MODE_READ);
+	exists = file != NULL;
+	if (file)
+		(void)fatfsFileClose(file);
 	return exists;
 }
 
 bool dc32OjUserFileOpen(const char *name, bool write, struct Dc32OjFile *file)
 {
 	const char *path = ojUserPath(name);
-	struct FatfsDir *saveDir;
+	const char *legacyPath = ojLegacyUserPath(name);
 	struct FatfsFil *fatFile;
 	int32_t slot = -1;
 	uint_fast8_t mode = write ? OPEN_MODE_CREATE | OPEN_MODE_WRITE | OPEN_MODE_TRUNCATE : OPEN_MODE_READ;
@@ -339,11 +350,9 @@ bool dc32OjUserFileOpen(const char *name, bool write, struct Dc32OjFile *file)
 	memset(file, 0, sizeof(*file));
 	if (!gOjVol || !path || (write && !dc32PortEnsureSaveDir(gOjVol)))
 		return false;
-	saveDir = fatfsDirOpen(gOjVol, "/SAVE");
-	if (!saveDir)
-		return false;
-	fatFile = fatfsFileOpenAt(saveDir, ojUserFileName(path), mode);
-	(void)fatfsDirClose(saveDir);
+	fatFile = fatfsFileOpen(gOjVol, path, mode);
+	if (!fatFile && !write && legacyPath)
+		fatFile = fatfsFileOpen(gOjVol, legacyPath, mode);
 	if (!fatFile)
 		return false;
 	for (uint32_t i = 0; i < FATFS_MAX_FILES; i++)

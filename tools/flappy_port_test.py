@@ -132,6 +132,7 @@ def check_port_source() -> None:
         "FlappyStateIdle", "FlappyStateFadeIn", "FlappyStateFadeOut",
         "FlappyStateReadyGame", "FlappyStateGoGame", "FlappyStateStopGame",
         "FlappyStateFadeOutGameover", "FlappyStateFallBird", "FlappyStateFadeInPanel",
+        "FlappyStateScoreMenu",
     )))
     expect("full-width landscape viewport is used", all(token in port for token in (
         "#define FLAPPY_VIEW_W 320", "#define FLAPPY_VIEW_H 240",
@@ -143,8 +144,12 @@ def check_port_source() -> None:
         "FLAPPY_FLOOR_Y_PERCENT 86.0f", "FLAPPY_READY_TAP_X 75.0f",
         "FLAPPY_PIPE_GAP_CENTER_PERCENT 43.0f",
         "FLAPPY_READY_TAP_Y_PERCENT 11.0f", "FLAPPY_GAME_OVER_Y_PERCENT 6.0f",
-        "FLAPPY_PANEL_SCORE_Y_PERCENT 9.5f", "FLAPPY_PANEL_BEST_Y_PERCENT 18.0f",
+        "FLAPPY_PANEL_SCORE_Y_PERCENT 9.5f", "FLAPPY_PANEL_BEST_Y_PERCENT 20.0f",
     )))
+    expect("title logo bob is bounded", all(token in port for token in (
+        "FLAPPY_TITLE_BOB_AMPLITUDE 25.0f", "FLAPPY_TITLE_BOB_SPEED 0.044f",
+        "sinf(game->titlePhase)", "flappyUpdateTitleBob(game, dt)",
+    )) and "logoVelocity" not in port and "birdVelocity" not in port)
     expect("runtime uses fast asset blitters", all(token in port for token in (
         "FLAPPY_ASSET_FLAG_OPAQUE", "flappyAssetRows", "flappyAssetRuns",
         "flappyDrawOpaqueRows", "flappyDrawRunRow", "memcpy(",
@@ -161,7 +166,12 @@ def check_port_source() -> None:
         "flappyAnimateBird(game, dt)", "flappyUpdateBirdTextureForLogo(game, dt)",
     )))
     expect("badge controls are mapped", "KEY_BIT_A | KEY_BIT_UP | KEY_BIT_START" in port and "UI_KEY_BIT_CENTER" in port)
-    expect("B remains unused in gameplay", port.count("KEY_BIT_B") == 1)
+    expect("score button controls are mapped", "KEY_BIT_B | KEY_BIT_SEL" in port and
+           "KEY_BIT_A | KEY_BIT_B | KEY_BIT_SEL | KEY_BIT_UP" in port)
+    expect("touch controls are mapped", all(token in port for token in (
+        "struct UiTouchSample sample", "uiReadTouchRaw(&sample)", "game->touchPressed",
+        "flappyTouchPressedInAsset", "flappyButtonBump", "flappyHardwareActionPressed(game) || game->touchPressed",
+    )))
     expect("versioned best score is persisted", all(token in port for token in (
         "FLAPPY_SAVE_MAGIC", "FLAPPY_SAVE_VERSION 1u", "flappySaveCheck",
         'dc32PortSaveWrite(game->args->vol, "flappy"',
@@ -190,6 +200,10 @@ def check_port_source() -> None:
         "FlappyAssetPanel", "FlappyAssetGameOver", "FlappyAssetNew",
         "score >= 40u", "score >= 30u", "score >= 20u", "score >= 10u",
     )))
+    expect("score menu replaces impossible share action", all(token in port for token in (
+        "FlappyStateScoreMenu", "flappyOpenScoreMenu(game)", "FlappyAssetScoreButton",
+        "game->currentState = FlappyStateReadyGame",
+    )) and "FlappyAssetShare" not in port)
     expect("runtime is silent and badge-native", all(token not in port for token in (
         "PlayAudio", "audioPwm", "OpenSLES", "GLES", "EGL", "android_native_app_glue",
         "upng", ".mp3",
@@ -217,8 +231,8 @@ def check_deterministic_values() -> None:
            gap_center - gap_half - random_offset_px > 0 and
            gap_center + gap_half + random_offset_px < floor_y)
     panel_score_y = round((9.5 / 100.0) * 512 * 240 / 512)
-    panel_best_y = round((18.0 / 100.0) * 512 * 240 / 512)
-    expect("panel score digits are lowered into value slots", (panel_score_y, panel_best_y) == (23, 43))
+    panel_best_y = round((20.0 / 100.0) * 512 * 240 / 512)
+    expect("panel score digits are lowered into value slots", (panel_score_y, panel_best_y) == (23, 48))
     min_offset = int((-5 / 100.0) * 512)
     max_offset = int((5 / 100.0) * 512)
     expect("source random offset bounds are preserved", (min_offset, max_offset) == (-25, 25))

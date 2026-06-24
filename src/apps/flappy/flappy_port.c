@@ -13,6 +13,7 @@
 #include "dispDefcon.h"
 #include "flappy_assets.h"
 #include "gb.h"
+#include "ui.h"
 
 #define FLAPPY_SCREEN_W 320
 #define FLAPPY_SCREEN_H 240
@@ -35,9 +36,14 @@
 #define FLAPPY_READY_TAP_Y_PERCENT 11.0f
 #define FLAPPY_GAME_OVER_Y_PERCENT 6.0f
 #define FLAPPY_PANEL_SCORE_Y_PERCENT 9.5f
-#define FLAPPY_PANEL_BEST_Y_PERCENT 18.0f
+#define FLAPPY_PANEL_BEST_Y_PERCENT 20.0f
 #define FLAPPY_BUTTON_LEFT_X 52.0f
 #define FLAPPY_BUTTON_RIGHT_X 188.0f
+#define FLAPPY_BUTTON_CENTER_X 120.0f
+#define FLAPPY_TITLE_Y_PERCENT 20.83f
+#define FLAPPY_TITLE_BOB_AMPLITUDE 25.0f
+#define FLAPPY_TITLE_BOB_SPEED 0.044f
+#define FLAPPY_TWO_PI 6.2831853f
 
 #define SIZE_SPACE_PIPE 3.3f
 #define SPACE_BETWEEN_PIPES 5
@@ -57,6 +63,7 @@ enum FlappyGameState {
 	FlappyStateFadeOutGameover,
 	FlappyStateFallBird,
 	FlappyStateFadeInPanel,
+	FlappyStateScoreMenu,
 };
 
 struct FlappyBird {
@@ -109,11 +116,14 @@ struct FlappyGame {
 	struct FlappyPipe pipes[2];
 	float logoY;
 	float birdY;
-	float logoVelocity;
-	float birdVelocity;
+	float titlePhase;
 	float logoFrameTimer;
 	enum FlappyAssetId curTextureAnimBirdForLogo;
 	uint32_t currentFrameForLogo;
+	int32_t touchX;
+	int32_t touchY;
+	bool touchDown;
+	bool touchPressed;
 };
 
 static bool mFlappyAbort;
@@ -189,6 +199,35 @@ static int32_t flappyRandom(struct FlappyGame *game, int32_t min, int32_t max)
 		return min;
 	span = (uint32_t)(max - min + 1);
 	return min + (int32_t)(flappyRand(game) % span);
+}
+
+static int32_t flappyClampI32(int32_t value, int32_t min, int32_t max)
+{
+	if (value < min)
+		return min;
+	if (value > max)
+		return max;
+	return value;
+}
+
+static void flappyPollTouch(struct FlappyGame *game)
+{
+	struct UiTouchSample sample;
+	bool penDown = false;
+	int32_t x = game->touchX;
+	int32_t y = game->touchY;
+
+	if (uiReadTouchRaw(&sample) && sample.penDown) {
+		penDown = true;
+		x = 350 - (int32_t)sample.x * 94 / 1024;
+		y = 260 - (int32_t)sample.y * 71 / 1024;
+		x = flappyClampI32(x, 0, FLAPPY_SCREEN_W - 1);
+		y = flappyClampI32(y, 0, FLAPPY_SCREEN_H - 1);
+	}
+	game->touchPressed = penDown && !game->touchDown;
+	game->touchDown = penDown;
+	game->touchX = x;
+	game->touchY = y;
 }
 
 static uint64_t flappyNowTicks(struct FlappyGame *game)
@@ -582,6 +621,18 @@ static void flappyUpdateBirdTextureForLogo(struct FlappyGame *game, float dt)
 	}
 }
 
+static void flappyUpdateTitleBob(struct FlappyGame *game, float dt)
+{
+	float y;
+
+	game->titlePhase += FLAPPY_TITLE_BOB_SPEED * dt;
+	while (game->titlePhase >= FLAPPY_TWO_PI)
+		game->titlePhase -= FLAPPY_TWO_PI;
+	y = flappyScaleY(FLAPPY_TITLE_Y_PERCENT) + sinf(game->titlePhase) * FLAPPY_TITLE_BOB_AMPLITUDE;
+	game->logoY = y;
+	game->birdY = y;
+}
+
 static void flappyApplyGravity(struct FlappyGame *game, float dt)
 {
 	float targetAngle;
@@ -688,18 +739,47 @@ static void flappyRenderSmallScoreRight(struct FlappyGame *game, uint32_t score,
 	flappyRenderScoreLeft(game, score, x - (float)count * digitWidth, y, digitWidth, true);
 }
 
-static bool flappyActionPressed(struct FlappyGame *game)
+static bool flappyHardwareActionPressed(struct FlappyGame *game)
 {
 	return (game->draw.pressed & (KEY_BIT_A | KEY_BIT_UP | KEY_BIT_START)) != 0;
+}
+
+static bool flappyActionPressed(struct FlappyGame *game)
+{
+	return flappyHardwareActionPressed(game) || game->touchPressed;
+}
+
+static bool flappyScorePressed(struct FlappyGame *game)
+{
+	return (game->draw.pressed & (KEY_BIT_B | KEY_BIT_SEL)) != 0;
+}
+
+static bool flappyTouchPressedInAsset(struct FlappyGame *game, enum FlappyAssetId assetId,
+	float x, float y)
+{
+	const struct FlappyAsset *asset = &flappyAssets[assetId];
+	int32_t screenX = flappyScreenX(x);
+	int32_t screenY = flappyScreenY(y);
+
+	return game->touchPressed &&
+		game->touchX >= screenX && game->touchX < screenX + (int32_t)asset->width &&
+		game->touchY >= screenY && game->touchY < screenY + (int32_t)asset->height;
 }
 
 static bool flappyButtonBump(struct FlappyGame *game, enum FlappyAssetId asset,
 	float x, float y, bool released)
 {
+	released = released || flappyTouchPressedInAsset(game, asset, x, y);
 	if (released)
 		y += flappyScaleY(1.0f);
 	flappyDrawAsset(game, asset, x, y);
 	return released;
+}
+
+static void flappyOpenScoreMenu(struct FlappyGame *game)
+{
+	game->currentState = FlappyStateScoreMenu;
+	game->panelY = flappyScaleY(30.0f);
 }
 
 static void flappyRenderBird(struct FlappyGame *game)
@@ -710,6 +790,8 @@ static void flappyRenderBird(struct FlappyGame *game)
 static void flappyRender(struct FlappyGame *game, float dt)
 {
 	bool action = flappyActionPressed(game);
+	bool hardwareAction = flappyHardwareActionPressed(game);
+	bool scoreAction = flappyScorePressed(game);
 
 	flappyDrawBackground(game);
 	if (game->currentState != FlappyStateStopGame &&
@@ -721,20 +803,31 @@ static void flappyRender(struct FlappyGame *game, float dt)
 	while (game->offsetBase <= -flappyScaleX(100.0f))
 		game->offsetBase += flappyScaleX(100.0f);
 
-	game->logoY += game->logoVelocity * dt;
-	game->birdY += game->birdVelocity * dt;
-	if (game->logoY > flappyScaleY(20.83f) + 25.0f || game->logoY < flappyScaleY(20.83f) - 25.0f)
-		game->logoVelocity = -game->logoVelocity;
-	if (game->birdY > flappyScaleY(20.83f) + 25.0f || game->birdY < flappyScaleY(20.83f) - 25.0f)
-		game->birdVelocity = -game->birdVelocity;
-
 	if (game->currentState == FlappyStateIdle || game->currentState == FlappyStateFadeIn) {
+		flappyUpdateTitleBob(game, dt);
 		flappyDrawAsset(game, FlappyAssetLogo, FLAPPY_TITLE_LOGO_X, game->logoY);
 		flappyUpdateBirdTextureForLogo(game, dt);
 		flappyDrawAsset(game, game->curTextureAnimBirdForLogo, FLAPPY_TITLE_BIRD_X, game->birdY);
-		if (flappyButtonBump(game, FlappyAssetStart, FLAPPY_BUTTON_LEFT_X, flappyScaleY(65.0f), action))
+		if (flappyButtonBump(game, FlappyAssetStart, FLAPPY_BUTTON_LEFT_X, flappyScaleY(65.0f),
+				hardwareAction))
 			game->currentState = FlappyStateFadeIn;
-		(void)flappyButtonBump(game, FlappyAssetScoreButton, FLAPPY_BUTTON_RIGHT_X, flappyScaleY(65.0f), false);
+		if (flappyButtonBump(game, FlappyAssetScoreButton, FLAPPY_BUTTON_RIGHT_X, flappyScaleY(65.0f),
+				scoreAction))
+			flappyOpenScoreMenu(game);
+	}
+	else if (game->currentState == FlappyStateScoreMenu) {
+		flappyDrawAsset(game, FlappyAssetPanel, flappyScaleX(15.0f), game->panelY);
+		flappyRenderSmallScoreRight(game, game->score, flappyScaleX(78.0f),
+			game->panelY + flappyScaleY(FLAPPY_PANEL_SCORE_Y_PERCENT), flappyScaleX(4.0f));
+		flappyRenderSmallScoreRight(game, game->bestScore, flappyScaleX(78.0f),
+			game->panelY + flappyScaleY(FLAPPY_PANEL_BEST_Y_PERCENT), flappyScaleX(4.0f));
+		if (game->newBestScore)
+			flappyDrawAsset(game, FlappyAssetNew, flappyScaleX(56.0f), game->panelY + flappyScaleY(9.0f));
+		if (flappyButtonBump(game, FlappyAssetOk, FLAPPY_BUTTON_CENTER_X, flappyScaleY(65.0f),
+				hardwareAction || scoreAction)) {
+			game->currentState = FlappyStateIdle;
+			flappyResetRound(game);
+		}
 	}
 	else if (game->currentState == FlappyStateFadeOut || game->currentState == FlappyStateReadyGame) {
 		flappyRenderBird(game);
@@ -815,11 +908,14 @@ static void flappyRender(struct FlappyGame *game, float dt)
 		medal = flappyMedalAsset(game->score);
 		if (medal != FlappyAssetCount)
 			flappyDrawAsset(game, medal, flappyScaleX(22.0f), game->panelY + flappyScaleY(6.0f));
-		if (flappyButtonBump(game, FlappyAssetOk, FLAPPY_BUTTON_LEFT_X, flappyScaleY(65.0f), action)) {
-			game->currentState = FlappyStateIdle;
+		if (flappyButtonBump(game, FlappyAssetOk, FLAPPY_BUTTON_LEFT_X, flappyScaleY(65.0f),
+				hardwareAction)) {
 			flappyResetRound(game);
+			game->currentState = FlappyStateReadyGame;
 		}
-		(void)flappyButtonBump(game, FlappyAssetShare, FLAPPY_BUTTON_RIGHT_X, flappyScaleY(65.0f), false);
+		if (flappyButtonBump(game, FlappyAssetScoreButton, FLAPPY_BUTTON_RIGHT_X, flappyScaleY(65.0f),
+				scoreAction))
+			flappyOpenScoreMenu(game);
 	}
 
 	if (game->currentState == FlappyStateFadeIn) {
@@ -862,10 +958,9 @@ static bool flappyInit(struct FlappyGame *game, const struct DcAppHostApi *host,
 	game->lastTicks = now;
 	game->gameSpeed = ((uint32_t)FLAPPY_VIRTUAL_W / 135u) * FLAPPY_SPEED_MULTIPLIER;
 	game->currentState = FlappyStateIdle;
-	game->logoY = flappyScaleY(20.83f);
-	game->birdY = flappyScaleY(20.83f);
-	game->logoVelocity = 1.1f;
-	game->birdVelocity = 1.1f;
+	game->logoY = flappyScaleY(FLAPPY_TITLE_Y_PERCENT);
+	game->birdY = flappyScaleY(FLAPPY_TITLE_Y_PERCENT);
+	game->titlePhase = 0.0f;
 	game->logoFrameTimer = 0.0f;
 	game->curTextureAnimBirdForLogo = FlappyAssetYellowBirdMid;
 	game->panelY = flappyScaleY(100.0f);
@@ -891,7 +986,7 @@ int flappyAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 		return -1;
 	}
 	dispSetFramerate(FLAPPY_FPS);
-	dcAppDrawWaitRelease(&game->draw, KEY_BIT_A | KEY_BIT_B | KEY_BIT_UP |
+	dcAppDrawWaitRelease(&game->draw, KEY_BIT_A | KEY_BIT_B | KEY_BIT_SEL | KEY_BIT_UP |
 		KEY_BIT_START | UI_KEY_BIT_CENTER);
 	game->lastTicks = flappyNowTicks(game);
 	flappyRender(game, 0.0f);
@@ -899,6 +994,7 @@ int flappyAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 		bool running = dcAppDrawFrame(&game->draw, UI_KEY_BIT_CENTER);
 		float dt = flappyDeltaFrames(game);
 
+		flappyPollTouch(game);
 		if (game->saveAfterPresent) {
 			game->saveAfterPresent = false;
 			(void)flappyWriteBestScore(game);

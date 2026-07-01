@@ -224,7 +224,7 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "sd_path": "APPS/",
                 "notes": "Original unmodified Jazz Jackrabbit shareware archive; converted to openjazz.pak on first launch, then fully decoded and sealed read-only in the shared 3 MiB ROM staging window before the menu.",
             },
-            "period_ports": {
+            "ports": {
                 "reserved_ids": {},
                 "accepted_ids": {
                     "chips": 207,
@@ -577,13 +577,13 @@ def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
         target = stage / sd_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target)
-    write_period_ports_readme(dst)
+    write_ports_readme(dst)
     return hashes
 
 
-def write_period_ports_readme(apps_dir: Path) -> None:
-    (apps_dir / "README-period-ports.txt").write_text(
-        "Faithful period ports status.\n"
+def write_ports_readme(apps_dir: Path) -> None:
+    (apps_dir / "README-ports.txt").write_text(
+        "DC32 ports status.\n"
         "\n"
         "Packaged:\n"
         "- 207 Chip's Challenge: /APPS/chips.DC32 plus /APPS/chips-tworld.pak; user builds /APPS/chips.pak from Win 3.1 CHIPS.DAT and CHIPS.EXE\n"
@@ -600,7 +600,7 @@ def write_period_ports_readme(apps_dir: Path) -> None:
         "Jazz Jackrabbit shareware remains copyright Epic MegaGames. JAZZ.ZIP is distributed unchanged under the terms in its LICENSE.DOC; SHA-256: 385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e.\n"
         "OpenJazz uses the same 3 MiB staging window as DOOM, so switching between them can trigger a one-time cache rebuild. The Chip's script prompts for paths and writes the badge-ready pak. The packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
         "\n"
-        "The firmware menu exposes only period titles whose source-derived ports have passed acceptance.\n",
+        "The firmware menu exposes the supported source-derived ports listed above.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -687,7 +687,7 @@ contains a generated scaled copy of that source's graphics. Flappy Bird is
 derived from VadimBoev/FlappyBird {FLAPPY_TAG} commit {FLAPPY_COMMIT} and
 contains generated pre-scaled RGB332 copies of that source's visible PNG sprites. Chip's Challenge,
 Scorched Earth, Pipe Dream, Sokoban, and Jazz Jackrabbit are included as
-source-derived/data-compatible period ports. Jazz Jackrabbit includes Epic
+source-derived/data-compatible ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
 shareware data only.
 
@@ -746,10 +746,10 @@ shareware data only.
 - SD path: APPS/
 - Notes: The original archive is copied unchanged. OpenJazz creates openjazz.pak locally on first launch, then builds and validates the complete shareware graphics cache before the menu. Gameplay performs no QSPI writes. The 3 MiB staging window is shared with DOOM and emulator ROM staging, so overwrites trigger an automatic rebuild.
 
-## Faithful Period Ports
+## Ports
 
 - Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps; 212 Jazz Jackrabbit, derived from GPL OpenJazz and bundled with the original Epic MegaGames shareware archive
-- Data helpers: tools/build_chips_pack.py, tools/build_openjazz_pack.py, tools/build_period_assets.py
+- Data helpers: tools/build_chips_pack.py, tools/build_openjazz_pack.py, tools/build_port_assets.py
 - Notes: CHIPS.DAT and unclear proprietary original graphics are user-provided only. The current Jazz Jackrabbit port supports the bundled shareware data.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")

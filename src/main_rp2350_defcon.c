@@ -87,6 +87,21 @@ extern uint32_t __data_start, __data_end, __bss_start, __bss_end, __stack_limit,
 static bool i2cAccelSetIdle(bool idle);
 
 
+static void bootPrvStartTicks(void)
+{
+	uint32_t cyclesPerUsec = XOSC_KHZ / 1000u;
+	uint32_t i;
+
+	//Watchdog resets do not guarantee that clock/tick configuration is reset.
+	//Recreate the SDK's 1 MHz tick sources from the now-stable XOSC ref clock.
+	for (i = 0; i < TICK_COUNT; i++) {
+		ticks_hw->ticks[i].ctrl = 0;
+		ticks_hw->ticks[i].cycles = cyclesPerUsec;
+		ticks_hw->ticks[i].ctrl = TICKS_PROC0_CTRL_ENABLE_BITS;
+	}
+}
+
+
 static void stackWatermarkInit(void)
 {
 	uint32_t *p = &__stack_limit, *end;
@@ -2297,10 +2312,18 @@ void __attribute__((noreturn, used)) micromain(void)
         
         //tell refclock to use ROSC
         clocks_hw->clk[clk_ref].ctrl = (clocks_hw->clk[clk_ref].ctrl &~ CLOCKS_CLK_REF_CTRL_SRC_BITS) | (CLOCKS_CLK_REF_CTRL_SRC_VALUE_ROSC_CLKSRC_PH << CLOCKS_CLK_REF_CTRL_SRC_LSB);
+        while (!(clocks_hw->clk[clk_ref].selected & (1u << CLOCKS_CLK_REF_CTRL_SRC_VALUE_ROSC_CLKSRC_PH)));
         
         //use ref clock for cpu, use sys clock for periphs
         clocks_hw->clk[clk_peri].ctrl &=~ CLOCKS_CLK_PERI_CTRL_ENABLE_BITS;
         clocks_hw->clk[clk_sys].ctrl = (clocks_hw->clk[clk_sys].ctrl &~ CLOCKS_CLK_SYS_CTRL_SRC_BITS)| (CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF << CLOCKS_CLK_SYS_CTRL_SRC_LSB);
+        while (!(clocks_hw->clk[clk_sys].selected & (1u << CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF)));
+
+        //Clock dividers can survive the watchdog handoff. Always boot with the
+        //reference, CPU, and peripheral clocks undivided.
+        clocks_hw->clk[clk_ref].div = CLOCKS_CLK_REF_DIV_RESET;
+        clocks_hw->clk[clk_sys].div = CLOCKS_CLK_SYS_DIV_RESET;
+        clocks_hw->clk[clk_peri].div = CLOCKS_CLK_PERI_DIV_RESET;
         clocks_hw->clk[clk_peri].ctrl = (clocks_hw->clk[clk_peri].ctrl &~ (CLOCKS_CLK_PERI_CTRL_KILL_BITS | CLOCKS_CLK_PERI_CTRL_AUXSRC_BITS)) | CLOCKS_CLK_PERI_CTRL_ENABLE_BITS | (CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS << CLOCKS_CLK_PERI_CTRL_AUXSRC_LSB);
 
         //release some peripherals from reset
@@ -2322,6 +2345,8 @@ void __attribute__((noreturn, used)) micromain(void)
         
         //tell refclock to use XOSC
         clocks_hw->clk[clk_ref].ctrl = (clocks_hw->clk[clk_ref].ctrl &~ CLOCKS_CLK_REF_CTRL_SRC_BITS) | (CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC << CLOCKS_CLK_REF_CTRL_SRC_LSB);
+        while (!(clocks_hw->clk[clk_ref].selected & (1u << CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC)));
+        bootPrvStartTicks();
 
         
         //many MHz please
@@ -2337,7 +2362,7 @@ void __attribute__((noreturn, used)) micromain(void)
         
         //switch sys to AUX and wait for it
         clocks_hw->clk[clk_sys].ctrl = (clocks_hw->clk[clk_sys].ctrl &~ CLOCKS_CLK_SYS_CTRL_SRC_BITS) | (CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX << CLOCKS_CLK_SYS_CTRL_SRC_LSB);
-        while (((clocks_hw->clk[clk_sys].selected & CLOCKS_CLK_REF_SELECTED_BITS) >> CLOCKS_CLK_REF_SELECTED_LSB) != (1 << CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX));
+        while (!(clocks_hw->clk[clk_sys].selected & (1u << CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX)));
 
         
         pr("VTAB relocation...\n");

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build redistributable period-port asset packs from checked-out source trees."""
+"""Build redistributable port asset packs from checked-out source trees."""
 
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ def main() -> int:
         }
         print(f"Wrote {pak} with {len(files)} files")
 
-    (out_dir / "period-assets-manifest.json").write_text(
+    (out_dir / "port-assets-manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",

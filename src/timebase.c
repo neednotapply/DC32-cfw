@@ -52,6 +52,10 @@ static volatile bool mIdleAlarmFired;
 
 void timebaseInit(void)
 {
+	//Clear any sleep masks retained across a watchdog handoff from an older image.
+	//This firmware does not modify them again at runtime.
+	clocks_hw->sleep_en0 = CLOCKS_SLEEP_EN0_RESET;
+	clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_RESET;
 	SysTick->CTRL = 0;
 	
 	NVIC_SetPriority(SysTick_IRQn, 1);

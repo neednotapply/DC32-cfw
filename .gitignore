@@ -1,8 +1,21 @@
-build/
+/build*/
 src/build_codex/
 src/*.o
 src/DC32-cfw
 src/DC32-cfw.bin
 src/DC32-cfw.uf2
+src/test
+__pycache__/
+*.py[cod]
+/.agents/
+/.codex/
 /.codex-remote-attachments
-/test-assets/doom-wads/
+/test-assets/
+
+# User-provided or locally generated game data.
+CHIPS.DAT
+CHIPS.EXE
+chips.bmp
+chips.pak
+openjazz.pak
+openjazz-pack-manifest.json

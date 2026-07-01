@@ -7,6 +7,7 @@
 struct BadgePowerStatus {
 	bool valid;
 	uint32_t battMv;
+	uint8_t battPercent;
 	uint32_t usbMv;
 	bool lowBatt;
 };

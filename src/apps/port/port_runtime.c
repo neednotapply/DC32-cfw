@@ -460,11 +460,6 @@ bool dc32PortSaveWrite(struct FatfsVol *vol, const char *appName, const void *sr
 	return ok;
 }
 
-bool dc32PortCenterExitRequested(const struct DcAppHostApi *host)
-{
-	return host && host->uiKeysRaw && (host->uiKeysRaw() & UI_KEY_BIT_CENTER);
-}
-
 static uint32_t dc32PortTextWidth(const char *text, enum Font font)
 {
 	uint32_t width = 0;

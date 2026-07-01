@@ -100,7 +100,7 @@ static const char mUiAppTitle[] = "DC32-cfw";
 static const char *mUiHeaderTitle = "Main Menu";
 static bool mUiHeaderInverted;
 static uint32_t mUiHeaderClockMinute = 0xffffffffu;
-static uint32_t mUiHeaderBattMv;
+static uint8_t mUiHeaderBattPercent;
 static bool mUiHeaderBattValid;
 static bool mUiHeaderLowBatt;
 static bool mUiHeaderUsbPowered;
@@ -782,7 +782,8 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 	struct BadgePowerStatus powerStatus;
 	char battText[16];
 	char timeText[9];
-	uint32_t titleLen, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft, battTextWidth = 0, battTextLeft = 0, battTextRight = 0, battMv = 0;
+	uint32_t titleLen, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft, battTextWidth = 0, battTextLeft = 0, battTextRight = 0;
+	uint8_t battPercent = 0;
 	bool battValid = false;
 	bool battDrawn = false;
 	bool timeDrawn = false;
@@ -794,17 +795,17 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 	badgePowerPoll();
 	if (badgePowerGetCached(&powerStatus)) {
 		battValid = true;
-		battMv = powerStatus.battMv;
+		battPercent = powerStatus.battPercent;
 		lowBatt = powerStatus.lowBatt;
 		usbPowered = powerStatus.usbMv >= UI_HEADER_USB_PRESENT_MV;
 	}
 
 	clockMinute = uiPrvHeaderCurrentClockMinute();
-	if (!force && clockMinute == mUiHeaderClockMinute && battValid == mUiHeaderBattValid && (!battValid || battMv == mUiHeaderBattMv) && lowBatt == mUiHeaderLowBatt && usbPowered == mUiHeaderUsbPowered)
+	if (!force && clockMinute == mUiHeaderClockMinute && battValid == mUiHeaderBattValid && (!battValid || battPercent == mUiHeaderBattPercent) && lowBatt == mUiHeaderLowBatt && usbPowered == mUiHeaderUsbPowered)
 		return;
 	mUiHeaderClockMinute = clockMinute;
 	mUiHeaderBattValid = battValid;
-	mUiHeaderBattMv = battMv;
+	mUiHeaderBattPercent = battPercent;
 	mUiHeaderLowBatt = lowBatt;
 	mUiHeaderUsbPowered = usbPowered;
 
@@ -812,7 +813,7 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 
 	cnv->font = FontLarge;
 	if (battValid) {
-		(void)sprintf(battText, "%umV", (unsigned)battMv);
+		(void)sprintf(battText, "%u%%", (unsigned)battPercent);
 		battTextWidth = uiPrvCharsWidth(cnv, battText, strlen(battText));
 		if (battTextWidth + UI_HEADER_EDGE_PAD < cnv->w) {
 			battTextLeft = (cnv->w - battTextWidth) / 2u;
@@ -2487,6 +2488,7 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 {
 	int_fast8_t selOption = 0;
 
+	uiPowerSetActiveBrightness(settings->brightness);
 	uiPrvSetHeaderTitle("Screen");
 	uiPrvReset(cnv, false);
 
@@ -2532,7 +2534,6 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 		if (selOption == rotationOption) {
 			settings->rotation = !settings->rotation;
 		}
-
 		if (selOption == contrastOption) {
 
 			if (button == KEY_BIT_LEFT) {
@@ -2567,7 +2568,55 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 			}
 
 			dispSetBrightness(settings->brightness);
+			uiPowerSetActiveBrightness(settings->brightness);
 		}
+	}
+}
+
+static void uiPrvApplyAudioSettings(const struct Settings *settings)
+{
+	audioPwmSetMasterVolume(settings->audioMuted ? 0 : settings->audioVolume);
+}
+
+static void __attribute__((noinline)) uiPrvAudioSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	enum {
+		AudioSettingDone,
+		AudioSettingMute,
+		AudioSettingVolume,
+		AudioSettingNum,
+	};
+	uint_fast8_t selOption = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvSetHeaderTitle("Audio");
+		uiPrvReset(cnv, false);
+		cnv->foreColor = 11;
+		uiPuts(cnv, uiPrvMenuRow(cnv, AudioSettingDone), 10, "DONE", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, AudioSettingMute), 10, "MUTE:", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, AudioSettingVolume), 10, "VOLUME:", -1);
+		cnv->foreColor = 15;
+		uiPuts(cnv, uiPrvMenuRow(cnv, AudioSettingMute), 111,
+			settings->audioMuted ? "ON " : "OFF", -1);
+		uiPrintf(cnv, uiPrvMenuRow(cnv, AudioSettingVolume), 111, "%u  ",
+			(unsigned)settings->audioVolume);
+
+		selOption = uiPrvMenu(cnv, selOption, AudioSettingNum, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selOption == AudioSettingDone)
+			return;
+		if (selOption == AudioSettingMute)
+			settings->audioMuted = !settings->audioMuted;
+		else if (selOption == AudioSettingVolume) {
+			if (button == KEY_BIT_LEFT) {
+				if (settings->audioVolume)
+					settings->audioVolume--;
+			}
+			else if (settings->audioVolume < AUDIO_PWM_VOLUME_MAX)
+				settings->audioVolume++;
+		}
+		uiPrvApplyAudioSettings(settings);
 	}
 }
 
@@ -3135,7 +3184,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 {
 	bool restartCurGame = false;
 	struct Settings settings;
-	uint_fast8_t numOptions = exitOnDone ? 6 : 5;
+	uint_fast8_t numOptions = exitOnDone ? 7 : 6;
 
 	uiPrvSetHeaderTitle("Settings");
 	settingsGet(&settings);
@@ -3147,7 +3196,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	uiPrvReset(cnv, false);
 
 	while (1) {
-		uint_fast8_t doneOption = 0, emulatorsOption = exitOnDone ? 1 : 0, clockOption = emulatorsOption + 1, ledSettingsOption = clockOption + 1, screenOption = ledSettingsOption + 1, usbOption = screenOption + 1, selOption;
+		uint_fast8_t doneOption = 0, emulatorsOption = exitOnDone ? 1 : 0, clockOption = emulatorsOption + 1, audioOption = clockOption + 1, ledSettingsOption = audioOption + 1, screenOption = ledSettingsOption + 1, usbOption = screenOption + 1, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvSetHeaderTitle("Settings");
@@ -3156,6 +3205,7 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, emulatorsOption), 10, "Emulators", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, clockOption), 10, "Clock", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, audioOption), 10, "Audio", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, screenOption), 10, "Screen", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, usbOption), 10, "USB", -1);
@@ -3175,6 +3225,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			restartCurGame = uiPrvEmulatorSettings(cnv, &settings) || restartCurGame;
 		else if (selOption == clockOption)
 			uiPrvClockSettings(cnv);
+		else if (selOption == audioOption)
+			uiPrvAudioSettings(cnv, &settings);
 		else if (selOption == ledSettingsOption)
 			uiPrvLedSettings(cnv, &settings);
 		else if (selOption == usbOption)
@@ -6850,20 +6902,20 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static void uiPrvMusicSanitizeSettings(struct Settings *settings)
 	{
-		if (settings->musicVolume > AUDIO_PWM_VOLUME_MAX)
-			settings->musicVolume = 11;
+		if (settings->audioVolume > AUDIO_PWM_VOLUME_MAX)
+			settings->audioVolume = 11;
 	}
 
 	static void uiPrvMusicApplySettings(struct MusicUiData *data)
 	{
-		audioPwmSetVolume(data->settings->musicVolume);
+		uiPrvApplyAudioSettings(data->settings);
 		data->settingsDirty = true;
 		data->forceDraw = true;
 	}
 
 	static void uiPrvMusicAdjustVolume(struct MusicUiData *data, int_fast8_t delta)
 	{
-		uint8_t volume = data->settings->musicVolume;
+		uint8_t volume = data->settings->audioVolume;
 
 		if (delta < 0) {
 			if (!volume)
@@ -6876,7 +6928,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			volume++;
 		}
 
-		data->settings->musicVolume = volume;
+		data->settings->audioVolume = volume;
 		uiPrvMusicApplySettings(data);
 	}
 
@@ -6926,7 +6978,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 				label = buf;
 			}
 			else if (i == MusicPlaybackControlVol) {
-				(void)sprintf(buf, "Vol%u", data->settings->musicVolume);
+				(void)sprintf(buf, "Vol%u", data->settings->audioVolume);
 				label = buf;
 			}
 
@@ -7033,7 +7085,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		struct MusicUiData data = {.cnv = cnv, .settings = settings, .name = name, .focus = focusP ? *focusP : MusicPlaybackControlPlay, .lastPct = 0xff, .forceDraw = true};
 		enum MusicPlayerResult ret;
 
-		audioPwmSetVolume(settings->musicVolume);
+		audioPwmSetVolume(AUDIO_PWM_VOLUME_MAX);
+		uiPrvApplyAudioSettings(settings);
 		fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
 		if (!fil) {
 			audioPwmStop();
@@ -7086,7 +7139,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			return;
 		settingsGet(&settings);
 		uiPrvMusicSanitizeSettings(&settings);
-		audioPwmSetVolume(settings.musicVolume);
+		audioPwmSetVolume(AUDIO_PWM_VOLUME_MAX);
+		uiPrvApplyAudioSettings(&settings);
 
 		vol = uiPrvMountCard(cnv, false);
 		if (!vol)
@@ -7296,8 +7350,9 @@ reload_dir:
 	struct BadUsbUiData {
 		struct Canvas *cnv;
 		const char *name;
-		uint64_t lastDraw;
 		uint32_t lastLine;
+		uint32_t lastProgressPct;
+		uint32_t lastDelayRemainSec;
 		enum BadUsbWorkerState lastState;
 		uint32_t lastUnsupportedCommands;
 		struct BadUsbStatus lastStatus;
@@ -7443,8 +7498,6 @@ reload_dir:
 	{
 		struct BadUsbUiData *data = (struct BadUsbUiData*)userData;
 		struct BadUsbStatus badStatus;
-		uint64_t now = getTime();
-
 		uiPrvRefreshHeaderClock(data->cnv);
 		if (uiPrvCenterExitPressedRaw())
 			return false;
@@ -7465,11 +7518,14 @@ reload_dir:
 			return uiPrvBadUsbPause(data, &data->lastStatus);
 
 		if (data->forceDraw || status->lineNo != data->lastLine || status->state != data->lastState ||
-		    status->unsupportedCommands != data->lastUnsupportedCommands || now - data->lastDraw > TICKS_PER_SECOND / 4) {
+				uiPrvBadUsbProgressPct(status) != data->lastProgressPct ||
+				status->delayRemainSec != data->lastDelayRemainSec ||
+				status->unsupportedCommands != data->lastUnsupportedCommands) {
 			uiPrvBeginPacedRedraw();
 			uiPrvBadUsbDrawStatus(data, &data->lastStatus, status->state, status->message);
-			data->lastDraw = now;
 			data->lastLine = status->lineNo;
+			data->lastProgressPct = uiPrvBadUsbProgressPct(status);
+			data->lastDelayRemainSec = status->delayRemainSec;
 			data->lastState = status->state;
 			data->lastUnsupportedCommands = status->unsupportedCommands;
 			data->forceDraw = false;
@@ -7524,7 +7580,6 @@ reload_dir:
 		uiPrvBadUsbDrawStatus(data, &status, state, message);
 		data->lastStatus = status;
 		data->haveStatus = true;
-		data->lastDraw = getTime();
 		data->lastState = state;
 	}
 
@@ -7541,12 +7596,13 @@ reload_dir:
 	static bool uiPrvBadUsbWaitReady(struct BadUsbUiData *data, const struct BadUsbPreload *preload)
 	{
 		uint64_t end = getTime() + (uint64_t)BADUSB_UI_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-		uint64_t lastDraw = 0;
+
+		uiPrvBeginPacedRedraw();
+		uiPrvBadUsbShowState(data, preload, BadUsbStateNotConnected, "Waiting for USB");
 
 		while (getTime() < end) {
-			uint64_t now = getTime();
-
 			usbHidTask();
+			uiPrvRefreshHeaderClock(data->cnv);
 			uiPrvRefreshHeaderClock(data->cnv);
 			if (uiPrvCenterExitPressedRaw()) {
 				uiPrvRequestToolExit();
@@ -7556,11 +7612,6 @@ reload_dir:
 				return false;
 			if (usbHidReady())
 				return true;
-			if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
-				uiPrvBeginPacedRedraw();
-				uiPrvBadUsbShowState(data, preload, BadUsbStateNotConnected, "Waiting for USB");
-				lastDraw = now;
-			}
 		}
 		return usbHidReady();
 	}
@@ -7883,25 +7934,21 @@ static bool uiPrvUsbKeyboardDelay(uint32_t msec)
 static bool uiPrvUsbKeyboardWaitReady(struct Canvas *cnv)
 {
 	uint64_t end = getTime() + (uint64_t)USB_KEYBOARD_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-	uint64_t lastDraw = 0;
+
+	uiPrvBeginPacedRedraw();
+	uiPrvSetHeaderTitle("USB Keyboard");
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
 
 	while (getTime() < end) {
-		uint64_t now = getTime();
-
 		usbHidTask();
+		uiPrvRefreshHeaderClock(cnv);
 		if (uiGetKeysRaw() & KEY_BIT_B)
 			return false;
 		if (usbHidReady())
 			return true;
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvBeginPacedRedraw();
-			uiPrvSetHeaderTitle("USB Keyboard");
-			uiPrvReset(cnv, false);
-			cnv->font = FontMedium;
-			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
-			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold B to cancel", -1);
-			lastDraw = now;
-		}
 	}
 	return usbHidReady();
 }
@@ -8273,27 +8320,23 @@ out:
 static bool uiPrvUsbHidWaitReady(struct Canvas *cnv, const char *title)
 {
 	uint64_t end = getTime() + (uint64_t)USB_HID_TOOL_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-	uint64_t lastDraw = 0;
+
+	uiPrvBeginPacedRedraw();
+	uiPrvSetHeaderTitle(title);
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Center = Exit", -1);
 
 	while (getTime() < end) {
-		uint64_t now = getTime();
-
 		usbHidTask();
+		uiPrvRefreshHeaderClock(cnv);
 		if (uiPrvCenterExitPressedRaw()) {
 			uiPrvRequestToolExit();
 			return false;
 		}
 		if (usbHidReady())
 			return true;
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvBeginPacedRedraw();
-			uiPrvSetHeaderTitle(title);
-			uiPrvReset(cnv, false);
-			cnv->font = FontMedium;
-			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
-			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Center = Exit", -1);
-			lastDraw = now;
-		}
 	}
 	return usbHidReady();
 }
@@ -8377,9 +8420,9 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 	struct UsbHidDeviceInfo info;
 	uint_fast16_t prevKeys = 0;
 	uint_fast16_t repeatKey = 0;
-	uint64_t nextClick = 0, lastDraw = 0;
+	uint64_t nextClick = 0;
 	uint64_t repeatNext = 0, aRearmTicks = 0;
-	bool running = false, failed = false, reportsEnabled = false;
+	bool running = false, failed = false, reportsEnabled = false, redraw = true;
 	bool aToggleArmed = true;
 
 	uiPrvSetHeaderTitle("Autoclicker");
@@ -8421,7 +8464,7 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 			if (running) {
 				running = false;
 				nextClick = 0;
-				lastDraw = 0;
+				redraw = true;
 				usbHidReleaseAll();
 			}
 			else
@@ -8434,7 +8477,7 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 
 			running = !running;
 			nextClick = 0;
-			lastDraw = 0;
+			redraw = true;
 			if (wasRunning && !running)
 				usbHidReleaseAll();
 			aToggleArmed = false;
@@ -8442,11 +8485,11 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 		}
 		if (pressed & KEY_BIT_LEFT) {
 			uiPrvAutoclickerAdjustButton(&settings, false);
-			lastDraw = 0;
+			redraw = true;
 		}
 		else if (pressed & KEY_BIT_RIGHT) {
 			uiPrvAutoclickerAdjustButton(&settings, true);
-			lastDraw = 0;
+			redraw = true;
 		}
 		if (keys & KEY_BIT_UP)
 			speedKey = KEY_BIT_UP;
@@ -8456,12 +8499,12 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 			repeatKey = speedKey;
 			repeatNext = speedKey ? now + UI_KEY_REPEAT_INITIAL_TICKS : 0;
 			if (speedKey && uiPrvAutoclickerAdjustClicks(&settings, speedKey == KEY_BIT_UP ? 1 : -1))
-				lastDraw = 0;
+				redraw = true;
 		}
 		else if (speedKey && now >= repeatNext) {
 			repeatNext = now + UI_KEY_REPEAT_INTERVAL_TICKS;
 			if (uiPrvAutoclickerAdjustClicks(&settings, speedKey == KEY_BIT_UP ? 1 : -1))
-				lastDraw = 0;
+				redraw = true;
 		}
 		if (running && (!nextClick || now >= nextClick)) {
 			uint8_t button = uiPrvAutoclickerButtonMask(settings.autoclickerButton);
@@ -8473,10 +8516,10 @@ static void uiPrvAutoclickerTool(struct Canvas *cnv)
 			}
 			nextClick = now + interval;
 		}
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+		if (redraw) {
 			uiPrvBeginPacedRedraw();
 			uiPrvAutoclickerDraw(cnv, &settings, running);
-			lastDraw = now;
+			redraw = false;
 		}
 		prevKeys = keys;
 	}
@@ -8624,12 +8667,21 @@ static void uiPrvGamepadEnd(enum UiGamepadProfile profile)
 static bool uiPrvGamepadWaitReady(struct Canvas *cnv, enum UiGamepadProfile profile)
 {
 	uint64_t end = getTime() + (uint64_t)USB_HID_TOOL_ENUM_WAIT_MS * (TICKS_PER_SECOND / 1000);
-	uint64_t lastDraw = 0, homeHoldStart = 0;
+	uint64_t homeHoldStart = 0;
+
+	uiPrvBeginPacedRedraw();
+	uiPrvSetHeaderTitle("USB Gamepad");
+	uiPrvReset(cnv, false);
+	cnv->font = FontMedium;
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
+	uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 1), 10, cnv->w - 20, uiPrvGamepadProfileName(profile));
+	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold Home = Exit", -1);
 
 	while (getTime() < end) {
 		uint64_t now = getTime();
 
 		uiPrvGamepadTask(profile);
+		uiPrvRefreshHeaderClock(cnv);
 		if (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
 			if (!homeHoldStart)
 				homeHoldStart = now;
@@ -8642,16 +8694,6 @@ static bool uiPrvGamepadWaitReady(struct Canvas *cnv, enum UiGamepadProfile prof
 			homeHoldStart = 0;
 		if (uiPrvGamepadReady(profile))
 			return true;
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
-			uiPrvBeginPacedRedraw();
-			uiPrvSetHeaderTitle("USB Gamepad");
-			uiPrvReset(cnv, false);
-			cnv->font = FontMedium;
-			uiPuts(cnv, uiPrvContentTop(cnv), 10, "Waiting for USB", -1);
-			uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, 1), 10, cnv->w - 20, uiPrvGamepadProfileName(profile));
-			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "Hold Home = Exit", -1);
-			lastDraw = now;
-		}
 	}
 	return uiPrvGamepadReady(profile);
 }
@@ -8851,6 +8893,17 @@ static bool uiPrvGamepadTouchChanged(const struct UsbHidGamepadTouch *cur, const
 		cur->y != prev->y;
 }
 
+static bool uiPrvGamepadFeedbackChanged(const struct UiGamepadFeedback *cur,
+	const struct UiGamepadFeedback *prev)
+{
+	return cur->rumbleLeft != prev->rumbleLeft ||
+		cur->rumbleRight != prev->rumbleRight ||
+		cur->lightRed != prev->lightRed ||
+		cur->lightGreen != prev->lightGreen ||
+		cur->lightBlue != prev->lightBlue ||
+		cur->pingSeq != prev->pingSeq;
+}
+
 static const char *uiPrvGamepadTouchZoneName(enum UiGamepadTouchZone zone)
 {
 	switch (zone) {
@@ -8892,15 +8945,15 @@ static void uiPrvGamepadTool(struct Canvas *cnv)
 {
 	enum UiGamepadProfile profile;
 	struct Settings ledSettings;
-	struct UiGamepadFeedback feedback;
-	struct UsbHidGamepadTouch touch = {0}, prevTouch = {0};
-	enum UiGamepadTouchZone touchZone = UiGamepadTouchZoneNone, prevTouchZone = UiGamepadTouchZoneNone;
-	uint_fast16_t prevUiKeys = 0xffff;
+	struct UiGamepadFeedback feedback, drawnFeedback = {0};
+	struct UsbHidGamepadTouch touch = {0}, prevTouch = {0}, drawnTouch = {0};
+	enum UiGamepadTouchZone touchZone = UiGamepadTouchZoneNone, prevTouchZone = UiGamepadTouchZoneNone, drawnTouchZone = UiGamepadTouchZoneNone;
+	uint_fast16_t prevUiKeys = 0xffff, drawnUiKeys = 0;
 	uint_fast8_t prevKeys = 0xff;
-	uint64_t lastDraw = 0, lastReport = 0, lastFeedback = 0, pingEndTicks = 0, homeHoldStart = 0;
+	uint64_t lastReport = 0, lastFeedback = 0, pingEndTicks = 0, homeHoldStart = 0;
 	uint_fast8_t audioVolume;
 	uint32_t lastPingSeq = 0;
-	bool reportsEnabled = false, failed = false;
+	bool reportsEnabled = false, failed = false, haveDrawn = false;
 
 	uiPrvSetHeaderTitle("USB Gamepad");
 	if (!uiPrvGamepadChooseProfile(cnv, &profile))
@@ -8972,10 +9025,16 @@ static void uiPrvGamepadTool(struct Canvas *cnv)
 		}
 		else
 			uiPrvGamepadUpdatePing(&feedback, &lastPingSeq, &pingEndTicks, audioVolume);
-		if (!lastDraw || now - lastDraw > TICKS_PER_SECOND / 4) {
+		if (!haveDrawn || uiKeys != drawnUiKeys || touchZone != drawnTouchZone ||
+				uiPrvGamepadTouchChanged(&touch, &drawnTouch) ||
+				uiPrvGamepadFeedbackChanged(&feedback, &drawnFeedback)) {
 			uiPrvBeginPacedRedraw();
 			uiPrvGamepadDraw(cnv, profile, uiKeys, &feedback, &touch, touchZone);
-			lastDraw = now;
+			drawnUiKeys = uiKeys;
+			drawnFeedback = feedback;
+			drawnTouch = touch;
+			drawnTouchZone = touchZone;
+			haveDrawn = true;
 		}
 	}
 
@@ -9639,13 +9698,11 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	case DcAppIdTetris:
 	case DcAppIdArkanoid:
 	case DcAppIdFlappy:
-	case DcAppIdLabyrinth:
 	case DcAppIdTrex:
 	case DcAppIdDoom:
 	case DcAppIdChips:
 	case DcAppIdScorch:
 	case DcAppIdPipe:
-	case DcAppIdCave:
 	case DcAppIdSokoban:
 	case DcAppIdOpenJazz:
 		return UiToolPorts;
@@ -9669,7 +9726,7 @@ static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppTool
 	enum DcAppResult result;
 
 	settingsGet(&settings);
-	if (appId == DcAppIdDoom)
+	if (appId >= DcAppIdPong && appId <= DcAppIdOpenJazz)
 		args.rotate = settings.rotation;
 	result = dcAppRunTool(appId, &args);
 
@@ -9936,40 +9993,146 @@ int uiDcAppRunGamepad(const struct DcAppHostApi *host, const struct DcAppRunArgs
 }
 #endif
 
-#define USB_STORAGE_REDRAW_TICKS TICKS_PER_SECOND
+struct UiUsbStorageState {
+	uint32_t blocks;
+	uint32_t lba;
+	uint32_t bytes;
+	bool mounted;
+	bool ejected;
+	bool writable;
+	bool speedLimited;
+	char op[24];
+	char error[80];
+};
 
-static void uiPrvUsbStorageDraw(struct Canvas *cnv)
+static void uiPrvUsbStorageReadState(struct UiUsbStorageState *state)
 {
-	uint32_t blocks = sdGetNumSecs();
 	struct UsbMscStatus status;
+
+	memset(state, 0, sizeof(*state));
+	usbMscGetStatus(&status);
+	state->blocks = sdGetNumSecs();
+	state->lba = status.lba;
+	state->bytes = status.bytes;
+	state->mounted = usbMscMounted();
+	state->ejected = usbMscEjected();
+	state->writable = usbMscWritable();
+	state->speedLimited = status.speedLimited;
+	uiPrvCopyStr(state->op, sizeof(state->op), status.op ? status.op : "");
+	uiPrvCopyStr(state->error, sizeof(state->error), status.error ? status.error : "");
+}
+
+static void uiPrvUsbStorageClearArea(struct Canvas *cnv, uint32_t top, uint32_t bottom)
+{
+	int8_t foreColor = cnv->foreColor;
+
+	cnv->foreColor = cnv->backColor;
+	uiPrvFillRect(cnv, 0, top, cnv->w - 1, bottom);
+	cnv->foreColor = foreColor;
+}
+
+static void uiPrvUsbStorageClearRow(struct Canvas *cnv, uint_fast8_t row)
+{
+	uint32_t top = row ? uiPrvMenuRow(cnv, row) : uiPrvContentTop(cnv);
+
+	uiPrvUsbStorageClearArea(cnv, top, top + uiPrvMenuItemHeight(cnv) - 1u);
+}
+
+static void uiPrvUsbStorageDrawConnection(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
+	uiPuts(cnv, uiPrvContentTop(cnv), 10, state->mounted ? "USB connected" : "Waiting for host", -1);
+}
+
+static void uiPrvUsbStorageDrawWritable(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
+	uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, state->writable ? "microSD is read-write" : "microSD is read-only", -1);
+}
+
+static void uiPrvUsbStorageDrawCapacity(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
 	char msg[96];
 
-	usbMscGetStatus(&status);
+	(void)sprintf(msg, "%u MiB exposed", (unsigned)(state->blocks / 2048));
+	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
+}
+
+static void uiPrvUsbStorageDrawOperation(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
+	char msg[96];
+
+	(void)sprintf(msg, "%s LBA %u", state->op, (unsigned)state->lba);
+	uiPuts(cnv, uiPrvMenuRow(cnv, 4), 10, msg, -1);
+}
+
+static void uiPrvUsbStorageDrawBytes(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
+	char msg[96];
+
+	(void)sprintf(msg, "%u bytes %s", (unsigned)state->bytes, state->speedLimited ? "safe speed" : "fast speed");
+	uiPuts(cnv, uiPrvMenuRow(cnv, 5), 10, msg, -1);
+}
+
+static void uiPrvUsbStorageDrawMessage(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
+	if (state->error[0] && strcmp(state->error, "none")) {
+		uiPrvDrawWrappedString(cnv, state->error, uiPrvMenuRow(cnv, 6), 10);
+	}
+	else if (state->ejected)
+		uiPuts(cnv, uiPrvMenuRow(cnv, 6), 10, "Host ejected the card", -1);
+	else
+		uiPrvDrawWrappedString(cnv, "Eject/unmount on the host before exiting.", uiPrvMenuRow(cnv, 6), 10);
+}
+
+static void uiPrvUsbStorageDraw(struct Canvas *cnv, const struct UiUsbStorageState *state)
+{
 	uiPrvSetHeaderTitle("USB Storage");
 	uiPrvReset(cnv, false);
 	cnv->font = FontMedium;
 
-	uiPuts(cnv, uiPrvContentTop(cnv), 10, usbMscMounted() ? "USB connected" : "Waiting for host", -1);
-	uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, usbMscWritable() ? "microSD is read-write" : "microSD is read-only", -1);
-	(void)sprintf(msg, "%u MiB exposed", (unsigned)(blocks / 2048));
-	uiPuts(cnv, uiPrvMenuRow(cnv, 3), 10, msg, -1);
-	(void)sprintf(msg, "%s LBA %u", status.op, (unsigned)status.lba);
-	uiPuts(cnv, uiPrvMenuRow(cnv, 4), 10, msg, -1);
-	(void)sprintf(msg, "%u bytes %s", (unsigned)status.bytes, status.speedLimited ? "safe speed" : "fast speed");
-	uiPuts(cnv, uiPrvMenuRow(cnv, 5), 10, msg, -1);
-	if (status.error && strcmp(status.error, "none")) {
-		uiPrvDrawWrappedString(cnv, status.error, uiPrvMenuRow(cnv, 6), 10);
-	}
-	else if (usbMscEjected())
-		uiPuts(cnv, uiPrvMenuRow(cnv, 6), 10, "Host ejected the card", -1);
-	else
-		uiPrvDrawWrappedString(cnv, "Eject/unmount on the host before exiting.", uiPrvMenuRow(cnv, 6), 10);
+	uiPrvUsbStorageDrawConnection(cnv, state);
+	uiPrvUsbStorageDrawWritable(cnv, state);
+	uiPrvUsbStorageDrawCapacity(cnv, state);
+	uiPrvUsbStorageDrawOperation(cnv, state);
+	uiPrvUsbStorageDrawBytes(cnv, state);
+	uiPrvUsbStorageDrawMessage(cnv, state);
 	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1, 10, "B = Exit", -1);
+}
+
+static void uiPrvUsbStorageUpdate(struct Canvas *cnv, const struct UiUsbStorageState *oldState, const struct UiUsbStorageState *state)
+{
+	uint32_t messageTop = uiPrvMenuRow(cnv, 6);
+	uint32_t footerTop = cnv->h - uiPrvGlyphHeight(cnv) - 1u;
+
+	if (oldState->mounted != state->mounted) {
+		uiPrvUsbStorageClearRow(cnv, 0);
+		uiPrvUsbStorageDrawConnection(cnv, state);
+	}
+	if (oldState->writable != state->writable) {
+		uiPrvUsbStorageClearRow(cnv, 2);
+		uiPrvUsbStorageDrawWritable(cnv, state);
+	}
+	if (oldState->blocks != state->blocks) {
+		uiPrvUsbStorageClearRow(cnv, 3);
+		uiPrvUsbStorageDrawCapacity(cnv, state);
+	}
+	if (oldState->lba != state->lba || strcmp(oldState->op, state->op)) {
+		uiPrvUsbStorageClearRow(cnv, 4);
+		uiPrvUsbStorageDrawOperation(cnv, state);
+	}
+	if (oldState->bytes != state->bytes || oldState->speedLimited != state->speedLimited) {
+		uiPrvUsbStorageClearRow(cnv, 5);
+		uiPrvUsbStorageDrawBytes(cnv, state);
+	}
+	if (oldState->ejected != state->ejected || strcmp(oldState->error, state->error)) {
+		uiPrvUsbStorageClearArea(cnv, messageTop, footerTop - 1u);
+		uiPrvUsbStorageDrawMessage(cnv, state);
+	}
 }
 
 static void uiPrvUsbStorageTool(struct Canvas *cnv)
 {
-	uint64_t lastDraw = 0;
+	struct UiUsbStorageState state, drawnState;
+	bool haveDrawn = false;
 	union SdFlags flags;
 
 	uiPrvSetHeaderTitle("USB Storage");
@@ -9999,8 +10162,6 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 	uiPrvWaitKeysReleased();
 
 	while (!uiPrvToolExitRequested()) {
-		uint64_t now = getTime();
-
 		usbMscTask();
 		uiPrvRefreshHeaderClock(cnv);
 		if ((uiGetKeysRaw() & KEY_BIT_B) || uiPrvCenterExitPressedRaw()) {
@@ -10008,15 +10169,20 @@ static void uiPrvUsbStorageTool(struct Canvas *cnv)
 			if (!usbMscEjected() && !uiAlert(cnv, "The host has not ejected the SD card.\nDisconnect anyway?", DialogTypeYesNo)) {
 				uiPrvClearToolExit();
 				uiPrvWaitKeysReleased();
-				lastDraw = 0;
+				haveDrawn = false;
 				continue;
 			}
 			break;
 		}
-		if (!lastDraw || now - lastDraw > USB_STORAGE_REDRAW_TICKS) {
+		uiPrvUsbStorageReadState(&state);
+		if (!haveDrawn || memcmp(&state, &drawnState, sizeof(state))) {
 			uiPrvBeginPacedRedraw();
-			uiPrvUsbStorageDraw(cnv);
-			lastDraw = now;
+			if (haveDrawn)
+				uiPrvUsbStorageUpdate(cnv, &drawnState, &state);
+			else
+				uiPrvUsbStorageDraw(cnv, &state);
+			drawnState = state;
+			haveDrawn = true;
 		}
 	}
 
@@ -10158,10 +10324,13 @@ enum UiGameAction uiGameMenu(void)
 		GameMenuOptionSelect,
 		GameMenuOptionSaveToSd,
 		GameMenuOptionSettings,
+		GameMenuOptionAudio,
+		GameMenuOptionScreen,
+		GameMenuOptionLeds,
 		GameMenuOptionSwitch,
 	};
-	uint_fast8_t optionIds[5], numOptions = 0, selOption, i;
-	const char *labels[5];
+	uint_fast8_t optionIds[8], numOptions = 0, selOption, i;
+	const char *labels[8];
 	char name[ROM_NAME_LEN + 1];
 	char title[UI_GAME_TITLE_BUF_SZ];
 	bool validRom = uiPrvHaveValidRom(name, NULL, NULL);
@@ -10187,6 +10356,12 @@ enum UiGameAction uiGameMenu(void)
 #endif
 	labels[numOptions] = uiPrvEmulatorSettingsName(uiPrvCurrentGameConsole());
 	optionIds[numOptions++] = GameMenuOptionSettings;
+	labels[numOptions] = "Audio";
+	optionIds[numOptions++] = GameMenuOptionAudio;
+	labels[numOptions] = "Screen";
+	optionIds[numOptions++] = GameMenuOptionScreen;
+	labels[numOptions] = "LEDs";
+	optionIds[numOptions++] = GameMenuOptionLeds;
 	labels[numOptions] = "Main Menu";
 	optionIds[numOptions++] = GameMenuOptionSwitch;
 
@@ -10248,12 +10423,96 @@ enum UiGameAction uiGameMenu(void)
 			mLastGameMenuAction = UiGameActionSwitchTool;
 		return mLastGameMenuAction;
 	}
+	if (optionIds[selOption] == GameMenuOptionAudio ||
+			optionIds[selOption] == GameMenuOptionScreen ||
+			optionIds[selOption] == GameMenuOptionLeds) {
+		struct Settings settings;
+
+		settingsGet(&settings);
+		if (optionIds[selOption] == GameMenuOptionAudio)
+			uiPrvAudioSettings(cnv, &settings);
+		else if (optionIds[selOption] == GameMenuOptionScreen)
+			uiPrvScreenSettings(cnv, &settings);
+		else
+			uiPrvLedSettings(cnv, &settings);
+		(void)settingsSet(&settings);
+		mLastGameMenuAction = uiPrvToolExitRequested() ?
+			UiGameActionSwitchTool : UiGameActionResume;
+		return mLastGameMenuAction;
+	}
 	if (optionIds[selOption] == GameMenuOptionSwitch) {
 		mLastGameMenuAction = UiGameActionSwitchTool;
 		return mLastGameMenuAction;
 	}
 
 	return UiGameActionResume;
+}
+
+bool uiPortMenu(struct Canvas *activeCanvas)
+{
+	struct Canvas canvas = CANVAS_INITIALIZER, *cnv = &canvas;
+	enum {
+		PortMenuOptionResume,
+		PortMenuOptionAudio,
+		PortMenuOptionScreen,
+		PortMenuOptionLeds,
+		PortMenuOptionMain,
+		PortMenuOptionCount,
+	};
+	static const char *const labels[PortMenuOptionCount] = {
+		"Resume",
+		"Audio",
+		"Screen",
+		"LEDs",
+		"Main Menu",
+	};
+	uint_fast8_t selOption = PortMenuOptionResume;
+
+	uiPrvWaitKeysReleased();
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+		uiPrvSetHeaderTitle("Ports");
+		uiPrvReset(cnv, false);
+		for (uint_fast8_t i = 0; i < PortMenuOptionCount; i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+		selOption = uiPrvMenu(cnv, selOption, PortMenuOptionCount, &button);
+		if (uiPrvToolExitRequested())
+			return false;
+		if (button == KEY_BIT_B || selOption == PortMenuOptionResume)
+			return true;
+		if (selOption == PortMenuOptionMain)
+			return false;
+		if (selOption == PortMenuOptionAudio) {
+			struct Settings settings;
+
+			settingsGet(&settings);
+			uiPrvAudioSettings(cnv, &settings);
+			(void)settingsSet(&settings);
+			if (uiPrvToolExitRequested())
+				return false;
+		}
+		if (selOption == PortMenuOptionScreen) {
+			struct Settings settings;
+
+			settingsGet(&settings);
+			uiPrvScreenSettings(cnv, &settings);
+			(void)settingsSet(&settings);
+			if (activeCanvas)
+				activeCanvas->flipped = settings.rotation;
+			if (uiPrvToolExitRequested())
+				return false;
+		}
+		if (selOption == PortMenuOptionLeds) {
+			struct Settings settings;
+
+			settingsGet(&settings);
+			uiPrvLedSettings(cnv, &settings);
+			(void)settingsSet(&settings);
+			if (uiPrvToolExitRequested())
+				return false;
+		}
+	}
 }
 
 enum UiCategoryEntryKind {
@@ -10443,13 +10702,11 @@ static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Tetris", UiCategoryEntrySdApp, UiToolPorts, DcAppIdTetris},
 		{"Arkanoid", UiCategoryEntrySdApp, UiToolPorts, DcAppIdArkanoid},
 		{"Flappy Bird", UiCategoryEntrySdApp, UiToolPorts, DcAppIdFlappy},
-		{"Labyrinth", UiCategoryEntrySdApp, UiToolPorts, DcAppIdLabyrinth},
 		{"T-Rex Runner", UiCategoryEntrySdApp, UiToolPorts, DcAppIdTrex},
 		{"DOOM (shareware)", UiCategoryEntrySdApp, UiToolPorts, DcAppIdDoom},
 		{"Chip's Challenge", UiCategoryEntrySdApp, UiToolPorts, DcAppIdChips},
 		{"Scorched Earth", UiCategoryEntrySdApp, UiToolPorts, DcAppIdScorch},
 		{"Pipe Dream", UiCategoryEntrySdApp, UiToolPorts, DcAppIdPipe},
-		{"Cave Story", UiCategoryEntrySdApp, UiToolPorts, DcAppIdCave},
 		{"Sokoban", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSokoban},
 		{"Jazz Jackrabbit", UiCategoryEntrySdApp, UiToolPorts, DcAppIdOpenJazz},
 	};

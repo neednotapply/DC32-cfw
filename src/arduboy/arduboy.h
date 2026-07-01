@@ -28,6 +28,7 @@ bool arduboyExtractPackageToFlash(const void *packageData, uint32_t packageSize,
 	void *writeBuf, uint32_t writeBufSize, uint32_t *hexSizeP);
 void arduboyRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize);
 void arduboyAbort(void);
+void arduboySetRotation(bool flipped);
 void arduboyRefreshDisplayOptions(void);
 void arduboyPortInGameMenu(void);
 

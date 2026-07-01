@@ -138,6 +138,13 @@ static ArduboySimRuntime mSim;
 static uint16_t mPresentRowFirst, mPresentRowEnd;
 static uint16_t mPresentColFirst, mPresentColEnd;
 static uint8_t mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
+static bool mPresentFlipped;
+
+void arduboySetRotation(bool flipped)
+{
+	mPresentFlipped = flipped;
+	mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
+}
 
 extern "C" void *arduboySimMalloc(size_t size);
 extern "C" void *arduboySimCalloc(size_t count, size_t size);
@@ -976,7 +983,6 @@ static void arduboyPrvPresentFrame(bool force)
 	}
 
 	for (uint32_t y = mPresentRowFirst; y < mPresentRowEnd; y++) {
-		uint16_t *row = fb + y * DISP_WIDTH;
 		uint16_t srcX = mSim.presentSrcX[y];
 
 		if (srcX == ARDUBOY_PRESENT_INVALID)
@@ -987,7 +993,11 @@ static void arduboyPrvPresentFrame(bool force)
 		for (uint32_t x = mPresentColFirst; x < mPresentColEnd; x++) {
 			uint8_t page = srcYPage[x];
 
-			row[x] = (page != ARDUBOY_PRESENT_Y_INVALID &&
+			uint32_t dst = y * DISP_WIDTH + x;
+
+			if (mPresentFlipped)
+				dst = DISP_WIDTH * DISP_HEIGHT - 1u - dst;
+			fb[dst] = (page != ARDUBOY_PRESENT_Y_INVALID &&
 				(mSim.screen->vram[page][srcX] & srcYMask[x])) ? onColor : offColor;
 		}
 	}

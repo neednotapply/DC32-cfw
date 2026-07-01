@@ -1,5 +1,6 @@
 #include "arduboy/arduboy.h"
 #include "dcApp.h"
+#include "settings.h"
 
 const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_header"), used, aligned(256))) = {
 	.magic = DCAPP_MAGIC,
@@ -16,6 +17,7 @@ int dcAppEntry(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
 	(void)host;
 	if (!args)
 		return -1;
+	arduboySetRotation(args->rotate);
 	arduboyRun(args->rom, args->romSize, args->saveRam, args->saveRamSize);
 	return 0;
 }
@@ -27,5 +29,9 @@ void dcAppAbort(void)
 
 void dcAppRefreshDisplayOptions(void)
 {
+	struct Settings settings;
+
+	settingsGet(&settings);
+	arduboySetRotation(settings.rotation);
 	arduboyRefreshDisplayOptions();
 }

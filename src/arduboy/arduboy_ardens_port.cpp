@@ -113,6 +113,15 @@ static ArduboyArdensRuntime *mArdensPtr;
 static uint16_t mPresentRowFirst, mPresentRowEnd;
 static uint16_t mPresentColFirst, mPresentColEnd;
 static uint8_t mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
+static bool mPresentFlipped;
+
+void arduboySetRotation(bool flipped)
+{
+	mPresentFlipped = flipped;
+	mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
+	if (mArdensPtr)
+		mArdensPtr->displayDirty = true;
+}
 
 static ArduboyArdensRuntime *arduboyPrvRuntime(void)
 {
@@ -884,7 +893,6 @@ static void arduboyPrvPresentFrame(bool force)
 
 	for (uint32_t y = mPresentRowFirst; y < mPresentRowEnd; y++) {
 		uint16_t srcX = mArdens.presentSrcX[y];
-		uint16_t *row = fb + y * DISP_WIDTH;
 
 		if (srcX == ARDUBOY_PRESENT_INVALID)
 			continue;
@@ -895,7 +903,11 @@ static void arduboyPrvPresentFrame(bool force)
 			bool pixelOn = displayOn && page != ARDUBOY_PRESENT_Y_INVALID &&
 				(mArdens.display.ram[(uint32_t)page * ARDUBOY_DISPLAY_WIDTH + srcX] & mask);
 
-			row[x] = pixelOn ? onColor : offColor;
+			uint32_t dst = y * DISP_WIDTH + x;
+
+			if (mPresentFlipped)
+				dst = DISP_WIDTH * DISP_HEIGHT - 1u - dst;
+			fb[dst] = pixelOn ? onColor : offColor;
 		}
 	}
 
@@ -914,7 +926,11 @@ static void arduboyPrvDebugPutPixel(uint16_t *fb, uint32_t x, uint32_t y, uint16
 {
 	if (!fb || x >= ARDUBOY_DEBUG_LOGICAL_WIDTH || y >= ARDUBOY_DEBUG_LOGICAL_HEIGHT)
 		return;
-	fb[x * DISP_WIDTH + (DISP_WIDTH - 1u - y)] = color;
+	uint32_t dst = x * DISP_WIDTH + (DISP_WIDTH - 1u - y);
+
+	if (mPresentFlipped)
+		dst = DISP_WIDTH * DISP_HEIGHT - 1u - dst;
+	fb[dst] = color;
 }
 
 static void arduboyPrvDebugFillRect(uint16_t *fb, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t color)

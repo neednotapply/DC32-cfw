@@ -1,3 +1,0 @@
-ndk;28.0.13004108
-build-tools;35.0.1
-platforms;android-35

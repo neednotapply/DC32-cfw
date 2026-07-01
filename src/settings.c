@@ -7,12 +7,12 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			17
+#define SETTINGS_CUR_VER			18
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
 #define SETTINGS_LED_MIN_BRIGHTNESS	15
-#define SETTINGS_MUSIC_VOLUME_MAX	15
+#define SETTINGS_AUDIO_VOLUME_MAX	15
 #define SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13	9
 #define SETTINGS_BADUSB_DEFAULT_VID	0x1209
 #define SETTINGS_BADUSB_DEFAULT_PID	0xdc32
@@ -86,8 +86,8 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->ledSpeed = 4;
 	if (settings->ledBrightness < SETTINGS_LED_MIN_BRIGHTNESS)
 		settings->ledBrightness = SETTINGS_LED_MIN_BRIGHTNESS;
-	if (settings->musicVolume > SETTINGS_MUSIC_VOLUME_MAX)
-		settings->musicVolume = 7;
+	if (settings->audioVolume > SETTINGS_AUDIO_VOLUME_MAX)
+		settings->audioVolume = 7;
 	if (!settings->badUsbVid)
 		settings->badUsbVid = SETTINGS_BADUSB_DEFAULT_VID;
 	if (!settings->badUsbPid)
@@ -164,12 +164,12 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 9:				//upgrade from v9
-			settings->musicVolume = 7;
+			settings->audioVolume = 7;
 			settings->musicLoopTrack = false;
 			//fallthrough
 
 		case 10:			//upgrade music volume from 0-10 scale to 0-15 scale
-			settings->musicVolume = (settings->musicVolume * 15 + 5) / 10;
+			settings->audioVolume = (settings->audioVolume * 15 + 5) / 10;
 			//fallthrough
 
 		case 11:			//upgrade LED speed from 1-4 scale to 1-10 scale
@@ -220,6 +220,10 @@ void settingsGet(struct Settings *settings)
 			settings->gbcUpscale = settings->upscale;
 			settings->nesSpeed = settings->speed;
 			settings->nesUpscale = settings->upscale;
+			//fallthrough
+
+		case 17:			//add universal audio mute
+			settings->audioMuted = false;
 			//fallthrough
 
 		//other cases here, in increasing order

@@ -251,6 +251,8 @@ static void usbDevicePrvApplyDeviceDesc(enum UsbDeviceMode mode)
 	}
 }
 
+static void usbDevicePrvPowerDown(void);
+
 bool usbDevicePrepare(void)
 {
 	uint32_t units;
@@ -264,6 +266,7 @@ bool usbDevicePrepare(void)
 	resets_hw->reset &=~ units;
 	if (!usbDevicePrvWaitBits(&resets_hw->reset_done, units, true)) {
 		mLastError = "PLL reset timeout";
+		usbDevicePrvPowerDown();
 		return false;
 	}
 
@@ -275,6 +278,7 @@ bool usbDevicePrepare(void)
 	pll_usb_hw->pwr &=~ (PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS);
 	if (!usbDevicePrvWaitBits(&pll_usb_hw->cs, PLL_CS_LOCK_BITS, true)) {
 		mLastError = "PLL lock timeout";
+		usbDevicePrvPowerDown();
 		return false;
 	}
 	pll_usb_hw->cs &=~ PLL_CS_BYPASS_BITS;
@@ -286,6 +290,13 @@ bool usbDevicePrepare(void)
 
 	mHwReady = true;
 	return true;
+}
+
+static void usbDevicePrvPowerDown(void)
+{
+	clocks_hw->clk[clk_usb].ctrl &=~ CLOCKS_CLK_USB_CTRL_ENABLE_BITS;
+	pll_usb_hw->pwr |= PLL_PWR_VCOPD_BITS | PLL_PWR_POSTDIVPD_BITS | PLL_PWR_PD_BITS;
+	mHwReady = false;
 }
 
 const char *usbDeviceLastError(void)
@@ -309,6 +320,7 @@ bool usbDeviceBegin(enum UsbDeviceMode mode, const struct UsbDeviceInfo *info)
 	if (!tud_init(0)) {
 		mMode = UsbDeviceModeNone;
 		mLastError = "TinyUSB init failed";
+		usbDevicePrvPowerDown();
 		return false;
 	}
 
@@ -345,25 +357,27 @@ enum UsbDeviceMode usbDeviceMode(void)
 
 void usbDeviceEnd(void)
 {
-	if (!mInited)
-		return;
-	tud_disconnect();
-	dcd_disconnect(0);
-	dcd_int_disable(0);
-	(void)tud_deinit(0);
+	if (mInited) {
+		tud_disconnect();
+		dcd_disconnect(0);
+		dcd_int_disable(0);
+		(void)tud_deinit(0);
+	}
 	mInited = false;
 	mMode = UsbDeviceModeNone;
+	usbDevicePrvPowerDown();
 }
 
 void usbDeviceDropNow(void)
 {
-	if (!mInited)
-		return;
-	dcd_disconnect(0);
-	dcd_int_disable(0);
-	(void)tud_deinit(0);
+	if (mInited) {
+		dcd_disconnect(0);
+		dcd_int_disable(0);
+		(void)tud_deinit(0);
+	}
 	mInited = false;
 	mMode = UsbDeviceModeNone;
+	usbDevicePrvPowerDown();
 }
 
 uint8_t const *tud_descriptor_device_cb(void)

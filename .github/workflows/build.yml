@@ -109,11 +109,12 @@ jobs:
             ${{ runner.temp }}/DC32-cfw/SD-apps.zip
           overwrite_files: true
 
-      - name: Remove SD source manifests from release
+      - name: Remove legacy SD bundle and source manifests from release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
         run: |
+          gh release delete-asset "$RELEASE_TAG" SD.zip --yes >/dev/null 2>&1 || true
           gh release delete-asset "$RELEASE_TAG" SD-assets.sources.json --yes >/dev/null 2>&1 || true
           gh release delete-asset "$RELEASE_TAG" SD-apps.sources.json --yes >/dev/null 2>&1 || true

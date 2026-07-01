@@ -11,33 +11,12 @@ enum PongMainScreen {
 };
 
 struct PongSettings {
-	bool audioEnabled;
-	uint8_t volume;
 	uint8_t colorTheme;
 };
 
 static void pongMainSetRole(struct PongRenderer *renderer, enum PongColorRole role)
 {
 	renderer->colorRole = (uint8_t)role;
-}
-
-static void pongMainNumber(char *buffer, uint32_t size, uint32_t value)
-{
-	char reverse[10];
-	uint32_t count = 0;
-	uint32_t out = 0;
-
-	if (!size)
-		return;
-	if (!value)
-		reverse[count++] = '0';
-	while (value && count < sizeof(reverse)) {
-		reverse[count++] = (char)('0' + value % 10u);
-		value /= 10u;
-	}
-	while (count && out + 1u < size)
-		buffer[out++] = reverse[--count];
-	buffer[out] = 0;
 }
 
 static void pongMainDrawMenu(struct PongPlatform *platform, uint32_t selected)
@@ -68,13 +47,8 @@ static void pongMainDrawMenu(struct PongPlatform *platform, uint32_t selected)
 	pongMainSetRole(renderer, PongColorNeutral);
 	renderer->draw_text(renderer->context, 18, 207,
 		selected < pongModesCount() ? pongModesGet(selected)->description :
-		"AUDIO / VOLUME / COLORS");
+		"COLOR THEMES");
 	renderer->draw_text(renderer->context, 18, 226, "A SELECT  CENTER EXIT");
-}
-
-static const char *pongMainAudioName(const struct PongSettings *settings)
-{
-	return settings->audioEnabled ? "ON" : "OFF";
 }
 
 static const char *pongMainThemeName(const struct PongSettings *settings)
@@ -88,17 +62,16 @@ static const char *pongMainThemeName(const struct PongSettings *settings)
 static void pongMainDrawSettings(struct PongPlatform *platform,
 	const struct PongSettings *settings, uint32_t selected)
 {
-	static const char *const labels[] = {"IN-GAME AUDIO", "VOLUME", "COLORS", "BACK"};
+	static const char *const labels[] = {"COLORS", "BACK"};
 	struct PongRenderer *renderer = &platform->renderer;
-	char volume[8];
 
 	renderer->clear(renderer->context);
 	pongMainSetRole(renderer, PongColorNeutral);
 	renderer->draw_text(renderer->context, 82, 14, "PONG SETTINGS");
 	pongMainSetRole(renderer, PongColorField);
 	renderer->draw_line(renderer->context, 38, 34, 282, 34);
-	for (uint_fast8_t i = 0; i < 4; i++) {
-		int32_t y = 58 + i * 34;
+	for (uint_fast8_t i = 0; i < 2; i++) {
+		int32_t y = 82 + i * 48;
 
 		if (i == selected) {
 			pongMainSetRole(renderer, PongColorAccent);
@@ -108,12 +81,6 @@ static void pongMainDrawSettings(struct PongPlatform *platform,
 		pongMainSetRole(renderer, PongColorNeutral);
 		renderer->draw_text(renderer->context, 42, y, labels[i]);
 		if (i == 0)
-			renderer->draw_text(renderer->context, 220, y, pongMainAudioName(settings));
-		else if (i == 1) {
-			pongMainNumber(volume, sizeof(volume), settings->volume);
-			renderer->draw_text(renderer->context, 220, y, volume);
-		}
-		else if (i == 2)
 			renderer->draw_text(renderer->context, 192, y, pongMainThemeName(settings));
 	}
 	pongMainSetRole(renderer, PongColorField);
@@ -126,18 +93,7 @@ static void pongMainDrawSettings(struct PongPlatform *platform,
 static void pongMainAdjustSettings(struct PongSettings *settings, uint32_t selected,
 	int8_t direction)
 {
-	if (selected == 0)
-		settings->audioEnabled = !settings->audioEnabled;
-	else if (selected == 1) {
-		int32_t volume = settings->volume + direction;
-
-		if (volume < 0)
-			volume = 0;
-		if (volume > 15)
-			volume = 15;
-		settings->volume = (uint8_t)volume;
-	}
-	else if (selected == 2) {
+	if (selected == 0) {
 		int32_t theme = settings->colorTheme + direction;
 
 		if (theme < 0)
@@ -163,8 +119,6 @@ int pongMainRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *args
 
 	if (!pongDc32PlatformInit(&platform, host, args))
 		return -1;
-	settings.audioEnabled = true;
-	settings.volume = platform.audio.volume;
 	settings.colorTheme = PongColorClassic;
 	platform.audio.enabled = false;
 	pongCoreReset(&state, platform.timing.ticksMs(platform.timing.context));
@@ -194,8 +148,7 @@ int pongMainRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *args
 					pongCoreReset(&state, platform.timing.ticksMs(platform.timing.context) ^
 						(selectedMode * 0x9e3779b9u));
 					mode->init(&state);
-					platform.audio.volume = settings.volume;
-					platform.audio.enabled = settings.audioEnabled;
+					platform.audio.enabled = true;
 					screen = PongMainPlaying;
 				}
 			}
@@ -207,14 +160,14 @@ int pongMainRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *args
 		else if (screen == PongMainSettings) {
 			if (input.pressedY[0]) {
 				if (input.pressedY[0] < 0)
-					selectedSetting = selectedSetting ? selectedSetting - 1u : 3u;
+					selectedSetting = selectedSetting ? selectedSetting - 1u : 1u;
 				else
-					selectedSetting = (selectedSetting + 1u) % 4u;
+					selectedSetting = (selectedSetting + 1u) % 2u;
 			}
 			if (input.pressedX[0])
 				pongMainAdjustSettings(&settings, selectedSetting, input.pressedX[0]);
 			if (input.confirmPressed) {
-				if (selectedSetting == 3)
+				if (selectedSetting == 1)
 					screen = PongMainModes;
 				else
 					pongMainAdjustSettings(&settings, selectedSetting, 1);

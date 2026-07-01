@@ -253,8 +253,6 @@ static SDLKey ojKeyForBit(uint_fast16_t bit)
 			return SDLK_p;
 		case KEY_BIT_SEL:
 			return SDLK_RCTRL;
-		case UI_KEY_BIT_CENTER:
-			return SDLK_ESCAPE;
 		default:
 			return SDLK_UNKNOWN;
 	}
@@ -300,9 +298,16 @@ static void ojProcessKeys(uint_fast16_t keys)
 		KEY_BIT_UP, KEY_BIT_DOWN, KEY_BIT_LEFT, KEY_BIT_RIGHT,
 	};
 	static const uint_fast16_t actions[] = {
-		KEY_BIT_A, KEY_BIT_B, KEY_BIT_START, KEY_BIT_SEL, UI_KEY_BIT_CENTER,
+		KEY_BIT_A, KEY_BIT_B, KEY_BIT_START, KEY_BIT_SEL,
 	};
 	uint_fast16_t changed = keys ^ gOjPrevKeys;
+
+	if ((changed & keys & UI_KEY_BIT_CENTER) && gOjHost && gOjHost->portMenu) {
+		if (!gOjHost->portMenu(&gOjCanvas))
+			gOjQuitRequested = true;
+		keys = gOjHost->uiKeysRaw ? gOjHost->uiKeysRaw() : 0;
+		changed = keys ^ gOjPrevKeys;
+	}
 
 	for (uint32_t i = 0; i < sizeof(directions) / sizeof(directions[0]); i++)
 		if (changed & directions[i])

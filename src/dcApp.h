@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define DCAPP_MAGIC             0x50414344u
-#define DCAPP_ABI_VERSION       4u
+#define DCAPP_ABI_VERSION       5u
 #define DCAPP_HEADER_SIZE       256u
 #define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
 #define DCAPP_CONTRACT_MAGIC    0x43444332u
@@ -34,13 +34,11 @@ enum DcAppId {
 	DcAppIdTetris = 201,
 	DcAppIdArkanoid = 202,
 	DcAppIdFlappy = 203,
-	DcAppIdLabyrinth = 204,
 	DcAppIdTrex = 205,
 	DcAppIdDoom = 206,
 	DcAppIdChips = 207,
 	DcAppIdScorch = 208,
 	DcAppIdPipe = 209,
-	DcAppIdCave = 210,
 	DcAppIdSokoban = 211,
 	DcAppIdOpenJazz = 212,
 	DcAppIdStarfield = 220,
@@ -113,6 +111,7 @@ struct DcAppHostApi {
 	bool (*flashWrite)(uint32_t addr, uint32_t eraseSize, const void *src, uint32_t writeSize);
 	void (*abortActive)(void);
 	void (*ledsTick)(void);
+	bool (*portMenu)(struct Canvas *activeCanvas);
 };
 
 typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);

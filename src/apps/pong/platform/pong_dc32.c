@@ -179,6 +179,13 @@ static bool pongDc32ReadInput(void *context, struct PongInput *input)
 	uint_fast16_t pressed = keys & ~ctx->previousKeys;
 
 	memset(input, 0, sizeof(*input));
+	if ((pressed & UI_KEY_BIT_CENTER) && ctx->host && ctx->host->portMenu) {
+		bool resume = ctx->host->portMenu(&ctx->draw.displayCnv);
+
+		keys = ctx->host->uiKeysRaw ? ctx->host->uiKeysRaw() : 0;
+		ctx->previousKeys = keys;
+		return resume;
+	}
 	input->axisX[0] = pongDc32Axis(keys, KEY_BIT_LEFT, KEY_BIT_RIGHT);
 	input->axisY[0] = pongDc32Axis(keys, KEY_BIT_UP, KEY_BIT_DOWN);
 	input->pressedX[0] = pongDc32Axis(pressed, KEY_BIT_LEFT, KEY_BIT_RIGHT);

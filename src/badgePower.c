@@ -7,7 +7,7 @@
 #define BADGE_POWER_ADC_REG				0x88
 #define BADGE_POWER_LOW_MV				3600u
 #define BADGE_POWER_CLEAR_MV			3700u
-#define BADGE_POWER_POLL_TICKS			(TICKS_PER_SECOND / 2u)
+#define BADGE_POWER_POLL_TICKS			((uint64_t)TICKS_PER_SECOND * 15u)
 #define BADGE_POWER_BATT_SCALE			(65536u * 10u / 3u)
 #define BADGE_POWER_USB_SCALE			(65536u * 5u)
 
@@ -16,6 +16,33 @@ static uint64_t mNextPollTime;
 static bool mPollInFlight;
 static uint8_t mPollAdcVals[4];
 static const uint8_t mPollAdcReg = BADGE_POWER_ADC_REG;
+
+struct BadgePowerCurvePoint {
+	uint16_t mv;
+	uint8_t percent;
+};
+
+static uint8_t badgePowerPrvPercent(uint32_t battMv)
+{
+	static const struct BadgePowerCurvePoint curve[] = {
+		{3300, 0}, {3500, 3}, {3600, 7}, {3690, 10}, {3730, 20},
+		{3770, 30}, {3790, 40}, {3830, 50}, {3870, 60}, {3920, 70},
+		{3980, 80}, {4060, 90}, {4200, 100},
+	};
+
+	if (battMv <= curve[0].mv)
+		return curve[0].percent;
+	for (uint_fast8_t i = 1; i < sizeof(curve) / sizeof(*curve); i++) {
+		if (battMv <= curve[i].mv) {
+			uint32_t mvSpan = curve[i].mv - curve[i - 1u].mv;
+			uint32_t percentSpan = curve[i].percent - curve[i - 1u].percent;
+
+			return (uint8_t)(curve[i - 1u].percent +
+				((battMv - curve[i - 1u].mv) * percentSpan + mvSpan / 2u) / mvSpan);
+		}
+	}
+	return 100;
+}
 
 static uint32_t badgePowerPrvAdcVal2mv(const uint8_t *val, uint32_t scaleValue)
 {
@@ -48,11 +75,17 @@ static bool badgePowerPrvLowBatt(uint32_t battMv)
 static void badgePowerPrvUpdate(const uint8_t adcVals[4])
 {
 	struct BadgePowerStatus status;
+	uint32_t rawBattMv = badgePowerPrvAdcVal2mv(adcVals + 0, BADGE_POWER_BATT_SCALE);
+	uint32_t battMv = rawBattMv;
+
+	if (mCachedStatus.valid)
+		battMv = (mCachedStatus.battMv * 3u + battMv + 2u) / 4u;
 
 	status.valid = true;
-	status.battMv = badgePowerPrvAdcVal2mv(adcVals + 0, BADGE_POWER_BATT_SCALE);
+	status.battMv = battMv;
+	status.battPercent = badgePowerPrvPercent(battMv);
 	status.usbMv = badgePowerPrvAdcVal2mv(adcVals + 2, BADGE_POWER_USB_SCALE);
-	status.lowBatt = badgePowerPrvLowBatt(status.battMv);
+	status.lowBatt = badgePowerPrvLowBatt(rawBattMv);
 
 	mCachedStatus = status;
 }

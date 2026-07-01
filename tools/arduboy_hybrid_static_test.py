@@ -18,6 +18,8 @@ ARDENS_SOUND_SRC = ARDENS_DIR / "absim_sound.hpp"
 ARDENS_RESET_SRC = ARDENS_DIR / "absim_reset.cpp"
 ARDENS_EMBEDDED_SRC = ARDENS_DIR / "absim_embedded.cpp"
 LINKER_SRC = ROOT / "src" / "linker_rp2350_defcon.lkr"
+ARDUBOY_APP_SRC = ROOT / "src" / "apps" / "arduboy_app.c"
+MAIN_SRC = ROOT / "src" / "main_rp2350_defcon.c"
 
 
 def expect(ok: bool, msg: str, failures: list[str]) -> None:
@@ -33,6 +35,8 @@ def main() -> int:
     ardens_text = ARDENS_PORT_SRC.read_text(encoding="utf-8")
     hybrid_text = HYBRID_SRC.read_text(encoding="utf-8")
     sim_text = SIM_SRC.read_text(encoding="utf-8")
+    app_text = ARDUBOY_APP_SRC.read_text(encoding="utf-8")
+    main_text = MAIN_SRC.read_text(encoding="utf-8")
     ardens_config_text = ARDENS_CONFIG_SRC.read_text(encoding="utf-8")
     ardens_hpp_text = ARDENS_HPP_SRC.read_text(encoding="utf-8")
     ardens_cpu_text = ARDENS_CPU_SRC.read_text(encoding="utf-8")
@@ -127,6 +131,15 @@ def main() -> int:
            "mArdens.display.ram" in ardens_text and "mPresentLastState" in ardens_text and
            "srcX = ARDUBOY_DISPLAY_WIDTH - 1u - srcX" in ardens_text,
            "Ardens presenter keeps dirty rendering and the display-space source-X correction", failures)
+    expect("arduboySetRotation(args->rotate)" in app_text and
+           "arduboySetRotation(settings.rotation)" in app_text and
+           "selection.runtime == GameRuntimeArduboy" in main_text and
+           "mRotateGame = shouldRotateGame();" in main_text,
+           "Arduboy launch and FN resume apply the saved screen orientation", failures)
+    expect(all("void arduboySetRotation(bool flipped)" in text and
+               "DISP_WIDTH * DISP_HEIGHT - 1u - dst" in text
+               for text in (ardens_text, hybrid_text, sim_text)),
+           "all Arduboy presenters support 180-degree framebuffer rotation", failures)
     expect("ARDUBOY ARDENS STOP" in ardens_text and
            "BOOT WATCHDOG" in ardens_text and "guest=%lu/s" in ardens_text and
            "backend=ardens audio=disabled" in ardens_text,

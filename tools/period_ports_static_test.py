@@ -16,7 +16,6 @@ ACCEPTED = {
     "DcAppIdChips": (207, "chips.DC32", "Chip's Challenge"),
     "DcAppIdScorch": (208, "scorch.DC32", "Scorched Earth"),
     "DcAppIdPipe": (209, "pipe.DC32", "Pipe Dream"),
-    "DcAppIdCave": (210, "cave.DC32", "Cave Story"),
     "DcAppIdSokoban": (211, "sokoban.DC32", "Sokoban"),
     "DcAppIdOpenJazz": (212, "openjazz.DC32", "Jazz Jackrabbit"),
 }
@@ -41,7 +40,11 @@ def check_sources_removed() -> None:
 
     expect("handmade period source is removed", not (ROOT / "src" / "apps" / "period" / "period_ports.c").exists())
     expect("period CMake source list is removed", "PERIOD_APP_SOURCES" not in cmake)
-    expect("generated fake cave data target is removed", "dcapp_cave_data" not in cmake and "cave.dat" not in cmake)
+    expect("retired Cave Story ID is removed", "DcAppIdCave" not in dcapp_h and "DcAppIdCave" not in dcapp_c and "DcAppIdCave" not in ui_c)
+    expect("retired Cave Story target is removed", "dcapp_cave" not in cmake and '"cave.DC32"' not in sd_zip)
+    expect("retired Cave Story source is removed", not (ROOT / "src" / "apps" / "cave").exists())
+    expect("retired Cave Story tools are removed", not (ROOT / "tools" / "build_cave_pack.py").exists() and not (ROOT / "tools" / "build_cave_assets.py").exists())
+    expect("retired NXEngine references are removed", not (ROOT / "third_party" / "nxengine-evo").exists() and not (ROOT / "third_party" / "doukutsu-rs").exists())
     for symbol, (app_id, filename, label) in ACCEPTED.items():
         expect(f"{symbol} ID is assigned to accepted port", f"{symbol} = {app_id}" in dcapp_h)
         expect(f"{filename} accepted port is built", filename.removesuffix(".DC32") in cmake)
@@ -67,9 +70,8 @@ def check_sources_removed() -> None:
         expect(f"{label} is not visible in Games menu", label not in ui_c)
         expect(f"{label} catalog entry is hidden", f'{{{symbol}, "{label}", "/APPS/{filename}", false}}' in dcapp_c)
     if apps_dir.exists():
-        expect("stale cave.dat build artifact is absent", not (apps_dir / "cave.dat").exists())
+        expect("stale Cave Story build artifacts are absent", not any((apps_dir / name).exists() for name in ("cave.DC32", "cave.raw", "cave.dat")))
     expect("period user-data README is packaged", "README-period-ports.txt" in sd_zip)
-    expect("Cave Story binary is packaged without user data", '"cave.DC32"' in sd_zip and '"APPS/cave.pak"' not in sd_zip and "CAVE_DATA_SOURCE" not in sd_zip)
     expect("Chip's user data is not redistributed", '"APPS/chips.pak"' not in sd_zip and "chips-tworld.pak" in sd_zip)
     expect("xscorch redistributable pack is packaged", '"APPS/scorch-xscorch.pak"' in sd_zip and "XSCORCH_PACK_SOURCE" in sd_zip)
     expect("PipeDreamer redistributable pack is packaged", '"APPS/pipe-pipedreamer.pak"' in sd_zip and "PIPEDREAMER_PACK_SOURCE" in sd_zip)
@@ -84,7 +86,7 @@ def check_port_runtime_scaffold() -> None:
     expect("port runtime has free-list allocator", "struct Dc32PortBlock" in source and "dc32PortCoalesce" in source)
     expect("port runtime has FAT asset pack reader", "dc32PortOpenAssetPack" in source and "dc32PortReadAssetPack" in source)
     expect("port runtime has save helpers", "dc32PortSaveRead" in source and '"/SAVE/PORTS/"' in source and "dc32PortLegacySavePath" in source)
-    expect("port runtime exits on center", "UI_KEY_BIT_CENTER" in source and "dc32PortCenterExitRequested" in source)
+    expect("port runtime no longer treats center as an unconditional exit", "dc32PortCenterExitRequested" not in source and "dc32PortCenterExitRequested" not in header)
 
 
 def check_xsokoban_source_and_generator(tmp: Path) -> None:
@@ -196,37 +198,6 @@ def check_xscorch_source_and_generator(tmp: Path) -> None:
     expect("Scorch app is large-XIP", "add_dcapp(dcapp_scorch scorch 208 LARGE_XIP" in cmake)
 
 
-def check_cave_source_and_loader() -> None:
-    nx_root = ROOT / "third_party" / "nxengine-evo"
-    drs_root = ROOT / "third_party" / "doukutsu-rs"
-    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    cave_app = (ROOT / "src" / "apps" / "cave" / "cave_app.c").read_text(encoding="utf-8")
-
-    expect("NXEngine-evo reference source is vendored", (nx_root / "src" / "map.cpp").is_file() and (nx_root / "src" / "graphics" / "Tileset.cpp").is_file())
-    expect("doukutsu-rs reference source is vendored", (drs_root / "src" / "game" / "map.rs").is_file() and (drs_root / "src" / "game" / "stage.rs").is_file())
-    expect("Cave app requires user cave.pak", 'CAVE_PACK_PATH "/APPS/cave.pak"' in cave_app and "dc32PortOpenAssetPack" in cave_app)
-    expect("Cave app parses Cave pack entries", "DC32CAVEPAK" in cave_app and "cavePackReadEntries" in cave_app)
-    expect("Cave app parses PXM maps and Stage.dat", all(token in cave_app for token in ("PXM", "Stage.dat", "caveLoadStageRecord", "caveLoadMap")))
-    expect("Cave app parses PXE entities", all(token in cave_app for token in ("PXE", "caveLoadEntities", "eventNum", "npcType")))
-    expect("Cave app loads TSC scripts", all(token in cave_app for token in ("Head.tsc", ".tsc", "caveStartScript", "caveScriptStep", "TRA", "MOV", "NOD")))
-    expect("Cave app loads Cave tile attributes", all(token in cave_app for token in ("tilekey.dat", ".pxa", "caveLoadTileAttrs", "CAVE_TA_SOLID_PLAYER")))
-    expect("Cave app loads NPC table and sheets", all(token in cave_app for token in ("npc.tbl", "caveLoadNpcTable", "caveLoadCommonNpcSheets", "caveLoadStageNpcSheets", "Npc/Npc%s.pbm")))
-    expect("Cave app renders NPC sprites from original sheets", all(token in cave_app for token in ("caveNpcSheetForId", "caveDrawNpcSprite", "dispLeft", "sheetId")))
-    expect("Cave app uses NXEngine sprite metadata", all(token in cave_app for token in ("cave_assets.h", "caveNxObjectSprites", "caveDrawNxObjectSprite")) and "build_cave_assets.py" in cmake)
-    expect("Cave app avoids heap framebuffer pressure", "static uint8_t mCaveFrame" in cave_app and "dc32PortMalloc(CAVE_SCREEN_W * CAVE_SCREEN_H)" not in cave_app)
-    expect("Cave app removes visible placeholder entities", "CAVE_FLAG_SCRIPT_ON_ACTIVATE) ? caveRgb" not in cave_app)
-    expect("Cave app has side-view player physics", all(token in cave_app for token in ("playerVx", "playerVy", "playerOnGround", "caveApplyPlayerPhysics", "caveMovePlayerFixedY")))
-    expect("Cave app fires Polar Star-style bullets", all(token in cave_app for token in ("Bullet.pbm", "CAVE_MAX_BULLETS", "caveFirePolarStar", "caveTickBullets", "CAVE_FLAG_SHOOTABLE")))
-    expect("Cave app persists Cave game state", all(token in cave_app for token in ("CAVE_NUM_GAME_FLAGS", "CAVE_MAP_FLAG_COUNT", "skipFlags", "mapFlags", "itemFlags", "weaponFlags", "equipMask", "CAVE_SAVE_VERSION 3u")))
-    expect("Cave app handles Cave TSC branch and inventory commands", all(token in cave_app for token in ("FLJ", "SKJ", "ITJ", "AMJ", "NCJ", "ECJ", "caveScriptJump")))
-    expect("Cave app handles Cave TSC entity commands", all(token in cave_app for token in ("DNP", "DNA", "ANP", "CNP", "INP", "MNP", "caveRefreshEntityVisibility")))
-    expect("Cave app handles Cave TSC world commands", all(token in cave_app for token in ("CMP", "SMP", "SNP", "MP+", "MPJ", "MYD", "MYB", "QUA", "FAI", "FAO", "SOU")))
-    expect("Cave app renders Cave text box modes", all(token in cave_app for token in ("messageTop", "messageBorder", "faceId", "itemId", "caveScriptAppendNumber")))
-    expect("Cave app decodes PBM/BMP tilesets", "caveLoadBitmap" in cave_app and "Stage/Prt%s.pbm" in cave_app)
-    expect("Cave app saves and transitions stages", "caveSaveGame" in cave_app and "caveTransition" in cave_app)
-    expect("Cave app is large-XIP", "add_dcapp(dcapp_cave cave 210 LARGE_XIP" in cmake)
-
-
 def check_openjazz_source_and_packer(tmp: Path) -> None:
     source_root = ROOT / "third_party" / "openjazz"
     shareware_root = ROOT / "third_party" / "openjazz-shareware"
@@ -286,7 +257,7 @@ def check_openjazz_source_and_packer(tmp: Path) -> None:
     expect("OpenJazz upstream file layer uses writable badge files", "dc32OjUserFileOpen" in file_io and "dc32OjFileWrite" in file_io)
     expect("OpenJazz first boot avoids missing config/save exceptions", "File::exists(CONFIG_FILE, PATH_TYPE_CONFIG)" in setup_io and "File::exists(fileName, PATH_TYPE_CONFIG)" in save_io)
     expect("OpenJazz save lookup uses port save folder with flat legacy fallback", '"/SAVE/PORTS/OJCFG.DAT"' in pack and '"/SAVE/OJCFG.DAT"' in pack and "dc32PortEnsureSaveDir" in pack)
-    expect("OpenJazz SDL shim maps badge-native gameplay controls", all(token in sdl for token in ("KEY_BIT_A", "KEY_BIT_B", "KEY_BIT_START", "KEY_BIT_SEL", "UI_KEY_BIT_CENTER", "return SDLK_p;", "return SDLK_RCTRL;", "return SDLK_ESCAPE;", "SDL_Flip")) and all(token not in sdl for token in ("gOjSelectHeld", "gOjChordActive", "ojChordKey")))
+    expect("OpenJazz SDL shim maps gameplay controls and reserves FN for the Ports menu", all(token in sdl for token in ("KEY_BIT_A", "KEY_BIT_B", "KEY_BIT_START", "KEY_BIT_SEL", "UI_KEY_BIT_CENTER", "return SDLK_p;", "return SDLK_RCTRL;", "gOjHost->portMenu(&gOjCanvas)", "SDL_Flip")) and "return SDLK_ESCAPE;" not in sdl and all(token not in sdl for token in ("gOjSelectHeld", "gOjChordActive", "ojChordKey")))
     expect("OpenJazz app has fatal allocation recovery", "setjmp" in app and "longjmp" in app and "HeapPeak" in app)
     expect("OpenJazz splits persistent auxiliary SRAM from transient app scratch", all(token in app for token in ("dcAppGetActiveScratch", "dc32OjHeapInit", "DC32_PORT_OPENJAZZ_AUX_START", "scratch.ptr", "scratch.size")) and "dc32PortHeapAddRegion" not in app)
     expect("OpenJazz accepts any build-contract scratch span with useful startup diagnostics", all(token in app for token in ("DC32_OJ_TRANSIENT_MIN", "Scratch missing", "Scratch too small", "Heap init failed", "Have %u; need %u")) and "80u * 1024u" not in app)
@@ -424,50 +395,6 @@ def check_openjazz_source_and_packer(tmp: Path) -> None:
     expect("OpenJazz packer rejects malformed ZIP input", bad_result.returncode != 0 and "error:" in bad_result.stdout)
 
 
-def check_cave_packer(tmp: Path) -> None:
-    data = tmp / "cave" / "data"
-    (data / "Stage").mkdir(parents=True)
-    (data / "Npc").mkdir()
-    for name in ("MyChar.pbm", "Arms.pbm", "ArmsImage.pbm", "Bullet.pbm", "Caret.pbm", "Face.pbm", "ItemImage.pbm", "npc.tbl"):
-        (data / name).write_bytes(b"sample")
-    (data / "Stage.dat").write_bytes(b"\x01" + b"Start".ljust(32, b"\0") + b"Start Point".ljust(35, b"\0") + bytes([0, 0, 4, 0, 0, 1]))
-    (data / "Stage" / "Start.pxm").write_bytes(b"pxm")
-    (data / "Stage" / "Start.tsc").write_bytes(b"tsc")
-    (data / "Stage" / "Start.pxe").write_bytes(b"pxe")
-    (data / "Npc" / "Npc0.pbm").write_bytes(b"npc")
-    out = tmp / "cave.pak"
-
-    result = run([sys.executable, "tools/build_cave_pack.py", "--input", str(tmp / "cave"), "--output", str(out)])
-    expect("Cave packer succeeds with local data", result.returncode == 0 and out.is_file())
-    raw = out.read_bytes()
-    magic, version, count = struct.unpack_from("<12sII", raw, 0)
-    expect("Cave pack magic", magic == b"DC32CAVEPAK\0")
-    expect("Cave pack version", version == 1)
-    expect("Cave pack file count", count >= 11)
-
-    (data / "Stage.dat").unlink()
-    exe = tmp / "cave" / "Doukutsu.exe"
-    exe_data = bytearray(0x937B0 + 95 * 0xC8)
-    for index in range(95):
-        pos = 0x937B0 + index * 0xC8
-        exe_data[pos : pos + 32] = b"0".ljust(32, b"\0")
-        exe_data[pos + 32 : pos + 64] = b"Start".ljust(32, b"\0")
-        struct.pack_into("<i", exe_data, pos + 64, 4)
-        exe_data[pos + 68 : pos + 100] = b"bk0".ljust(32, b"\0")
-        exe_data[pos + 100 : pos + 132] = b"Guest".ljust(32, b"\0")
-        exe_data[pos + 132 : pos + 164] = b"0".ljust(32, b"\0")
-        exe_data[pos + 164] = 0
-        exe_data[pos + 165 : pos + 200] = b"Start Point".ljust(35, b"\0")
-    exe.write_bytes(exe_data)
-    exe_out = tmp / "cave-from-exe.pak"
-    exe_result = run([sys.executable, "tools/build_cave_pack.py", "--input", str(tmp / "cave"), "--output", str(exe_out)])
-    expect("Cave packer extracts Stage.dat from Doukutsu.exe", exe_result.returncode == 0 and exe_out.is_file())
-    expect("Cave packer reports executable stage source", "Doukutsu.exe" in exe_result.stdout)
-
-    missing = run([sys.executable, "tools/build_cave_pack.py", "--input", str(tmp / "missing"), "--output", str(tmp / "bad.pak")])
-    expect("Cave packer fails cleanly without data", missing.returncode != 0 and "error:" in missing.stdout)
-
-
 def check_chips_packer(tmp: Path) -> None:
     chips = tmp / "CHIPS.DAT"
     upper = bytes([0x6C, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0x03, 0x00])
@@ -524,7 +451,6 @@ def check_chips_packer(tmp: Path) -> None:
 
 
 def check_period_asset_packer(tmp: Path) -> None:
-    cave_tool = (ROOT / "tools" / "build_cave_pack.py").read_text(encoding="utf-8")
     chips_tool = (ROOT / "tools" / "build_chips_pack.py").read_text(encoding="utf-8")
     period_tool = (ROOT / "tools" / "build_period_assets.py").read_text(encoding="utf-8")
     tworld_tool = (ROOT / "tools" / "build_tworld_assets.py").read_text(encoding="utf-8")
@@ -550,7 +476,7 @@ def check_period_asset_packer(tmp: Path) -> None:
     expect("Period asset packer succeeds with local source tree", result.returncode == 0)
     expect("PipeDreamer pack is written", (out_dir / "pipe-pipedreamer.pak").is_file())
     expect("Period asset manifest is written", (out_dir / "period-assets-manifest.json").is_file())
-    expect("User asset packers have interactive no-argument paths", all("resolve_inputs" in text and "prompt_path" in text for text in (cave_tool, chips_tool, period_tool)))
+    expect("User asset packers have interactive no-argument paths", all("resolve_inputs" in text and "prompt_path" in text for text in (chips_tool, period_tool)))
     expect("Generated asset scripts have no required terminal arguments", all("required=True" not in text and "resolve_inputs" in text for text in (tworld_tool, xscorch_tool, xsokoban_tool)))
     expect("Chip packer supports flexible tile image import", all(token in chips_tool for token in ("PIL", "guess_grid", "build_tile_pack_from_image", "DC32CHIPTIL")))
     expect("Chip packer supports Win 3.1 executable tile extraction", all(token in chips_tool for token in ("CHIPS.EXE", "read_ne_bitmap_resource", "WIN_EXE_TILE_RESOURCE_ID")))
@@ -564,10 +490,8 @@ def main() -> int:
         check_tworld_source_and_generator(tmp_path)
         check_xscorch_source_and_generator(tmp_path)
         check_pipedreamer_source()
-        check_cave_source_and_loader()
         check_openjazz_source_and_packer(tmp_path)
         check_xsokoban_source_and_generator(tmp_path)
-        check_cave_packer(tmp_path)
         check_chips_packer(tmp_path)
         check_period_asset_packer(tmp_path)
     print("Period port acceptance tests passed")

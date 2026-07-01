@@ -90,13 +90,11 @@ APP_BINARIES = (
     "tetris.DC32",
     "arkanoid.DC32",
     "flappy.DC32",
-    "labyrinth.DC32",
     "trex.DC32",
     "doom.DC32",
     "chips.DC32",
     "scorch.DC32",
     "pipe.DC32",
-    "cave.DC32",
     "sokoban.DC32",
     "openjazz.DC32",
     "starfield.DC32",
@@ -232,12 +230,11 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                     "chips": 207,
                     "scorch": 208,
                     "pipe": 209,
-                    "cave": 210,
                     "sokoban": 211,
                     "openjazz": 212,
                 },
                 "sd_path": "APPS/",
-                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Cave Story is an NXEngine/doukutsu data-compatible loader port that requires user-provided Cave data, Sokoban is an XSokoban-derived port, and Jazz Jackrabbit is an OpenJazz-derived port bundled with Epic MegaGames' unmodified shareware archive.",
+                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Sokoban is an XSokoban-derived port, and Jazz Jackrabbit is an OpenJazz-derived port bundled with Epic MegaGames' unmodified shareware archive.",
             },
         },
     }
@@ -592,19 +589,16 @@ def write_period_ports_readme(apps_dir: Path) -> None:
         "- 207 Chip's Challenge: /APPS/chips.DC32 plus /APPS/chips-tworld.pak; user builds /APPS/chips.pak from Win 3.1 CHIPS.DAT and CHIPS.EXE\n"
         "- 208 Scorched Earth: /APPS/scorch.DC32 plus /APPS/scorch-xscorch.pak\n"
         "- 209 Pipe Dream: /APPS/pipe.DC32 plus /APPS/pipe-pipedreamer.pak\n"
-        "- 210 Cave Story: /APPS/cave.DC32; user builds /APPS/cave.pak from freeware Cave Story data\n"
         "- 211 Sokoban: /APPS/sokoban.DC32 plus /APPS/sokoban-xsokoban.pak\n"
         "- 212 Jazz Jackrabbit: /APPS/openjazz.DC32 plus the original Epic MegaGames /APPS/JAZZ.ZIP shareware archive; first launch creates /APPS/openjazz.pak and a validated XIP graphics cache\n"
         "\n"
         "Required user data:\n"
-        "- Cave Story: /APPS/cave.pak\n"
         "- Chip's Challenge: /APPS/chips.pak\n"
         "\n"
-        "Cave Story freeware data, CHIPS.DAT, and proprietary original Chip's graphics are not redistributed. Build optional packs locally by running:\n"
-        "- python tools/build_cave_pack.py\n"
+        "CHIPS.DAT and proprietary original Chip's graphics are not redistributed. Build the optional pack locally by running:\n"
         "- python tools/build_chips_pack.py\n"
         "Jazz Jackrabbit shareware remains copyright Epic MegaGames. JAZZ.ZIP is distributed unchanged under the terms in its LICENSE.DOC; SHA-256: 385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e.\n"
-        "OpenJazz uses the same 3 MiB staging window as DOOM, so switching between them can trigger a one-time cache rebuild. The Cave and Chip's scripts prompt for paths and write the badge-ready pak. The Chip's packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
+        "OpenJazz uses the same 3 MiB staging window as DOOM, so switching between them can trigger a one-time cache rebuild. The Chip's script prompts for paths and writes the badge-ready pak. The packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
         "\n"
         "The firmware menu exposes only period titles whose source-derived ports have passed acceptance.\n",
         encoding="utf-8",
@@ -692,7 +686,7 @@ wkeeling/arkanoid commit 7e0e876cd034ebd62890e65352c7ef0b12b45df5 and
 contains a generated scaled copy of that source's graphics. Flappy Bird is
 derived from VadimBoev/FlappyBird {FLAPPY_TAG} commit {FLAPPY_COMMIT} and
 contains generated pre-scaled RGB332 copies of that source's visible PNG sprites. Chip's Challenge,
-Scorched Earth, Pipe Dream, Cave Story, Sokoban, and Jazz Jackrabbit are included as
+Scorched Earth, Pipe Dream, Sokoban, and Jazz Jackrabbit are included as
 source-derived/data-compatible period ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
 shareware data only.
@@ -754,9 +748,9 @@ shareware data only.
 
 ## Faithful Period Ports
 
-- Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 210 Cave Story, data-compatible with freeware Cave Story packs and informed by NXEngine-evo/doukutsu-rs formats; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps; 212 Jazz Jackrabbit, derived from GPL OpenJazz and bundled with the original Epic MegaGames shareware archive
-- Data helpers: tools/build_cave_pack.py, tools/build_chips_pack.py, tools/build_openjazz_pack.py, tools/build_period_assets.py
-- Notes: Cave Story freeware data, CHIPS.DAT, and unclear proprietary original graphics are user-provided only. The current Jazz Jackrabbit port supports the bundled shareware data.
+- Packaged: 207 Chip's Challenge, derived from GPL Tile World engine/assets; 208 Scorched Earth, derived from GPL xscorch tables/assets; 209 Pipe Dream, derived from MIT PipeDreamer logic/assets; 211 Sokoban, derived from public-domain XSokoban screens and pixmaps; 212 Jazz Jackrabbit, derived from GPL OpenJazz and bundled with the original Epic MegaGames shareware archive
+- Data helpers: tools/build_chips_pack.py, tools/build_openjazz_pack.py, tools/build_period_assets.py
+- Notes: CHIPS.DAT and unclear proprietary original graphics are user-provided only. The current Jazz Jackrabbit port supports the bundled shareware data.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

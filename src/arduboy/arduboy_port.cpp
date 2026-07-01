@@ -463,6 +463,15 @@ static uint16_t mPresentRowEnd;
 static uint16_t mPresentColFirst;
 static uint16_t mPresentColEnd;
 static uint8_t mPresentLastState;
+static bool mPresentFlipped;
+
+void arduboySetRotation(bool flipped)
+{
+	mPresentFlipped = flipped;
+	mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
+	if (mMachine)
+		mMachine->displayDirty = 1;
+}
 
 static bool arduboyPrvDisplayHasVisibleContent(const ArduboyMachine *m);
 static void arduboyPrvSyncEepromToSave(bool force);
@@ -5246,7 +5255,6 @@ static void arduboyPrvPresentFrame(void)
 	}
 
 	for (uint32_t y = mPresentRowFirst; y < mPresentRowEnd; y++) {
-		uint16_t *row = fb + y * DISP_WIDTH;
 		uint16_t srcX = mPresentSrcX[y];
 
 		if (srcX == ARDUBOY_PRESENT_INVALID)
@@ -5257,10 +5265,14 @@ static void arduboyPrvPresentFrame(void)
 		for (uint32_t x = mPresentColFirst; x < mPresentColEnd; x++) {
 			uint8_t page = srcYPage[x];
 
+			uint32_t dst = y * DISP_WIDTH + x;
+
+			if (mPresentFlipped)
+				dst = DISP_WIDTH * DISP_HEIGHT - 1u - dst;
 			if (page != ARDUBOY_PRESENT_Y_INVALID && (mMachine->vram[page][srcX] & srcYMask[x]))
-				row[x] = onColor;
+				fb[dst] = onColor;
 			else
-				row[x] = offColor;
+				fb[dst] = offColor;
 		}
 	}
 	mMachine->displayDirty = 0;

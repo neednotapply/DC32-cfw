@@ -30,6 +30,8 @@ extern "C" {
 bool dispInit(uint32_t desiredFramerate);
 bool dispOn(void);
 bool dispOff(void);
+bool dispPauseScanout(void);
+bool dispResumeScanout(void);
 void dispSetFramerate(uint32_t desiredFramerate);
 
 void* dispGetFb(void);

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER_FMT = "<IHH" + "I" * 14 + "32sI" + "I" * 39
 HEADER_SIZE = 256
 MAGIC = 0x50414344
-ABI = 4
+ABI = 5
 LOAD_ADDR = 0x10080000
 DCAPP_IMAGE_FLAG_LARGE_XIP = 0x00000001
 DCAPP_CONTRACT_MAGIC = 0x43444332
@@ -57,13 +57,11 @@ APPS = {
     "tetris.DC32": 201,
     "arkanoid.DC32": 202,
     "flappy.DC32": 203,
-    "labyrinth.DC32": 204,
     "trex.DC32": 205,
     "doom.DC32": 206,
     "chips.DC32": 207,
     "scorch.DC32": 208,
     "pipe.DC32": 209,
-    "cave.DC32": 210,
     "sokoban.DC32": 211,
     "openjazz.DC32": 212,
     "starfield.DC32": 220,
@@ -71,12 +69,11 @@ APPS = {
     "cube.DC32": 222,
 }
 RESERVED_PERIOD_IDS = {}
-LARGE_XIP_APPS = {"chips.DC32", "scorch.DC32", "pipe.DC32", "cave.DC32"}
+LARGE_XIP_APPS = {"chips.DC32", "scorch.DC32", "pipe.DC32"}
 GAME_APPS = {"gb.DC32", "nes.DC32", "arduboy.DC32"}
 PICOWARE_APPS = {
     "pong.DC32",
     "tetris.DC32",
-    "labyrinth.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
@@ -327,7 +324,6 @@ def check_loader_source() -> None:
     for filename in ():
         expect(f"{filename} is not built", filename.removesuffix(".DC32") not in cmake)
         expect(f"{filename} is not packaged", f'"{filename}"' not in sd_zip)
-    expect("Cave fake data is not packaged", "cave.dat" not in sd_zip and "CAVE_DATA_SOURCE" not in sd_zip)
     expect("Period port README is packaged", "README-period-ports.txt" in sd_zip)
     for label in ():
         expect(f"{label} is not menu-enabled before faithful port", label not in ui_c)
@@ -337,8 +333,6 @@ def check_loader_source() -> None:
     expect("Scorched Earth xscorch pack is packaged", '"APPS/scorch-xscorch.pak"' in sd_zip and "XSCORCH_PACK_SOURCE" in sd_zip)
     expect("Pipe Dream faithful port is menu-enabled", '"Pipe Dream"' in ui_c and '"pipe.DC32"' in sd_zip)
     expect("Pipe Dream PipeDreamer pack is packaged", '"APPS/pipe-pipedreamer.pak"' in sd_zip and "PIPEDREAMER_PACK_SOURCE" in sd_zip)
-    expect("Cave Story faithful port is menu-enabled", '"Cave Story"' in ui_c and '"cave.DC32"' in sd_zip)
-    expect("Cave Story user data is not packaged", '"APPS/cave.pak"' not in sd_zip and "cave.dat" not in sd_zip)
     expect("Sokoban faithful port is menu-enabled", '"Sokoban"' in ui_c and '"sokoban.DC32"' in sd_zip)
     expect("Sokoban XSokoban pack is packaged", '"APPS/sokoban-xsokoban.pak"' in sd_zip and "XSOKOBAN_PACK_SOURCE" in sd_zip)
     expect("DOOM WHX is packaged under APPS", '"APPS/doom1.whx"' in sd_zip and "rp2040-doom" in sd_zip)
@@ -377,8 +371,9 @@ def check_loader_source() -> None:
     expect("DOOM recovers corrupt patch decoder cache", "dc32_reset_patch_decoder_cache" in cmake and "header->size == 0" in cmake and "offset_or_inverse_slot = patch_offset_or_inverse_slot(patch_num)" in cmake)
     expect("DOOM presenter handles wipe video type", "case VIDEO_TYPE_WIPE:" in doom_platform and "doomDc32AdvanceWipe" in doom_platform)
     expect("DOOM presenter keeps overlay active list", "vpatchlists->vpatch_next[prev]" in doom_platform and "doomDc32DrawOverlayLine" in doom_platform)
-    expect("DOOM receives screen orientation setting", "if (appId == DcAppIdDoom)" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8") and "args.rotate = settings.rotation" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8"))
+    expect("native ports receive the saved screen orientation", "appId >= DcAppIdPong && appId <= DcAppIdOpenJazz" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8") and "args.rotate = settings.rotation" in (ROOT / "src" / "ui.c").read_text(encoding="utf-8"))
     expect("DOOM applies screen orientation setting", "doomDc32Canvas.flipped = 1u" in doom_app and "args && args->rotate" in doom_app)
+    expect("DOOM reserves FN for the live Ports menu", "doomDc32Host->portMenu(&doomDc32Canvas)" in doom_platform and "doomDc32Exit(0)" in doom_platform)
 
 
 def check_artifacts() -> None:
@@ -454,6 +449,8 @@ def check_artifacts() -> None:
         if name == "flappy.DC32":
             expect("Flappy Bird remains below 256 KiB", image_size < QSPI_APP_CACHE_SIZE)
             expect("Flappy Bird abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
+        if name == "doom.DC32":
+            expect("DOOM keeps 16 KiB app-cache release headroom", image_size <= QSPI_APP_CACHE_SIZE - 0x4000)
         if name == "sokoban.DC32":
             expect("Sokoban abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "openjazz.DC32":
@@ -465,8 +462,6 @@ def check_artifacts() -> None:
             expect("Scorched Earth abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "pipe.DC32":
             expect("Pipe Dream abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
-        if name == "cave.DC32":
-            expect("Cave Story abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         if name == "openjazz.DC32":
             expect("Jazz Jackrabbit abort offset", HEADER_SIZE <= (abort_offset & ~1) < image_size)
         expect(f"{name} CRC", (binascii.crc32(data[HEADER_SIZE:]) & 0xFFFFFFFF) == crc32)

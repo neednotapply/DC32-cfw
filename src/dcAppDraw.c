@@ -66,6 +66,8 @@ bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, co
 		ctx->displayCnv.h = h;
 	if (!ctx->displayCnv.bpp)
 		ctx->displayCnv.bpp = 16u;
+	if (args && args->rotate)
+		ctx->displayCnv.flipped = 1u;
 	dcAppDrawClear(ctx, 0);
 	ctx->prevKeys = host && host->uiKeysRaw ? host->uiKeysRaw() : uiGetUiKeysRaw();
 	return true;
@@ -179,6 +181,14 @@ bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)
 	ctx->pressed = ctx->keys & ~ctx->prevKeys;
 	ctx->prevKeys = ctx->keys;
 	ctx->frame++;
+	if ((ctx->pressed & UI_KEY_BIT_CENTER) && ctx->host && ctx->host->portMenu) {
+		bool resume = ctx->host->portMenu(&ctx->displayCnv);
+
+		ctx->keys = ctx->host->uiKeysRaw ? ctx->host->uiKeysRaw() : 0;
+		ctx->prevKeys = ctx->keys;
+		ctx->pressed = 0;
+		return resume;
+	}
 	return (ctx->pressed & exitMask) == 0;
 }
 

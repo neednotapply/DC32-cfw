@@ -29,6 +29,7 @@ static uint32_t mFbStartAddr = (uintptr_t)mFb;
 static uint64_t mPerFrameSpace, mNextFrame;
 static uint8_t mSm0start, mBri = 15;
 static bool mDispOn;
+static bool mScanoutPaused = true;
 
 
 
@@ -99,16 +100,45 @@ static void dispPrvArmContinuousDma(void)
 	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = (DREQ_PIO_TYPE_IDX(DISP_PIO_IDX, TX, DISP_PIO_SM) << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) | (DISP_DMA_START_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB) | (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) | DMA_CH0_CTRL_TRIG_INCR_READ_BITS | DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS | DMA_CH0_CTRL_TRIG_EN_BITS;
 }
 
+static void dispPrvStartScanout(bool resetWindow)
+{
+	dispPrvSetPioWidth(8);
+	if (resetWindow)
+		lcdSetRegion(0, 0, DISP_WIDTH, DISP_HEIGHT, 0, 0);
+	lcdCmd(0x2c, false, -1);	//restart LCD memory write at the configured window origin
+	dispPrvSetPioWidth(16);
+	dispPrvArmContinuousDma();
+	dma_hw->multi_channel_trigger = 1u << DISP_DMA_START_CH;
+	dispPrvFrameCtrReset();
+	mScanoutPaused = false;
+}
+
+static void dispPrvStopScanout(void)
+{
+	const uint32_t txStallMask = (1u << PIO_FDEBUG_TXSTALL_LSB) << DISP_PIO_SM;
+	uint32_t ctrl = dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl;
+
+	//Let the current frame complete, but prevent it from chaining another frame.
+	ctrl &=~ DMA_CH0_CTRL_TRIG_CHAIN_TO_BITS;
+	ctrl |= DISP_DMA_XFER_CH << DMA_CH0_CTRL_TRIG_CHAIN_TO_LSB;
+	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = ctrl;
+	while ((dma_hw->ch[DISP_DMA_START_CH].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS) ||
+	       (dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS));
+	dma_hw->ch[DISP_DMA_START_CH].al1_ctrl = 0;
+	dma_hw->ch[DISP_DMA_XFER_CH].al1_ctrl = 0;
+	MY_PIO->fdebug = txStallMask;
+	while (!(MY_PIO->fdebug & txStallMask));
+	sio_hw->gpio_set = 1 << PIN_LCD_CS;
+	mScanoutPaused = true;
+}
+
 static bool dispPrvTurnOn(bool firstTime)
 {
+	(void)firstTime;
 
 	pr("turning display on\n");
 
-	dispPrvSetPioWidth(8);
-	lcdCmd(0x2c, false, -1);	//write data command
-
-	dispPrvSetPioWidth(16);
-	dma_hw->ch[DISP_DMA_START_CH].ctrl_trig |= 0;
+	dispPrvStartScanout(false);
 	pr("dma is on\n");
 
 	pwm_hw->slice[BACKLITE_PWM_INDEX].csr &=~ PWM_CH0_CSR_EN_BITS;
@@ -128,21 +158,10 @@ static bool dispPrvTurnOn(bool firstTime)
 
 static bool dispPrvTurnOff(void)
 {
-	uint_fast8_t i;
-
 	pr("turning display off\n");
 
 	pwm_hw->slice[BACKLITE_PWM_INDEX].csr = 0;	//backlight duty = 0
-
-	for (i = 0; i < 2; i++)
-		dma_hw->ch[i].al1_ctrl = 0;
-
-	dma_hw->abort = 3 << 0;
-
-	for (i = 0; i < 2; i++)
-		while (dma_hw->ch[i].al1_ctrl & DMA_CH0_CTRL_TRIG_BUSY_BITS)
-	
-	sio_hw->gpio_set = 1 << PIN_LCD_CS;
+	dispPrvStopScanout();
 
 	//verify backlight went off before disabling pwm (pwm can be slow)
 	while (sio_hw->gpio_in & (1 << PIN_LCD_BL));
@@ -231,6 +250,22 @@ bool dispOn(void)
 bool dispOff(void)
 {
 	return !mDispOn || dispPrvTurnOff();
+}
+
+bool dispPauseScanout(void)
+{
+	if (!mDispOn || mScanoutPaused)
+		return true;
+	dispPrvStopScanout();
+	return true;
+}
+
+bool dispResumeScanout(void)
+{
+	if (!mDispOn || !mScanoutPaused)
+		return true;
+	dispPrvStartScanout(true);
+	return true;
 }
 
 void* dispGetFb(void)

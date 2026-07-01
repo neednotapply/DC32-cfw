@@ -32,6 +32,7 @@ static volatile uint16_t mPcmWrite;
 static uint8_t mPcmBuf[AUDIO_PCM_BUF_SIZE];
 static volatile uint8_t mPcmSample = 128;
 static uint8_t mVolume = AUDIO_PWM_VOLUME_MAX;
+static uint8_t mMasterVolume = AUDIO_PWM_VOLUME_MAX;
 static volatile enum AudioPwmMode mMode;
 
 static void audioPwmPrvPinToPwm(void)
@@ -92,14 +93,19 @@ static void audioPwmPrvWriteToneDuty(void)
 		0, 16, 24, 34, 46, 60, 76, 94, 114, 136, 160, 188, 220, 256, 294, 336
 	};
 
-	audioPwmPrvWriteDuty((mToneDuty * toneGain[mVolume]) / (256 * 2));
+	uint_fast8_t effective = (mVolume * mMasterVolume + AUDIO_PWM_VOLUME_MAX / 2u) /
+		AUDIO_PWM_VOLUME_MAX;
+
+	audioPwmPrvWriteDuty((mToneDuty * toneGain[effective]) / (256 * 2));
 }
 
 static void audioPwmPrvWritePcmDuty(uint8_t sample)
 {
 	int32_t centered = (int32_t)sample - 128;
 	int32_t top = (int32_t)mPcmTop;
-	int32_t duty = top / 2 + (centered * (top / 2) * (int32_t)mVolume) / (128 * AUDIO_PWM_VOLUME_MAX);
+	int32_t duty = top / 2 + (centered * (top / 2) * (int32_t)mVolume *
+		(int32_t)mMasterVolume) /
+		(128 * AUDIO_PWM_VOLUME_MAX * AUDIO_PWM_VOLUME_MAX);
 
 	if (duty < 0)
 		duty = 0;
@@ -128,6 +134,26 @@ uint_fast8_t audioPwmGetVolume(void)
 	return mVolume;
 }
 
+void audioPwmSetMasterVolume(uint_fast8_t volume)
+{
+	if (volume > AUDIO_PWM_VOLUME_MAX)
+		volume = AUDIO_PWM_VOLUME_MAX;
+	mMasterVolume = volume;
+	if (mMode == AudioPwmModeTone) {
+		if (mVolume && mMasterVolume)
+			audioPwmPrvWriteToneDuty();
+		else
+			audioPwmStop();
+	}
+	else if (mMode == AudioPwmModePcm)
+		audioPwmPrvWritePcmDuty(mPcmSample);
+}
+
+uint_fast8_t audioPwmGetMasterVolume(void)
+{
+	return mMasterVolume;
+}
+
 bool audioPwmTone(uint32_t freq)
 {
 	uint32_t duty, baseFreq = TICKS_PER_SECOND / AUDIO_TONE_CLK_DIV;
@@ -136,7 +162,7 @@ bool audioPwmTone(uint32_t freq)
 		audioPwmStop();
 		return true;
 	}
-	if (!mVolume) {
+	if (!mVolume || !mMasterVolume) {
 		audioPwmStop();
 		return true;
 	}

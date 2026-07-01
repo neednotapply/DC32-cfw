@@ -171,11 +171,10 @@ def main() -> int:
     )))
     expect("Ultra score records display their own line totals",
            "tetrisNumber(second, sizeof(second), ultra->lines);" in port)
-    expect("gameplay SFX use PWM and restore volume", all(token in port for token in (
-        "audioPwmTone", "audioPwmStop", "audioPwmSetVolume(app.previousVolume)",
-    )))
+    expect("gameplay SFX use globally governed PWM audio", "audioPwmTone" in port and "audioPwmStop" in port and "audioPwmSetVolume" not in port)
+    expect("title removes duplicate audio-only settings", '"SETTINGS"' not in port and "TetrisScreenSettings" not in port and "reservedAudioEnabled" in port and "reservedVolume" in port)
     expect("menus remain silent", all("tetrisTone" not in function_body(port, name) for name in (
-        "tetrisHandleTitle", "tetrisHandleSettings", "tetrisHandleRecords",
+        "tetrisHandleTitle", "tetrisHandleRecords",
     )))
     expect("runtime is 60 FPS", "#define TETRIS_FPS 60u" in port and "dispSetFramerate(TETRIS_FPS)" in port)
     expect("pinned source is documented", "4de098dd0b48d991247313d8dba30b9721e6f9d9" in reference)

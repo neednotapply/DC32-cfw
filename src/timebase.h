@@ -14,5 +14,6 @@ uint64_t getTime(void);
 
 void delayMsec(uint32_t msec);
 void delayUsec(uint32_t usec);
+void timebaseIdleWaitMsec(uint32_t msec);
 
 #endif

@@ -20,6 +20,17 @@ set(DCAPP_CACHE_START 0x10080000)
 set(DCAPP_LARGE_LOAD_START 0x10100000)
 set(DCAPP_RAM_START 0x2005F000)
 set(DCAPP_RAM_SIZE 0x00014000)
+
+# Do not let binaries from retired app targets survive incremental builds and
+# leak back onto an SD card through an old build directory.
+file(REMOVE
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/labyrinth.DC32"
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/labyrinth.raw"
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/video.DC32"
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/video.raw"
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/cave.DC32"
+    "${CMAKE_CURRENT_BINARY_DIR}/apps/cave.raw"
+)
 set(DCAPP_BUILD_CONTRACT "${CMAKE_CURRENT_BINARY_DIR}/dcapp_build_contract.h")
 
 file(GLOB_RECURSE DCAPP_BUILD_CONTRACT_INPUTS CONFIGURE_DEPENDS
@@ -795,33 +806,6 @@ set(SCORCH_APP_SOURCES
     ${XSCORCH_ASSET_C}
 )
 
-set(CAVE_NXENGINE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nxengine-evo")
-set(CAVE_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cave")
-set(CAVE_ASSET_C "${CAVE_ASSET_DIR}/cave_assets.c")
-set(CAVE_ASSET_H "${CAVE_ASSET_DIR}/cave_assets.h")
-add_custom_command(
-    OUTPUT ${CAVE_ASSET_C} ${CAVE_ASSET_H}
-    DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_cave_assets.py
-        ${CAVE_NXENGINE_SOURCE_DIR}/data/sprites.sif
-        ${CAVE_NXENGINE_SOURCE_DIR}/src/autogen/sprites.h
-        ${CAVE_NXENGINE_SOURCE_DIR}/src/autogen/AssignSprites.cpp
-        ${CAVE_NXENGINE_SOURCE_DIR}/src/object.h
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CAVE_ASSET_DIR}
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_cave_assets.py
-        --nxengine-root ${CAVE_NXENGINE_SOURCE_DIR}
-        --output-c ${CAVE_ASSET_C}
-        --output-h ${CAVE_ASSET_H}
-    VERBATIM
-)
-add_custom_target(cave_assets DEPENDS ${CAVE_ASSET_C} ${CAVE_ASSET_H})
-
-set(CAVE_APP_SOURCES
-    ${SRC_DIR}/apps/cave/cave_app.c
-    ${SRC_DIR}/apps/port/port_runtime.c
-    ${CAVE_ASSET_C}
-)
-
 set(XSOKOBAN_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xsokoban")
 set(XSOKOBAN_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/xsokoban")
 set(XSOKOBAN_ASSET_C "${XSOKOBAN_ASSET_DIR}/xsokoban_assets.c")
@@ -1296,6 +1280,9 @@ target_compile_definitions(dcapp_doom PRIVATE
 )
 
 target_compile_options(dcapp_doom PRIVATE
+    # DOOM shares the fixed 256 KiB cache used by standard SD apps. Override
+    # the firmware-wide -Ofast default so the release image has safe headroom.
+    -Os
     -fno-common
     "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
     "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build"
@@ -1306,6 +1293,27 @@ target_compile_options(dcapp_doom PRIVATE
     -Wno-sign-compare
     -Wno-missing-field-initializers
     -Wno-unused-const-variable
+)
+
+# Keep the frame renderer and per-tic simulation throughput-optimized. The
+# remainder of the port is size-optimized above, where -Ofast's duplication
+# does not buy visible frame rate.
+set_source_files_properties(
+    ${DOOM_RENDER_SOURCE}
+    ${DOOM_LOOP_SOURCE}
+    ${DOOM_R_THINGS_SOURCE}
+    ${DOOM_VIDEO_SOURCE}
+    ${DOOM_SRC_DIR}/doom/p_map.c
+    ${DOOM_SRC_DIR}/doom/p_maputl.c
+    ${DOOM_SRC_DIR}/doom/p_mobj.c
+    ${DOOM_SRC_DIR}/doom/p_sight.c
+    ${DOOM_SRC_DIR}/doom/p_tick.c
+    ${DOOM_SRC_DIR}/doom/p_user.c
+    ${DOOM_SRC_DIR}/doom/r_bsp.c
+    ${DOOM_SRC_DIR}/doom/r_main.c
+    ${DOOM_SRC_DIR}/doom/r_plane.c
+    ${DOOM_SRC_DIR}/doom/r_segs.c
+    PROPERTIES COMPILE_OPTIONS "-Ofast"
 )
 
 add_dcapp(dcapp_pong pong 200
@@ -1343,10 +1351,6 @@ target_include_directories(dcapp_flappy BEFORE PRIVATE
     ${FLAPPY_ASSET_DIR}
     ${SRC_DIR}/apps/flappy
     ${SRC_DIR}/apps/port
-)
-
-add_dcapp(dcapp_labyrinth labyrinth 204
-    ${PICOWARE_APP_SOURCES}
 )
 
 add_dcapp(dcapp_trex trex 205
@@ -1411,23 +1415,6 @@ target_include_directories(dcapp_scorch BEFORE PRIVATE
 )
 
 target_compile_options(dcapp_scorch PRIVATE
-    -Wno-error
-    -Wno-format-truncation
-)
-
-add_dcapp(dcapp_cave cave 210 LARGE_XIP
-    ${CAVE_APP_SOURCES}
-)
-
-add_dependencies(dcapp_cave cave_assets)
-
-target_include_directories(dcapp_cave BEFORE PRIVATE
-    ${CAVE_ASSET_DIR}
-    ${SRC_DIR}/apps/cave
-    ${SRC_DIR}/apps/port
-)
-
-target_compile_options(dcapp_cave PRIVATE
     -Wno-error
     -Wno-format-truncation
 )

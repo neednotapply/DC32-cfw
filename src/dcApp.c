@@ -42,13 +42,11 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdTetris, "Tetris", "/APPS/tetris.DC32", true},
 	{DcAppIdArkanoid, "Arkanoid", "/APPS/arkanoid.DC32", true},
 	{DcAppIdFlappy, "Flappy Bird", "/APPS/flappy.DC32", true},
-	{DcAppIdLabyrinth, "Labyrinth", "/APPS/labyrinth.DC32", true},
 	{DcAppIdTrex, "T-Rex Runner", "/APPS/trex.DC32", true},
 	{DcAppIdDoom, "DOOM (shareware)", "/APPS/doom.DC32", true},
 	{DcAppIdChips, "Chip's Challenge", "/APPS/chips.DC32", true},
 	{DcAppIdScorch, "Scorched Earth", "/APPS/scorch.DC32", true},
 	{DcAppIdPipe, "Pipe Dream", "/APPS/pipe.DC32", true},
-	{DcAppIdCave, "Cave Story", "/APPS/cave.DC32", true},
 	{DcAppIdSokoban, "Sokoban", "/APPS/sokoban.DC32", true},
 	{DcAppIdOpenJazz, "Jazz Jackrabbit", "/APPS/openjazz.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
@@ -75,6 +73,7 @@ static const struct DcAppHostApi mHostApi = {
 	.flashWrite = flashWrite,
 	.abortActive = dcAppAbortActive,
 	.ledsTick = badgeLedsTick,
+	.portMenu = uiPortMenu,
 };
 
 static uint32_t dcAppPrvAlignUp(uint32_t val, uint32_t align)
@@ -594,6 +593,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	dcAppPrvClearActiveAppContext();
 	dcAppPrvSyncExecutableImage(&mLoadedHeader);
 	audioPwmStop();
+	audioPwmSetVolume(AUDIO_PWM_VOLUME_MAX);
 	if (!dcAppPrvApplyAppRam(&mLoadedHeader))
 		return dcAppPrvFail(DcAppResultInvalid, "Cannot initialize app RAM");
 

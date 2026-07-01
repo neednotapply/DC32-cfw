@@ -251,6 +251,7 @@ jobs:
             "$RUNNER_TEMP/DC32-cfw/DC32-cfw.uf2" \
             "$RUNNER_TEMP/DC32-cfw/SD-apps.zip" \
             --clobber
+          gh release delete-asset nightly SD.zip --yes >/dev/null 2>&1 || true
           gh release delete-asset nightly SD-assets.sources.json --yes >/dev/null 2>&1 || true
           gh release delete-asset nightly SD-apps.sources.json --yes >/dev/null 2>&1 || true
 

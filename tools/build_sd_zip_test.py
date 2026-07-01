@@ -35,6 +35,8 @@ def write_hex(path: Path) -> None:
 def main() -> int:
     builder = load_builder()
 
+    expect("retired Labyrinth and Video apps are not packaged", "labyrinth.DC32" not in builder.APP_BINARIES and "video.DC32" not in builder.APP_BINARIES)
+
     expect("Arduboy ROM path is /ROMS/AB", "AB" in builder.ROM_DIRS and "ARDUBOY" not in builder.ROM_DIRS)
     expect("Arduboy placeholder README is not generated", "AB" not in builder.ROM_PLACEHOLDER_DIRS)
 
@@ -138,7 +140,6 @@ def main() -> int:
         expect("Chip's Challenge accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["chips"] == 207)
         expect("Scorched Earth accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["scorch"] == 208)
         expect("Pipe Dream accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["pipe"] == 209)
-        expect("Cave Story accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["cave"] == 210)
         expect("Sokoban accepted ID is recorded", manifest["sources"]["period_ports"]["accepted_ids"]["sokoban"] == 211)
         builder.write_app_sources(stage, app_hashes)
         apps_zip = tmp_path / "SD-apps.zip"
@@ -155,7 +156,7 @@ def main() -> int:
         expect("SD-apps.zip contains PipeDreamer pack", "APPS/pipe-pipedreamer.pak" in names)
         expect("SD-apps.zip contains XSokoban pack", "APPS/sokoban-xsokoban.pak" in names)
         expect("SD-apps.zip contains period port README", "APPS/README-period-ports.txt" in names)
-        expect("SD-apps.zip omits proprietary Cave data", "APPS/cave.pak" not in names and "APPS/cave.dat" not in names)
+        expect("SD-apps.zip omits retired Cave Story files", not any("cave" in name.lower() for name in names))
         expect("SD-apps.zip excludes /ROMS/DOOM", not any(name.startswith("ROMS/DOOM/") for name in names))
         expect("SD-apps.zip SOURCES records hashes", all(name in sources_md and app_hashes[name] in sources_md for name in expected_hash_files))
         expect("SD-apps.zip SOURCES records Flappy attribution",

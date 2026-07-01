@@ -61,10 +61,10 @@ def main() -> int:
     expect("audio exposes the minimal buzzer operations", all(token in platform_h for token in (
         "beep", "click", "score_sound",
     )))
-    expect("audio state exposes enable and volume settings", "uint8_t volume" in platform_h and "bool enabled" in platform_h)
-    expect("menu exposes audio, volume and color settings", all(token in main_c for token in (
-        "IN-GAME AUDIO", '"VOLUME"', '"COLORS"', '"CLASSIC"', '"TEAMS"', '"RAINBOW"',
-    )))
+    expect("audio state retains runtime enable and output level", "uint8_t volume" in platform_h and "bool enabled" in platform_h)
+    expect("menu exposes color settings without duplicate audio controls", all(token in main_c for token in (
+        '"COLORS"', '"CLASSIC"', '"TEAMS"', '"RAINBOW"',
+    )) and "IN-GAME AUDIO" not in main_c and '"VOLUME"' not in main_c)
     expect("menu navigation is silent", "platform.audio.click" not in main_c and "880u" not in main_c)
     expect("returning to the menu stops active audio", "platform.audio.beep(platform.audio.context, 0, 0)" in main_c)
     expect("renderer supports the three color themes", all(token in platform_h for token in (

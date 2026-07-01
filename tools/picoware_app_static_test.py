@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import re
-from collections import deque
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PICOWARE_APPS = {
-    "Labyrinth": (204, "labyrinth.DC32"),
     "Starfield": (220, "starfield.DC32"),
     "Spiro": (221, "spiro.DC32"),
     "Cube": (222, "cube.DC32"),
@@ -58,35 +56,6 @@ def function_body(text: str, name: str) -> str:
     return ""
 
 
-def check_labyrinth_solvable(port: str) -> None:
-    match = re.search(r"static const char mMaze\[12\]\[17\] = \{(?P<body>.*?)\};", port, re.S)
-    expect("Labyrinth maze table exists", match is not None)
-    maze = re.findall(r'"([^"]{16})"', match.group("body"))
-    expect("Labyrinth maze dimensions", len(maze) == 12)
-
-    start = goal = None
-    for y, row in enumerate(maze):
-        for x, ch in enumerate(row):
-            if ch == "S":
-                start = (x, y)
-            elif ch == "G":
-                goal = (x, y)
-    expect("Labyrinth has start and goal", start is not None and goal is not None)
-
-    q = deque([start])
-    seen = {start}
-    while q:
-        x, y = q.popleft()
-        if (x, y) == goal:
-            return
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if 0 <= ny < len(maze) and 0 <= nx < len(maze[ny]) and (nx, ny) not in seen and maze[ny][nx] != "#":
-                seen.add((nx, ny))
-                q.append((nx, ny))
-    expect("Labyrinth goal is reachable", False)
-
-
 def main() -> int:
     dcapp_h = (ROOT / "src" / "dcApp.h").read_text(encoding="utf-8")
     dcapp_c = (ROOT / "src" / "dcApp.c").read_text(encoding="utf-8")
@@ -114,7 +83,9 @@ def main() -> int:
     expect("USB category contains BadUSB", '{"BadUSB", UiCategoryEntryTool, UiToolBadUsb, 0}' in ui)
     expect("category return waits for key release", "uiPrvCategoryReturnFence" in ui and "uiPrvWaitKeysReleased();" in ui)
     expect("media category contains screensavers", all(token in ui for token in ("DcAppIdStarfield", "DcAppIdSpiro", "DcAppIdCube")))
-    expect("games category contains small ports", all(token in ui for token in ("DcAppIdPong", "DcAppIdTetris", "DcAppIdArkanoid", "DcAppIdFlappy", "DcAppIdLabyrinth", "DcAppIdTrex")))
+    expect("games category contains supported small ports", all(token in ui for token in ("DcAppIdPong", "DcAppIdTetris", "DcAppIdArkanoid", "DcAppIdFlappy", "DcAppIdTrex")))
+    expect("retired Labyrinth app is fully removed", "DcAppIdLabyrinth" not in dcapp_h + dcapp_c + ui and '"labyrinth.DC32"' not in builder and "dcapp_labyrinth" not in cmake and "pwRunLabyrinth" not in port and 'apps/labyrinth.DC32' in cmake)
+    expect("retired Video app is excluded and stale build outputs are cleaned", '"video.DC32"' not in builder and 'apps/video.DC32' in cmake and 'apps/video.raw' in cmake)
     expect("Picoware wrapper uses runtime-specific header", "DCAPP_RUNTIME_ID" in wrapper and "picowareAppRun" in wrapper)
     expect("Picoware source list is named for the port, not the registry", "PICOWARE_APP_SOURCES" in cmake and old_source_var not in cmake)
     expect("Pong uses its dedicated source tree", "PONG_APP_SOURCES" in cmake and "${PONG_APP_SOURCES}" in cmake)
@@ -177,8 +148,6 @@ def main() -> int:
     expect("shared draw helper paces present with scanout", "dispPrvFrameCtrWait()" in helper_c and "dispPrvWaitForScanoutStart()" in helper_c)
     expect("shared draw helper presents completed backbuffer", "dcAppDrawPresent(ctx);" in helper_c)
     expect("shared draw helper handles canvas orientation", "dcAppDrawPrvDisplayIndex" in helper_c and "cnv->rotated" in helper_c and "cnv->flipped" in helper_c)
-    check_labyrinth_solvable(port)
-
     print("Picoware app static tests passed")
     return 0
 

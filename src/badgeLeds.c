@@ -38,6 +38,7 @@ static uint64_t mButtonLastPressed[sizeof(mButtonZones) / sizeof(*mButtonZones)]
 static bool mTouchSeen;
 static bool mButtonSeen[sizeof(mButtonZones) / sizeof(*mButtonZones)];
 static uint8_t mLedFrame;
+static bool mIdle;
 
 
 static uint_fast8_t badgeLedsPrvSanitizeMode(uint_fast8_t mode)
@@ -479,8 +480,28 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force)
 		mLedFrame = 0;
 		mNextLedFrameTime = getTime();
 		badgeLedsPrvResetReactive();
-		badgeLedsPrvRenderCurrent();
+		if (!mIdle)
+			badgeLedsPrvRenderCurrent();
 	}
+}
+
+void badgeLedsSetIdle(bool idle)
+{
+	if (mIdle == idle)
+		return;
+
+	mIdle = idle;
+	if (idle) {
+		ws2812SetAllRgb(0, 0, 0);
+		ws2812refresh();
+		return;
+	}
+
+	mLedFrame = 0;
+	mNextLedFrameTime = getTime();
+	badgeLedsPrvResetReactive();
+	if (mHaveLedSettings)
+		badgeLedsPrvRenderCurrent();
 }
 
 void badgeLedsOverrideRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
@@ -494,7 +515,7 @@ void badgeLedsTick(void)
 	uint64_t now;
 	uint_fast8_t mode;
 
-	if (!mHaveLedSettings)
+	if (!mHaveLedSettings || mIdle)
 		return;
 
 	mode = badgeLedsPrvSanitizeMode(mLedSettings.ledMode);

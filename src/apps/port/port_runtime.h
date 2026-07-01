@@ -54,7 +54,6 @@ bool dc32PortEnsureSaveDir(struct FatfsVol *vol);
 bool dc32PortSaveRead(struct FatfsVol *vol, const char *appName, void *dst, uint32_t size);
 bool dc32PortSaveWrite(struct FatfsVol *vol, const char *appName, const void *src, uint32_t size);
 
-bool dc32PortCenterExitRequested(const struct DcAppHostApi *host);
 void dc32PortShowMissingData(const struct DcAppHostApi *host, const struct DcAppRunArgs *args,
 	const char *title, const char *path, void *backbuffer);
 

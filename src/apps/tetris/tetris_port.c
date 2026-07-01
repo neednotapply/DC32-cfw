@@ -33,7 +33,6 @@
 
 enum TetrisScreen {
 	TetrisScreenTitle,
-	TetrisScreenSettings,
 	TetrisScreenRecords,
 	TetrisScreenPlaying,
 	TetrisScreenPaused,
@@ -60,8 +59,8 @@ struct TetrisSave {
 	uint32_t magic;
 	uint16_t version;
 	uint16_t size;
-	uint8_t audioEnabled;
-	uint8_t volume;
+	uint8_t reservedAudioEnabled;
+	uint8_t reservedVolume;
 	uint8_t selectedMode;
 	uint8_t selectedRule;
 	struct TetrisMarathonRecord marathon[TetrisRuleCount][TETRIS_RANKS];
@@ -79,10 +78,8 @@ struct TetrisApp {
 	struct TetrisSave save;
 	uint32_t seed;
 	uint32_t toneFrames;
-	uint8_t previousVolume;
 	uint8_t screen;
 	uint8_t titleSelection;
-	uint8_t settingsSelection;
 	uint8_t recordsRule;
 	bool saveDirty;
 	bool recordedRun;
@@ -215,14 +212,12 @@ static uint32_t tetrisSaveCheck(const struct TetrisSave *save)
 	return check;
 }
 
-static void tetrisDefaultSave(struct TetrisSave *save, uint8_t volume)
+static void tetrisDefaultSave(struct TetrisSave *save)
 {
 	memset(save, 0, sizeof(*save));
 	save->magic = TETRIS_SAVE_MAGIC;
 	save->version = TETRIS_SAVE_VERSION;
 	save->size = sizeof(*save);
-	save->audioEnabled = 1;
-	save->volume = volume <= AUDIO_PWM_VOLUME_MAX ? volume : AUDIO_PWM_VOLUME_MAX;
 	for (uint8_t rule = 0; rule < TetrisRuleCount; rule++)
 		for (uint8_t rank = 0; rank < TETRIS_RANKS; rank++)
 			save->line[rule][rank].time = UINT32_MAX;
@@ -233,7 +228,7 @@ static void tetrisLoadSave(struct TetrisApp *app)
 {
 	struct TetrisSave loaded;
 
-	tetrisDefaultSave(&app->save, app->previousVolume);
+	tetrisDefaultSave(&app->save);
 	if (!app->args->vol ||
 			!dc32PortSaveRead(app->args->vol, "tetris", &loaded, sizeof(loaded)))
 		return;
@@ -241,8 +236,7 @@ static void tetrisLoadSave(struct TetrisApp *app)
 			loaded.size != sizeof(loaded) || loaded.check != tetrisSaveCheck(&loaded))
 		return;
 	if (loaded.selectedMode >= TetrisModeCount ||
-			loaded.selectedRule >= TetrisRuleCount ||
-			loaded.volume > AUDIO_PWM_VOLUME_MAX)
+			loaded.selectedRule >= TetrisRuleCount)
 		return;
 	app->save = loaded;
 }
@@ -375,9 +369,6 @@ static void tetrisTone(struct TetrisApp *app, uint32_t frequency, uint32_t milli
 		audioPwmStop();
 		return;
 	}
-	if (!app->save.audioEnabled || !app->save.volume)
-		return;
-	audioPwmSetVolume(app->save.volume);
 	(void)audioPwmTone(frequency);
 	app->toneFrames = (milliseconds * TETRIS_FPS + 999u) / 1000u;
 	if (!app->toneFrames)
@@ -588,7 +579,7 @@ static void tetrisDrawGame(struct TetrisApp *app)
 
 static void tetrisDrawTitle(struct TetrisApp *app)
 {
-	static const char *const labels[] = {"START", "MODE", "RULE", "RECORDS", "SETTINGS"};
+	static const char *const labels[] = {"START", "MODE", "RULE", "RECORDS"};
 	uint16_t white = tetrisRgb(240, 245, 255);
 	uint16_t cyan = tetrisRgb(60, 220, 255);
 	uint16_t dim = tetrisRgb(100, 120, 145);
@@ -596,8 +587,8 @@ static void tetrisDrawTitle(struct TetrisApp *app)
 	dcAppDrawClear(&app->draw, tetrisRgb(3, 6, 14));
 	tetrisCentered(app, 0, 320, 10, "TETRIS", FontLarge, white);
 	tetrisCentered(app, 0, 320, 34, "NULLPOMINO RULES", FontSmall, cyan);
-	for (uint8_t i = 0; i < 5; i++) {
-		int32_t y = 65 + i * 29;
+	for (uint8_t i = 0; i < 4; i++) {
+		int32_t y = 73 + i * 34;
 
 		if (i == app->titleSelection) {
 			dcAppDrawFill(&app->draw, 44, y - 4, 5, 16, cyan);
@@ -614,32 +605,6 @@ static void tetrisDrawTitle(struct TetrisApp *app)
 	tetrisCentered(app, 0, 320, 214,
 		tetrisModeGet(app->save.selectedMode)->description, FontSmall, dim);
 	tetrisCentered(app, 0, 320, 228, "A SELECT  CENTER EXIT", FontSmall, white);
-}
-
-static void tetrisDrawSettings(struct TetrisApp *app)
-{
-	static const char *const labels[] = {"IN-GAME AUDIO", "VOLUME", "BACK"};
-	uint16_t white = tetrisRgb(240, 245, 255);
-	uint16_t cyan = tetrisRgb(60, 220, 255);
-	char value[12];
-
-	dcAppDrawClear(&app->draw, tetrisRgb(3, 6, 14));
-	tetrisCentered(app, 0, 320, 16, "SETTINGS", FontLarge, white);
-	for (uint8_t i = 0; i < 3; i++) {
-		int32_t y = 75 + i * 42;
-
-		if (i == app->settingsSelection)
-			dcAppDrawFill(&app->draw, 36, y - 4, 5, 16, cyan);
-		tetrisText(app, 52, y, labels[i], FontMedium, white);
-		if (i == 0)
-			tetrisText(app, 235, y, app->save.audioEnabled ? "ON" : "OFF",
-				FontMedium, cyan);
-		else if (i == 1) {
-			tetrisNumber(value, sizeof(value), app->save.volume);
-			tetrisText(app, 235, y, value, FontMedium, cyan);
-		}
-	}
-	tetrisCentered(app, 0, 320, 218, "LEFT/RIGHT CHANGE  B BACK", FontSmall, white);
 }
 
 static void tetrisDrawRecords(struct TetrisApp *app)
@@ -727,9 +692,9 @@ static void tetrisHandleTitle(struct TetrisApp *app)
 	uint_fast16_t pressed = app->draw.pressed;
 
 	if (pressed & KEY_BIT_UP)
-		app->titleSelection = app->titleSelection ? app->titleSelection - 1u : 4u;
+		app->titleSelection = app->titleSelection ? app->titleSelection - 1u : 3u;
 	if (pressed & KEY_BIT_DOWN)
-		app->titleSelection = (app->titleSelection + 1u) % 5u;
+		app->titleSelection = (app->titleSelection + 1u) % 4u;
 	if (pressed & KEY_BIT_LEFT)
 		tetrisAdjustTitle(app, -1);
 	if (pressed & KEY_BIT_RIGHT)
@@ -739,54 +704,10 @@ static void tetrisHandleTitle(struct TetrisApp *app)
 			tetrisStart(app);
 		else if (app->titleSelection == 1 || app->titleSelection == 2)
 			tetrisAdjustTitle(app, 1);
-		else if (app->titleSelection == 3) {
+		else {
 			app->recordsRule = app->save.selectedRule;
 			app->screen = TetrisScreenRecords;
 		}
-		else {
-			app->settingsSelection = 0;
-			app->screen = TetrisScreenSettings;
-		}
-	}
-}
-
-static void tetrisAdjustSetting(struct TetrisApp *app, int8_t direction)
-{
-	if (app->settingsSelection == 0)
-		app->save.audioEnabled = !app->save.audioEnabled;
-	else if (app->settingsSelection == 1) {
-		int32_t volume = app->save.volume + direction;
-
-		if (volume < 0) volume = AUDIO_PWM_VOLUME_MAX;
-		if (volume > AUDIO_PWM_VOLUME_MAX) volume = 0;
-		app->save.volume = volume;
-	}
-	app->saveDirty = true;
-}
-
-static void tetrisHandleSettings(struct TetrisApp *app)
-{
-	uint_fast16_t pressed = app->draw.pressed;
-
-	if (pressed & KEY_BIT_UP)
-		app->settingsSelection = app->settingsSelection ? app->settingsSelection - 1u : 2u;
-	if (pressed & KEY_BIT_DOWN)
-		app->settingsSelection = (app->settingsSelection + 1u) % 3u;
-	if (pressed & KEY_BIT_LEFT)
-		tetrisAdjustSetting(app, -1);
-	if (pressed & KEY_BIT_RIGHT)
-		tetrisAdjustSetting(app, 1);
-	if (pressed & KEY_BIT_A) {
-		if (app->settingsSelection == 2) {
-			app->screen = TetrisScreenTitle;
-			(void)tetrisWriteSave(app);
-		}
-		else
-			tetrisAdjustSetting(app, 1);
-	}
-	if (pressed & KEY_BIT_B) {
-		app->screen = TetrisScreenTitle;
-		(void)tetrisWriteSave(app);
 	}
 }
 
@@ -863,8 +784,6 @@ static void tetrisRender(struct TetrisApp *app)
 {
 	if (app->screen == TetrisScreenTitle)
 		tetrisDrawTitle(app);
-	else if (app->screen == TetrisScreenSettings)
-		tetrisDrawSettings(app);
 	else if (app->screen == TetrisScreenRecords)
 		tetrisDrawRecords(app);
 	else
@@ -881,7 +800,6 @@ static bool tetrisInit(struct TetrisApp *app, const struct DcAppHostApi *host,
 	memset(app, 0, sizeof(*app));
 	app->host = host;
 	app->args = args;
-	app->previousVolume = (uint8_t)audioPwmGetVolume();
 	if (!dcAppDrawInit(&app->draw, host, args, mTetrisFrame,
 			TETRIS_SCREEN_W, TETRIS_SCREEN_H))
 		return false;
@@ -912,8 +830,6 @@ int tetrisAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 			audioPwmStop();
 		if (app.screen == TetrisScreenTitle)
 			tetrisHandleTitle(&app);
-		else if (app.screen == TetrisScreenSettings)
-			tetrisHandleSettings(&app);
 		else if (app.screen == TetrisScreenRecords)
 			tetrisHandleRecords(&app);
 		else
@@ -925,7 +841,6 @@ int tetrisAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 		tetrisRecordRun(&app);
 	(void)tetrisWriteSave(&app);
 	tetrisTone(&app, 0, 0);
-	audioPwmSetVolume(app.previousVolume);
 	dcAppDrawWaitRelease(&app.draw, UI_KEY_BIT_CENTER);
 	dispSetFramerate(60);
 	return 0;

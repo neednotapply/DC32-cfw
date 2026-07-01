@@ -6,7 +6,6 @@
 #include <string.h>
 #include "dcAppDraw.h"
 #include "dispDefcon.h"
-#include "fonts.h"
 #include "gb.h"
 
 #define PICOWARE_SCREEN_W 320u
@@ -16,18 +15,11 @@
 struct PicowareAppCtx {
 	const struct DcAppHostApi *host;
 	struct DcAppDrawCtx draw;
-	uint_fast16_t keys;
-	uint_fast16_t pressed;
 	uint32_t rng;
 	uint32_t frame;
 };
 
 static uint8_t mPicowareBackbuffer[PICOWARE_SCREEN_W * PICOWARE_SCREEN_H];
-
-static uint32_t pwMinU32(uint32_t a, uint32_t b)
-{
-	return a < b ? a : b;
-}
 
 static uint32_t pwRand(struct PicowareAppCtx *ctx)
 {
@@ -60,76 +52,10 @@ static void pwLine(struct PicowareAppCtx *ctx, int32_t x0, int32_t y0, int32_t x
 	dcAppDrawLine(&ctx->draw, x0, y0, x1, y1, color);
 }
 
-static uint32_t pwTextWidth(const char *text, enum Font font)
-{
-	uint32_t width = 0;
-
-	while (*text) {
-		struct FontGlyphInfo glyph;
-
-		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text))
-			width += glyph.width + 1u;
-		text++;
-	}
-	return width;
-}
-
-static void pwText(struct PicowareAppCtx *ctx, int32_t x, int32_t y, const char *text, enum Font font, uint16_t color)
-{
-	while (*text) {
-		struct FontGlyphInfo glyph;
-		uint_fast8_t row, col;
-
-		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text)) {
-			for (row = 0; row < glyph.height; row++)
-				for (col = 0; col < glyph.width; col++)
-					if (fontGetGlyphPixel(&glyph, row, col))
-						pwPixel(ctx, x + col, y + row, color);
-			x += glyph.width + 1;
-		}
-		text++;
-	}
-}
-
-static void pwTextCentered(struct PicowareAppCtx *ctx, int32_t y, const char *text, enum Font font, uint16_t color)
-{
-	uint32_t width = pwTextWidth(text, font);
-
-	pwText(ctx, (int32_t)((PICOWARE_SCREEN_W > width ? PICOWARE_SCREEN_W - width : 0u) / 2u), y, text, font, color);
-}
-
-static void pwU32ToText(uint32_t value, char *buf, uint32_t bufSz)
-{
-	char tmp[12];
-	uint32_t n = 0, i = 0;
-
-	if (!bufSz)
-		return;
-	if (!value)
-		tmp[n++] = '0';
-	while (value && n < sizeof(tmp)) {
-		tmp[n++] = (char)('0' + value % 10u);
-		value /= 10u;
-	}
-	while (i + 1u < bufSz && n)
-		buf[i++] = tmp[--n];
-	buf[i] = 0;
-}
-
-static void pwDrawScore(struct PicowareAppCtx *ctx, uint32_t score)
-{
-	char buf[16];
-
-	pwU32ToText(score, buf, sizeof(buf));
-	pwText(ctx, 8, 8, buf, FontMedium, pwRgb(255, 255, 255));
-}
-
 static bool pwFrame(struct PicowareAppCtx *ctx)
 {
 	bool running = dcAppDrawFrame(&ctx->draw, UI_KEY_BIT_CENTER);
 
-	ctx->keys = ctx->draw.keys;
-	ctx->pressed = ctx->draw.pressed;
 	ctx->frame = ctx->draw.frame;
 	return running;
 }
@@ -147,74 +73,6 @@ static bool pwInit(struct PicowareAppCtx *ctx, const struct DcAppHostApi *host, 
 	ctx->host = host;
 	ctx->rng = (uint32_t)(now ^ (now >> 32));
 	return dcAppDrawInit(&ctx->draw, host, args, mPicowareBackbuffer, PICOWARE_SCREEN_W, PICOWARE_SCREEN_H);
-}
-
-static const char mMaze[12][17] = {
-	"################",
-	"#S   #     #   #",
-	"### # # ### # ##",
-	"#   # #   # #  #",
-	"# ### ### # ## #",
-	"# #     # #    #",
-	"# # ### # #### #",
-	"#   # # #      #",
-	"### # # ###### #",
-	"#   #         G#",
-	"# ############ #",
-	"################",
-};
-
-static void pwLabyrinthWin(struct PicowareAppCtx *ctx, uint32_t score)
-{
-	pwClear(ctx, pwRgb(3, 18, 10));
-	pwTextCentered(ctx, 82, "Goal!", FontLarge, pwRgb(90, 255, 130));
-	pwTextCentered(ctx, 124, "Resetting maze", FontMedium, pwRgb(210, 230, 210));
-	pwDrawScore(ctx, score);
-	for (uint_fast8_t i = 0; i < 24; i++)
-		if (!pwFrame(ctx))
-			return;
-}
-
-static int pwRunLabyrinth(struct PicowareAppCtx *ctx)
-{
-	int32_t px = 1, py = 1;
-	uint32_t score = 0;
-
-	while (pwFrame(ctx)) {
-		int32_t nx = px, ny = py;
-
-		if (ctx->pressed & KEY_BIT_LEFT)
-			nx--;
-		if (ctx->pressed & KEY_BIT_RIGHT)
-			nx++;
-		if (ctx->pressed & KEY_BIT_UP)
-			ny--;
-		if (ctx->pressed & KEY_BIT_DOWN)
-			ny++;
-		if (mMaze[ny][nx] != '#') {
-			px = nx;
-			py = ny;
-			score++;
-		}
-		if (mMaze[py][px] == 'G') {
-			pwLabyrinthWin(ctx, score);
-			px = 1;
-			py = 1;
-			score = 0;
-		}
-		pwClear(ctx, pwRgb(5, 5, 10));
-		for (int32_t y = 0; y < 12; y++)
-			for (int32_t x = 0; x < 16; x++) {
-				uint16_t color = mMaze[y][x] == '#' ? pwRgb(40, 100, 180) : pwRgb(10, 18, 28);
-
-				if (mMaze[y][x] == 'G')
-					color = pwRgb(40, 180, 80);
-				pwFill(ctx, 16 + x * 18, 12 + y * 18, 17, 17, color);
-			}
-		pwFill(ctx, 16 + px * 18 + 4, 12 + py * 18 + 4, 9, 9, pwRgb(255, 230, 80));
-		pwDrawScore(ctx, score);
-	}
-	return 0;
 }
 
 static int pwRunStarfield(struct PicowareAppCtx *ctx)
@@ -333,9 +191,7 @@ int picowareAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *a
 	}
 	pwWaitRelease(&ctx);
 
-#if DCAPP_RUNTIME_ID == 204
-	ret = pwRunLabyrinth(&ctx);
-#elif DCAPP_RUNTIME_ID == 220
+#if DCAPP_RUNTIME_ID == 220
 	ret = pwRunStarfield(&ctx);
 #elif DCAPP_RUNTIME_ID == 221
 	ret = pwRunSpiro(&ctx);

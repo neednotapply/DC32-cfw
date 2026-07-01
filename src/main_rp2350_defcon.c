@@ -77,6 +77,14 @@ extern uint32_t __data_start, __data_end, __bss_start, __bss_end, __stack_limit,
 #define TOUCH_I2C_ADDR                  0x48
 #define RTC_I2C_ADDR                    0x51
 #define TOUCH_PEN_DOWN_THRESHOLD        100
+#define ACCEL_REG_CTRL1                 0x20
+#define ACCEL_REG_CTRL4                 0x23
+#define ACCEL_CTRL1_ACTIVE              0x77
+#define ACCEL_CTRL4_ACTIVE              0xd8
+#define ACCEL_CTRL1_IDLE                0x2f
+#define ACCEL_CTRL4_IDLE                0xd0
+
+static bool i2cAccelSetIdle(bool idle);
 
 
 static void stackWatermarkInit(void)
@@ -231,50 +239,134 @@ static uint_fast16_t prvUiKeysMap(uint32_t sta)
         return ret;
 }
 
+#define UI_IDLE_DIM_TICKS	((uint64_t)TICKS_PER_SECOND * 30u)
+#define UI_IDLE_DIM_BRIGHTNESS	1u
+
+static uint64_t mUiLastActivity;
+static uint8_t mUiActiveBrightness;
+static bool mUiDimInitialized;
+static bool mUiDimmed;
+
+static void uiPrvDimRestore(void)
+{
+	if (mUiDimmed) {
+		dispResumeScanout();
+		dispSetBrightness(mUiActiveBrightness);
+		(void)i2cAccelSetIdle(false);
+		badgeLedsSetIdle(false);
+	}
+	mUiDimmed = false;
+	mUiLastActivity = getTime();
+}
+
+static void uiPrvDimInit(void)
+{
+	struct Settings settings;
+
+	if (mUiDimInitialized)
+		return;
+	settingsGet(&settings);
+	mUiActiveBrightness = settings.brightness;
+	mUiLastActivity = getTime();
+	mUiDimInitialized = true;
+}
+
+void uiPowerSetActiveBrightness(uint_fast8_t brightness)
+{
+	if (brightness > 0x1fu)
+		brightness = 0x1fu;
+	mUiActiveBrightness = brightness;
+	mUiLastActivity = getTime();
+	mUiDimInitialized = true;
+	mUiDimmed = false;
+}
+
+static uint_fast16_t uiPrvDimObserveDebounced(uint_fast16_t keys)
+{
+	uiPrvDimInit();
+	if (keys) {
+		if (mUiDimmed) {
+			uiPrvDimRestore();
+			return 0;
+		}
+		mUiLastActivity = getTime();
+		return keys;
+	}
+
+	if (!mUiDimmed && getTime() - mUiLastActivity >= UI_IDLE_DIM_TICKS) {
+		uint_fast8_t dimBrightness = mUiActiveBrightness < UI_IDLE_DIM_BRIGHTNESS ?
+			mUiActiveBrightness : UI_IDLE_DIM_BRIGHTNESS;
+
+		dispSetBrightness(dimBrightness);
+		dispPauseScanout();
+		(void)i2cAccelSetIdle(true);
+		badgeLedsSetIdle(true);
+		mUiDimmed = true;
+	}
+	return 0;
+}
+
+static void uiPrvDimObserveRaw(uint_fast16_t keys)
+{
+	if (!keys || !mUiDimInitialized)
+		return;
+	uiPrvDimRestore();
+}
+
 uint_fast8_t uiGetKeys(void)
 {
-        uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
+        uint32_t val, stableFor, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
 	while(1) {
 		usbHidTask();
 		badgeLedsTick();
 		val = sio_hw->gpio_in & ourKeysMask;
-		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+		for (stableFor = 0; stableFor < 2 && val == (sio_hw->gpio_in & ourKeysMask); stableFor++) {
+			timebaseIdleWaitMsec(1);
 			usbHidTask();
 			badgeLedsTick();
 		}
-		if (count == countUntil)
-			return prvKeysMap(val);
+		if (stableFor == 2)
+			return (uint_fast8_t)uiPrvDimObserveDebounced(prvKeysMap(val));
 	}
 }
 
 uint_fast8_t uiGetKeysRaw(void)
 {
+	uint_fast8_t keys;
+
 	usbHidTask();
-	return prvKeysMap(sio_hw->gpio_in);
+	keys = prvKeysMap(sio_hw->gpio_in);
+	uiPrvDimObserveRaw(keys);
+	return keys;
 }
 
 uint_fast16_t uiGetUiKeys(void)
 {
-        uint32_t val, count = 0, countUntil = 10000, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
+        uint32_t val, stableFor, ourKeysMask = (1 << PIN_BTN_U) | (1 << PIN_BTN_D) | (1 << PIN_BTN_L) | (1 << PIN_BTN_R) | (1 << PIN_BTN_START) | (1 << PIN_BTN_SEL) | (1 << PIN_BTN_A) | (1 << PIN_BTN_B) | (1 << PIN_BTN_CENTER);
 
 	while(1) {
 		usbHidTask();
 		badgeLedsTick();
 		val = sio_hw->gpio_in & ourKeysMask;
-		for (count = 0; count < countUntil && val == (sio_hw->gpio_in & ourKeysMask); count++) {
+		for (stableFor = 0; stableFor < 2 && val == (sio_hw->gpio_in & ourKeysMask); stableFor++) {
+			timebaseIdleWaitMsec(1);
 			usbHidTask();
 			badgeLedsTick();
 		}
-		if (count == countUntil)
-			return prvUiKeysMap(val);
+		if (stableFor == 2)
+			return uiPrvDimObserveDebounced(prvUiKeysMap(val));
 	}
 }
 
 uint_fast16_t uiGetUiKeysRaw(void)
 {
+	uint_fast16_t keys;
+
 	usbHidTask();
-	return uiGetUiKeysRawNoTask();
+	keys = uiGetUiKeysRawNoTask();
+	uiPrvDimObserveRaw(keys);
+	return keys;
 }
 
 uint_fast16_t uiGetUiKeysRawNoTask(void)
@@ -285,6 +377,7 @@ uint_fast16_t uiGetUiKeysRawNoTask(void)
 bool uiReadTouchRaw(struct UiTouchSample *sampleP)
 {
 	uint8_t touchX[2], touchY[2], touchZ[2];
+	bool wasDimmed;
 
 	if (!sampleP)
 		return false;
@@ -298,6 +391,13 @@ bool uiReadTouchRaw(struct UiTouchSample *sampleP)
 	sampleP->y = touchY[0] * 16 + touchY[1] / 16;
 	sampleP->z = touchZ[0] * 16 + touchZ[1] / 16;
 	sampleP->penDown = sampleP->z > TOUCH_PEN_DOWN_THRESHOLD;
+	if (sampleP->penDown) {
+		wasDimmed = mUiDimmed;
+		uiPrvDimInit();
+		uiPrvDimRestore();
+		if (wasDimmed)
+			sampleP->penDown = false;
+	}
 	return true;
 }
 
@@ -338,7 +438,7 @@ static void exitGame(void)
         }
         if (mActiveGameRuntime == GameRuntimeArduboy) {
                 mUpscaling = false;
-                mRotateGame = false;
+                mRotateGame = shouldRotateGame();
                 dcAppRefreshActive();
                 return;
         }
@@ -929,6 +1029,11 @@ static void runSelectedGameTool(void *userData)
                                 if (mUpscaling)
                                         uiPrvUpscalerInit();
                         }
+                        else if (selection.runtime == GameRuntimeArduboy) {
+                                mUpscaling = false;
+                                mRotateGame = shouldRotateGame();
+                                args.rotate = mRotateGame;
+                        }
                         else {
                                 mUpscaling = false;
                                 mRotateGame = false;
@@ -948,6 +1053,15 @@ static void runSelectedGameTool(void *userData)
                         //if the app is aborted by the in-game menu, it returns here and restarts or exits the game tool
                 }
         }
+}
+
+static void applySavedAudio(void)
+{
+	struct Settings settings;
+
+	settingsGet(&settings);
+	audioPwmSetVolume(AUDIO_PWM_VOLUME_MAX);
+	audioPwmSetMasterVolume(settings.audioMuted ? 0 : settings.audioVolume);
 }
 
 static void gpiosConfig(bool firstTime)
@@ -1037,10 +1151,33 @@ static void gpiosConfig(bool firstTime)
         }
 }
 
+static bool mAccelAvailable;
+
+static bool i2cAccelSetIdle(bool idle)
+{
+	bool success;
+
+	if (!mAccelAvailable || i2cPrvIsBuysy())
+		return false;
+
+	if (idle) {
+		//High-resolution and low-power modes are mutually exclusive on LIS3DH.
+		success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL4, ACCEL_CTRL4_IDLE);
+		success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL1, ACCEL_CTRL1_IDLE) && success;
+	}
+	else {
+		success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL1, ACCEL_CTRL1_ACTIVE);
+		success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL4, ACCEL_CTRL4_ACTIVE) && success;
+	}
+
+	return success;
+}
+
 static void i2cAccelConfigure(void)
 {
         uint8_t rv = 0xff;
 
+	mAccelAvailable = false;
         if (!i2cRegRead(ACCEL_I2C_ADDR, 0x0f, &rv, 1) || rv != 0x33)
                 pr("Accelerometer not found\n");
         else {
@@ -1048,8 +1185,9 @@ static void i2cAccelConfigure(void)
                 bool success = true;
 
                 success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, 0x1f, 0xc0) && success;            //temp measurement on
-                success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, 0x20, 0x77) && success;            ///400Hz no-low power mode, all axes on
-                success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, 0x23, 0xd8) && success;            //update data when both halves read, BE, 4g scale, high res
+                success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL1, ACCEL_CTRL1_ACTIVE) && success; //400Hz, all axes
+                success = i2cOneByteRegWrite(ACCEL_I2C_ADDR, ACCEL_REG_CTRL4, ACCEL_CTRL4_ACTIVE) && success; //BDU, BE, 4g, high res
+		mAccelAvailable = success;
 
                 pr("ACCEL config success: %d\n", success);
         }
@@ -1154,7 +1292,7 @@ void badgeIrdaInit(bool txMode)
                 pr("IrDA RX cfg fail\n");
                 return;
         }
-        sio_hw->gpio_clr = 1 << PIN_IRDA_SD;
+	sio_hw->gpio_clr = 1 << PIN_IRDA_SD;
 }
 
 void irdaRoll(void)
@@ -2166,7 +2304,8 @@ void __attribute__((noreturn, used)) micromain(void)
         clocks_hw->clk[clk_peri].ctrl = (clocks_hw->clk[clk_peri].ctrl &~ (CLOCKS_CLK_PERI_CTRL_KILL_BITS | CLOCKS_CLK_PERI_CTRL_AUXSRC_BITS)) | CLOCKS_CLK_PERI_CTRL_ENABLE_BITS | (CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS << CLOCKS_CLK_PERI_CTRL_AUXSRC_LSB);
 
         //release some peripherals from reset
-        unitsToReset = RESETS_RESET_PWM_BITS | RESETS_RESET_UART1_BITS | RESETS_RESET_PADS_BANK0_BITS | RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PIO0_BITS | RESETS_RESET_PIO1_BITS | RESETS_RESET_PIO2_BITS | RESETS_RESET_DMA_BITS | RESETS_RESET_SPI1_BITS | RESETS_WDSEL_PLL_SYS_BITS;
+        //UART1 and PIO2 are unused; leave them in their power-on reset state.
+        unitsToReset = RESETS_RESET_PWM_BITS | RESETS_RESET_PADS_BANK0_BITS | RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PIO0_BITS | RESETS_RESET_PIO1_BITS | RESETS_RESET_DMA_BITS | RESETS_RESET_SPI1_BITS | RESETS_WDSEL_PLL_SYS_BITS;
         resets_hw->reset |= unitsToReset;
         resets_hw->reset |= unitsToReset;
         resets_hw->reset &=~ unitsToReset;
@@ -2212,6 +2351,7 @@ void __attribute__((noreturn, used)) micromain(void)
 
         pr("gpios...\n");
         gpiosConfig(true);
+	applySavedAudio();
 
         pr("ws2812...");
         ws2812init();
@@ -2237,10 +2377,6 @@ void __attribute__((noreturn, used)) micromain(void)
         irdaSIRuartTx(tx, sizeof(tx), true);
         while (!(irdaSIRuartGetSta() & UART_STA_BIT_TX_FIFO_EMPTY));
         badgeIrdaInit(false);
-
-        pr("USB HID prepare...\n");
-        if (!usbHidPrepare())
-                pr("USB HID prepare failed\n");
 
         uiPrvSelfTestsIfNeeded();
 

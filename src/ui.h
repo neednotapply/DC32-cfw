@@ -62,6 +62,7 @@ typedef void (*UiRunGameF)(void *userData);
 
 void uiRunToolShell(UiRunGameF runGameF, void *userData);
 enum UiGameAction uiGameMenu(void);
+bool uiPortMenu(struct Canvas *activeCanvas);
 
 
 bool uiSaveSavestate(void);
@@ -80,6 +81,7 @@ uint_fast16_t uiGetUiKeysRaw(void);
 uint_fast16_t uiGetUiKeysRawNoTask(void);
 
 bool uiReadTouchRaw(struct UiTouchSample *sampleP);
+void uiPowerSetActiveBrightness(uint_fast8_t brightness);
 
 
 void uiSelfTestInit(struct Canvas *cnv, bool inverted, bool flipped);

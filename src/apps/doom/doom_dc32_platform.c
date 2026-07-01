@@ -535,8 +535,13 @@ static void doomDc32PollKeys(void)
 	bool pauseDown = (keys & (KEY_BIT_START | KEY_BIT_SEL)) == (KEY_BIT_START | KEY_BIT_SEL);
 	bool prevPauseDown = (prevKeys & (KEY_BIT_START | KEY_BIT_SEL)) == (KEY_BIT_START | KEY_BIT_SEL);
 
-	if ((keys & UI_KEY_BIT_CENTER) && !(prevKeys & UI_KEY_BIT_CENTER))
-		doomDc32Exit(0);
+	if ((keys & UI_KEY_BIT_CENTER) && !(prevKeys & UI_KEY_BIT_CENTER) &&
+			doomDc32Host && doomDc32Host->portMenu) {
+		if (!doomDc32Host->portMenu(&doomDc32Canvas))
+			doomDc32Exit(0);
+		keys = doomDc32Host->uiKeysRaw ? doomDc32Host->uiKeysRaw() : 0;
+		changed = keys ^ prevKeys;
+	}
 	if (changed & KEY_BIT_LEFT)
 		doomDc32PostKey(KEY_LEFTARROW, (keys & KEY_BIT_LEFT) != 0);
 	if (changed & KEY_BIT_RIGHT)

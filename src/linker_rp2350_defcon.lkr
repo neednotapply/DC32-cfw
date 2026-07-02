@@ -19,8 +19,8 @@ SECTIONS
                 KEEP ( *(.text.vec) ) ;
                 KEEP ( *(.text.vec.*) ) ;
                 *(.text.vec) *(.text.vec.*) ;
-                *(.text) *(.text.*) ;
-                *(.rodata) *(.rodata.*) ;
+                *(EXCLUDE_FILE (*absim_execute.cpp.obj) .text .text.*) ;
+                *(.rodata) *(EXCLUDE_FILE (*absim_execute.cpp.obj) .rodata.*) ;
                 . = ALIGN(4);
         }  > rom
 
@@ -29,6 +29,10 @@ SECTIONS
                 __data_data = LOADADDR(.data);
 
                 *(.fastcode) ; *(.fastcode.*) ;
+
+                /* The embedded AVR dispatcher and instruction handlers are the
+                   Arduboy hot loop. Other apps do not link this object. */
+                *absim_execute.cpp.obj(.text .text.* .rodata .rodata.*) ;
 
                 *(.data) ; *(.data.*) ;
                 . = ALIGN(4);

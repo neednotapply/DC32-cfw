@@ -4266,7 +4266,7 @@ bool uiSaveSavestate(void)
 					ArduboyPackageScratchSize = QSPI_ROM_SIZE_MAX / 2,
 				};
 				struct ToolWorkspaceSpan inflateDict = {0}, writeBuf = {0};
-				uint32_t extractedHexSize = 0;
+				uint32_t extractedHexSize = 0, extractedFxSize = 0;
 
 				if (fileSz > ArduboyPackageScratchSize) {
 					uiAlert(cnv, "Arduboy package is too large for this firmware", DialogTypeOk);
@@ -4282,9 +4282,11 @@ bool uiSaveSavestate(void)
 					if (ret) {
 						ret = arduboyExtractPackageToFlash((const void*)ArduboyPackageScratchAddr, fileSz, QSPI_ROM_START,
 							ArduboyPackageScratchSize, inflateDict.ptr, inflateDict.size, writeBuf.ptr, writeBuf.size,
-							&extractedHexSize);
+							&extractedHexSize, &extractedFxSize);
 						if (!ret)
 							uiAlert(cnv, "Cannot extract Arduboy package", DialogTypeOk);
+						else if (extractedFxSize)
+							pr("Arduboy package: cached %lu bytes of FX data\n", (unsigned long)extractedFxSize);
 					}
 					if (inflateDict.ptr)
 						toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerTransfer);
@@ -4299,6 +4301,11 @@ bool uiSaveSavestate(void)
 				}
 			}
 			else {
+				if (runtime == GameRuntimeArduboy && !arduboyClearFxCache()) {
+					uiAlert(cnv, "Cannot clear cached Arduboy FX data", DialogTypeOk);
+					ret = false;
+					goto out_close_file;
+				}
 				ret = uiPrvLoadFile(cnv, filR, QSPI_ROM_START, "ROM", QSPI_ROM_SIZE_MAX);
 				if (ret && runtime == GameRuntimeArduboy) {
 					ret = arduboyAnalyzeRom((const void*)QSPI_ROM_START, romSzExpected, &arduboyInfo);

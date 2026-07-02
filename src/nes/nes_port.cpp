@@ -12,6 +12,7 @@ extern "C" {
 #include "mbc.h"
 #include "memMap.h"
 #include "pinoutRp2350defcon.h"
+#include "printf.h"
 #include "settings.h"
 #include "timebase.h"
 #include "ui.h"
@@ -21,7 +22,6 @@ void nesPortInGameMenu(void);
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
-#include "InfoNES_pAPU.h"
 #include "nes.h"
 
 #define NES_MAGIC0 'N'
@@ -46,36 +46,59 @@ static enum NesRegion mRegion;
 static uint8_t *mSaveRam;
 static uint32_t mSaveRamSize;
 static uint8_t *mPool;
-static uint32_t mPoolSize;
-static uint32_t mPoolPos;
-static uint16_t *mLine;
+static uint16_t mLine[NES_LINE_WORDS];
 static uint16_t mDrawLeft;
 static uint16_t mDrawTop;
 static uint16_t mDrawWidth;
 static uint16_t mDrawHeight;
 static bool mDrawFlipped;
-static uint8_t mFrame[NES_DISP_WIDTH * NES_SAFE_HEIGHT];
+static uint8_t *mFrame;
 #ifdef DCAPP_BUILD
 static uint8_t mPpuRam[0x4000u];
-static uint8_t *mChrBuf;
 #endif
-static uint16_t *mPresentSrcX;
-static uint16_t *mPresentSrcRow;
+static uint16_t mPresentSrcX[DISP_HEIGHT];
+static uint16_t mPresentSrcRow[DISP_WIDTH];
 static uint16_t mPresentRowFirst;
 static uint16_t mPresentRowEnd;
 static uint16_t mPresentColFirst;
 static uint16_t mPresentColEnd;
+static uint64_t mNextEmulatedFrame;
+static uint32_t mEmulatedFrameTicks;
+static void (*mLedsTick)(void);
 static jmp_buf mAbort;
+
+#ifdef NES_PERF_PROFILE
+#define NES_PERF_WINDOW_FRAMES 300u
+static uint64_t mPerfSectionStart[2];
+static uint64_t mPerfSectionTicks[2];
+static uint64_t mPerfPresentTicks;
+static uint64_t mPerfWorkTicks;
+static uint64_t mPerfWindowStart;
+static uint64_t mPerfLastBoundary;
+static uint32_t mPerfWorkSamples[NES_PERF_WINDOW_FRAMES];
+static uint32_t mPerfFrames;
+static uint32_t mPerfRenderedFrames;
+static uint32_t mPerfLateFrames;
+
+static uint32_t nesPortPerfWorkP95(void)
+{
+	for (uint32_t i = 1; i < NES_PERF_WINDOW_FRAMES; i++) {
+		uint32_t sample = mPerfWorkSamples[i];
+		uint32_t j = i;
+		while (j > 0 && mPerfWorkSamples[j - 1] > sample) {
+			mPerfWorkSamples[j] = mPerfWorkSamples[j - 1];
+			j--;
+		}
+		mPerfWorkSamples[j] = sample;
+	}
+	return mPerfWorkSamples[(NES_PERF_WINDOW_FRAMES * 95u + 99u) / 100u - 1u];
+}
+#endif
 
 bool IsNSF = false;
 bool NsfIsPlaying = false;
 bool FDS_AudioEnabled = false;
 BYTE *NsfBank4K[8];
-BYTE *fds_wave_buffer;
-BYTE ApuFdsEnable;
-BYTE (*mmc5_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
-BYTE (*vrc6_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
-BYTE (*s5b_wave_buffers)[APU_MAX_SAMPLES_PER_SYNC];
 
 const WORD NesPalette[64] = {
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
@@ -109,30 +132,6 @@ static const uint16_t NesRgbPalette[64] = {
 	RGB565(0xb5, 0xeb, 0xf2), RGB565(0xb8, 0xb8, 0xb8), RGB565(0x00, 0x00, 0x00), RGB565(0x00, 0x00, 0x00),
 };
 
-static void *nesPortAllocAligned(uint32_t size, uint32_t align)
-{
-	uintptr_t base = (uintptr_t)mPool;
-	uint32_t pos = (uint32_t)(((base + mPoolPos + align - 1) &~ (uintptr_t)(align - 1)) - base);
-	void *ret;
-
-	if (!mPool || pos > mPoolSize || size > mPoolSize - pos)
-		return NULL;
-	ret = mPool + pos;
-	mPoolPos = pos + size;
-	memset(ret, 0, size);
-	return ret;
-}
-
-extern "C" void *nesPortAlloc(size_t size)
-{
-	return nesPortAllocAligned((uint32_t)size, 4);
-}
-
-extern "C" void nesPortFree(void *ptr)
-{
-	(void)ptr;
-}
-
 #ifndef DCAPP_BUILD
 extern "C" void *_sbrk(ptrdiff_t incr)
 {
@@ -140,6 +139,11 @@ extern "C" void *_sbrk(ptrdiff_t incr)
 	return (void*)-1;
 }
 #endif
+
+extern "C" void nesPortFree(void *ptr)
+{
+	(void)ptr;
+}
 
 extern "C" void *nesPortSaveRam(void)
 {
@@ -153,17 +157,6 @@ extern "C" void *nesPortPpuRam(void)
 	return mPpuRam;
 #else
 	return mbcPrvGetVramBuf();
-#endif
-}
-
-extern "C" void *nesPortChrBuf(void)
-{
-#ifdef DCAPP_BUILD
-	if (!mChrBuf)
-		mChrBuf = (uint8_t*)nesPortAllocAligned(0x8000u, 4);
-	return mChrBuf;
-#else
-	return mbcPrvGetWramBuf();
 #endif
 }
 
@@ -200,6 +193,26 @@ static uint32_t nesPortDesiredFramerate(enum NesRegion region)
 	if (speed >= sizeof(fpsVals) / sizeof(*fpsVals))
 		speed = settings.speed;
 	return (base * fpsVals[speed] + NES_FRAME_BASE_NTSC / 2) / NES_FRAME_BASE_NTSC;
+}
+
+static void nesPortResetFramePacing(void)
+{
+	uint32_t fps = nesPortDesiredFramerate(mRegion);
+
+	if (!fps)
+		fps = NES_FRAME_BASE_NTSC;
+	mEmulatedFrameTicks = TICKS_PER_SECOND / fps;
+	mNextEmulatedFrame = getTime() + mEmulatedFrameTicks;
+#ifdef NES_PERF_PROFILE
+	mPerfWindowStart = getTime();
+	mPerfLastBoundary = mPerfWindowStart;
+	memset(mPerfSectionTicks, 0, sizeof(mPerfSectionTicks));
+	mPerfPresentTicks = 0;
+	mPerfWorkTicks = 0;
+	mPerfFrames = 0;
+	mPerfRenderedFrames = 0;
+	mPerfLateFrames = 0;
+#endif
 }
 
 static void nesPortUpdateDrawOptions(void)
@@ -261,6 +274,7 @@ void nesRefreshDisplayOptions(void)
 {
 	dispSetFramerate(nesPortDesiredFramerate(mRegion));
 	nesPortUpdateDrawOptions();
+	nesPortResetFramePacing();
 }
 
 bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
@@ -385,6 +399,9 @@ void InfoNES_PostDrawLine(int line)
 static void nesPortPresentFrame(void)
 {
 	uint16_t *fb = (uint16_t*)dispGetFb();
+#ifdef NES_PERF_PROFILE
+	uint64_t perfStart = getTime();
+#endif
 
 	dispPrvWaitForScanoutStart();
 
@@ -398,15 +415,79 @@ static void nesPortPresentFrame(void)
 			*dst++ = NesRgbPalette[mFrame[srcOfst] & 0x3f];
 		}
 	}
+#ifdef NES_PERF_PROFILE
+	mPerfPresentTicks += getTime() - perfStart;
+#endif
 }
 
 int InfoNES_LoadFrame(void)
 {
-	dispPrvFrameCtrWait();
 	nesPortPresentFrame();
+#ifdef NES_PERF_PROFILE
+	mPerfRenderedFrames++;
+#endif
 	SRAMwritten = false;
 	return 0;
 }
+
+void InfoNES_FrameBoundary(void)
+{
+	uint64_t now = getTime();
+
+	if (mLedsTick)
+		mLedsTick();
+
+#ifdef NES_PERF_PROFILE
+	uint64_t workTicks = now - mPerfLastBoundary;
+	mPerfWorkSamples[mPerfFrames] = workTicks > UINT32_MAX ? UINT32_MAX : (uint32_t)workTicks;
+	mPerfWorkTicks += workTicks;
+	mPerfFrames++;
+	if (now > mNextEmulatedFrame)
+		mPerfLateFrames++;
+#endif
+
+	while (now < mNextEmulatedFrame)
+		now = getTime();
+	if (now - mNextEmulatedFrame > (uint64_t)mEmulatedFrameTicks * 4u)
+		mNextEmulatedFrame = now;
+	mNextEmulatedFrame += mEmulatedFrameTicks;
+#ifdef NES_PERF_PROFILE
+	mPerfLastBoundary = getTime();
+	if (mPerfFrames >= NES_PERF_WINDOW_FRAMES) {
+		uint64_t elapsed = mPerfLastBoundary - mPerfWindowStart;
+		uint32_t fps100 = elapsed ? (uint32_t)((uint64_t)mPerfFrames * TICKS_PER_SECOND * 100u / elapsed) : 0;
+		uint32_t render100 = elapsed ? (uint32_t)((uint64_t)mPerfRenderedFrames * TICKS_PER_SECOND * 100u / elapsed) : 0;
+		uint32_t workP95 = nesPortPerfWorkP95();
+		prRaw("NES perf emu=%u.%02u render=%u.%02u work=%u p95=%u cpu=%u ppu=%u present=%u late=%u\n",
+			fps100 / 100u, fps100 % 100u, render100 / 100u, render100 % 100u,
+			(unsigned)(mPerfWorkTicks / mPerfFrames),
+			(unsigned)workP95,
+			(unsigned)(mPerfSectionTicks[INFONES_PERF_CPU] / mPerfFrames),
+			(unsigned)(mPerfRenderedFrames ? mPerfSectionTicks[INFONES_PERF_PPU] / mPerfRenderedFrames : 0),
+			(unsigned)(mPerfRenderedFrames ? mPerfPresentTicks / mPerfRenderedFrames : 0),
+			(unsigned)mPerfLateFrames);
+		memset(mPerfSectionTicks, 0, sizeof(mPerfSectionTicks));
+		mPerfPresentTicks = 0;
+		mPerfWorkTicks = 0;
+		mPerfFrames = 0;
+		mPerfRenderedFrames = 0;
+		mPerfLateFrames = 0;
+		mPerfWindowStart = mPerfLastBoundary;
+	}
+#endif
+}
+
+#ifdef NES_PERF_PROFILE
+void InfoNES_PerfStart(enum InfoNES_PerfSection section)
+{
+	mPerfSectionStart[section] = getTime();
+}
+
+void InfoNES_PerfStop(enum InfoNES_PerfSection section)
+{
+	mPerfSectionTicks[section] += getTime() - mPerfSectionStart[section];
+}
+#endif
 
 void InfoNES_MessageBox(const char *pszMsg, ...)
 {
@@ -423,44 +504,13 @@ void InfoNES_DebugPrint(const char *pszMsg)
 	(void)pszMsg;
 }
 
-void InfoNES_SoundInit(void)
-{
-}
-
-int InfoNES_SoundOpen(int samples_per_sync, int sample_rate)
-{
-	(void)samples_per_sync;
-	(void)sample_rate;
-	return 0;
-}
-
-void InfoNES_SoundClose(void)
-{
-	audioPwmStop();
-}
-
-int InfoNES_GetSoundBufferSize(void)
-{
-	return 0;
-}
-
-void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3, BYTE *wave4, BYTE *wave5, BYTE *wave6)
-{
-	(void)samples;
-	(void)wave1;
-	(void)wave2;
-	(void)wave3;
-	(void)wave4;
-	(void)wave5;
-	(void)wave6;
-}
-
 void nesAbort(void)
 {
 	longjmp(mAbort, 1);
 }
 
-void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize)
+void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize,
+	void (*ledsTick)(void))
 {
 	struct NesRomInfo info;
 
@@ -472,28 +522,22 @@ void nesRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSi
 	mRegion = info.region;
 	mSaveRam = (uint8_t*)saveRam;
 	mSaveRamSize = saveRamSize;
+	mLedsTick = ledsTick;
 	mPool = (uint8_t*)CART_RAM_ADDR_IN_RAM;
-	mPoolSize = QSPI_RAM_SIZE_MAX;
-	mPoolPos = NES_SAVE_RAM_SIZE;
-#ifdef DCAPP_BUILD
-	mChrBuf = NULL;
-#endif
+	static_assert(NES_SAVE_RAM_SIZE + NES_DISP_WIDTH * NES_SAFE_HEIGHT <= QSPI_RAM_SIZE_MAX,
+		"NES save RAM and frame buffer must fit the cartridge SRAM window");
+	mFrame = mPool + NES_SAVE_RAM_SIZE;
 	if (mSaveRam != mPool && mSaveRam && mSaveRamSize)
 		memcpy(mPool, mSaveRam, mSaveRamSize > NES_SAVE_RAM_SIZE ? NES_SAVE_RAM_SIZE : mSaveRamSize);
 	mSaveRam = mPool;
 	mSaveRamSize = NES_SAVE_RAM_SIZE;
+	memset(mFrame, 0, NES_DISP_WIDTH * NES_SAFE_HEIGHT);
 
-	mLine = (uint16_t*)nesPortAllocAligned(NES_LINE_WORDS * sizeof(uint16_t), 4);
-	mPresentSrcX = (uint16_t*)nesPortAllocAligned(DISP_HEIGHT * sizeof(uint16_t), 4);
-	mPresentSrcRow = (uint16_t*)nesPortAllocAligned(DISP_WIDTH * sizeof(uint16_t), 4);
-	if (!mLine || !mPresentSrcX || !mPresentSrcRow)
-		return;
-
-	APU_Mute = 1;
 	audioPwmStop();
 	nesPortUpdateDrawOptions();
 	dispSetFramerate(nesPortDesiredFramerate(mRegion));
 	dispPrvFrameCtrReset();
+	nesPortResetFramePacing();
 
 	if (setjmp(mAbort)) {
 		InfoNES_Fin();
@@ -516,7 +560,7 @@ void nesPortDrawLine(uint16_t line, const uint16_t *pixels256)
 		return;
 
 	if (!srcY)
-		memset(mFrame, 0, sizeof(mFrame));
+		memset(mFrame, 0, NES_DISP_WIDTH * NES_SAFE_HEIGHT);
 
 	if (srcY < NES_SAFE_TOP || srcY >= NES_SAFE_BOTTOM)
 		return;

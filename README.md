@@ -15,6 +15,10 @@
 - Battery percentage, idle dimming, paused static scanout, and bounded clock gating for longer runtime
 - Deterministic warm-restart clock initialization and boot recovery
 
+## Emulator compatibility
+
+Arduboy emulation is playable but not yet 100% accurate. Many games run at or near full speed, while more demanding titles may run slower or exhibit timing or compatibility differences. Arduboy audio is not currently emulated.
+
 ## Release files
 
 A release consists of:

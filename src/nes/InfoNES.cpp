@@ -38,7 +38,6 @@
 #include "InfoNES.h"
 #include "InfoNES_System.h"
 #include "InfoNES_Mapper.h"
-#include "InfoNES_pAPU.h"
 #include "K6502.h"
 #include <assert.h>
 #include <pico.h>
@@ -99,6 +98,8 @@ BYTE *PPURAM;
 BYTE *PPUBANK[16];
 /* Sprite RAM */
 BYTE *SPRRAM;
+static BYTE CpuRamStorage[RAM_SIZE];
+static BYTE SpriteRamStorage[SPRRAM_SIZE];
 // Share this memory with other components (menu.cpp, romselect.cpp, main.cpp)
 // void *InfoNes_GetSPRRAM(size_t *size)
 // {
@@ -250,9 +251,6 @@ BYTE PPU_MirrorTable[][4] =
 /* APU Register */
 BYTE APU_Reg[0x18];
 
-/* APU Mute ( 0:OFF, 1:ON ) */
-int APU_Mute = 0;
-
 /* Pad data */
 DWORD PAD1_Latch;
 DWORD PAD2_Latch;
@@ -312,7 +310,6 @@ bool IsFDS = false;
 
 extern "C" void *nesPortSaveRam(void);
 extern "C" void *nesPortPpuRam(void);
-extern "C" void *nesPortChrBuf(void);
 
 /*===================================================================*/
 /*                                                                   */
@@ -328,11 +325,11 @@ void InfoNES_Init()
    *    Initialize memory, K6502 and Scanline Table.
    */
 
-  RAM = (BYTE *)Frens::f_malloc(RAM_SIZE);
+  RAM = CpuRamStorage;
   SRAM = (BYTE *)nesPortSaveRam();
   PPURAM = (BYTE *)nesPortPpuRam();
-  SPRRAM = (BYTE *)Frens::f_malloc(SPRRAM_SIZE);
-  ChrBuf = (BYTE *)nesPortChrBuf();
+  SPRRAM = SpriteRamStorage;
+  ChrBuf = nullptr;
 
   int nIdx;
 
@@ -366,15 +363,12 @@ void InfoNES_Fin()
    *  Remarks
    *    Release resources
    */
-  // Finalize pAPU
-  InfoNES_pAPUDone();
-
   // Release a memory for ROM
   InfoNES_ReleaseRom();
-  Frens::f_free(RAM);
+  RAM = nullptr;
   SRAM = nullptr;
   PPURAM = nullptr;
-  Frens::f_free(SPRRAM);
+  SPRRAM = nullptr;
   ChrBuf = nullptr;
   if (DRAM) { Frens::f_free(DRAM); DRAM = nullptr; }
 }
@@ -468,8 +462,8 @@ int InfoNES_Reset()
   // Clear RAM
   InfoNES_MemorySet(RAM, 0, RAM_SIZE);
 
-  // Reset frame skip and frame count
-  FrameSkip = 0;
+  // Emulate every frame while presenting every other frame.
+  FrameSkip = 1;
   FrameCnt = 0;
 
 #if 0
@@ -496,12 +490,6 @@ int InfoNES_Reset()
   /*-------------------------------------------------------------------*/
 
   InfoNES_SetupPPU();
-
-  /*-------------------------------------------------------------------*/
-  /*  Initialize pAPU                                                  */
-  /*-------------------------------------------------------------------*/
-
-  InfoNES_pAPUInit();
 
   /*-------------------------------------------------------------------*/
   /*  Initialize Mapper                                                */
@@ -587,8 +575,8 @@ void InfoNES_SetupPPU()
   // Reset information on PPU_R0
   PPU_Increment = 1;
   PPU_NameTableBank = NAME_TABLE0;
-  PPU_BG_Base = ChrBuf;
-  PPU_SP_Base = ChrBuf + 256 * 64;
+  PPU_BG_Base = nullptr;
+  PPU_SP_Base = nullptr;
   PPU_SP_Height = 8;
 
   // Reset PPU banks
@@ -740,6 +728,7 @@ void __not_in_flash_func(InfoNES_Cycle)()
     util::WorkMeterMark(MARKER_START);
 
     // Set a flag if a scanning line is a hit in the sprite #0
+    InfoNES_PerfStart(INFONES_PERF_CPU);
     if (SpriteJustHit == PPU_Scanline &&
         PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
     {
@@ -765,6 +754,7 @@ void __not_in_flash_func(InfoNES_Cycle)()
       // Execute instructions
       K6502_Step(STEP_PER_SCANLINE);
     }
+    InfoNES_PerfStop(INFONES_PERF_CPU);
 
     // Frame IRQ in H-Sync
     FrameStep += STEP_PER_SCANLINE;
@@ -777,8 +767,9 @@ void __not_in_flash_func(InfoNES_Cycle)()
 
     util::WorkMeterMark(MARKER_CPU);
 
-    // A mapper function in H-Sync
-    MapperHSync();
+    // Mapper 4 is the only supported mapper with per-scanline work.
+    if (MapperNo == 4)
+      Map4_HSync();
 
     // A function in H-Sync
     if (InfoNES_HSync() == -1)
@@ -804,8 +795,6 @@ int __not_in_flash_func(InfoNES_HSync)()
    *   -1 : Exit an emulation
    */
 
-  if (!APU_Mute)
-    InfoNES_pAPUHsync(true);
   util::WorkMeterMark(MARKER_SOUND);
 
   // int tmpv = (PPU_Addr >> 12) + ((PPU_Addr >> 5) << 3);
@@ -821,10 +810,26 @@ int __not_in_flash_func(InfoNES_HSync)()
   if (FrameCnt == 0 &&
       PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
   {
+    InfoNES_PerfStart(INFONES_PERF_PPU);
     InfoNES_PreDrawLine(PPU_Scanline);
     InfoNES_DrawLine();
     InfoNES_PostDrawLine(PPU_Scanline);
+    InfoNES_PerfStop(INFONES_PERF_PPU);
     // todo: 描画しないラインにもスプライトオーバーレジスタとかは反映する必要がある
+  }
+  else if (FrameCnt != 0 &&
+           PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN &&
+           (PPU_R1 & R1_SHOW_SP))
+  {
+    int count = 0;
+    for (BYTE *spr = SPRRAM; spr < SPRRAM + SPRRAM_SIZE; spr += 4)
+    {
+      int y = spr[SPR_Y] + 1;
+      if (y <= PPU_Scanline && y + PPU_SP_Height > PPU_Scanline)
+        ++count;
+    }
+    if (count >= 8)
+      PPU_R2 |= R2_MAX_SP;
   }
 
   util::WorkMeterReset(); // 計測起点はここ
@@ -913,15 +918,11 @@ int __not_in_flash_func(InfoNES_HSync)()
     // Set a V-Blank flag
     PPU_R2 |= R2_IN_VBLANK;
 
-    // pAPU Sound function in V-Sync
-    if (!APU_Mute)
-      InfoNES_pAPUVsync();
-
-    // A mapper function in V-Sync
-    MapperVSync();
-
     // Get the condition of the joypad
     InfoNES_PadState(&PAD1_Latch, &PAD2_Latch, &PAD_System);
+
+    // Pace all emulated frames, including non-rendered frames.
+    InfoNES_FrameBoundary();
 
     // NMI on V-Blank
     if (PPU_R0 & R0_NMI_VB)
@@ -1008,9 +1009,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*  Render Background                                                */
   /*-------------------------------------------------------------------*/
 
-  /* MMC5 VROM switch */
-  MapperRenderScreen(1);
-
   // Pointer to the render position
   //  pPoint = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
   assert(WorkLine);
@@ -1062,7 +1060,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     /*-------------------------------------------------------------------*/
 
     pbyNameTable = PPUBANK[nNameTable] + nY * 32 + nX;
-    pbyChrData = PPU_BG_Base + (*pbyNameTable << 6) + nYBit;
     pAttrBase = PPUBANK[nNameTable] + 0x3c0 + (nY / 4) * 8;
 #if 0
     pPalTbl = &PalTable[(((pAttrBase[nX >> 2] >> ((nX & 2) + nY4)) & 3) << 2)];
@@ -1120,9 +1117,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       }
     }
 #endif
-
-    // Callback at PPU read/write
-    MapperPPU(PATTBL(pbyChrData));
 
     ++nX;
     ++pbyNameTable;
@@ -1195,10 +1189,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       putBG(nX);
 #endif
 
-      // Callback at PPU read/write
-      pbyChrData = PPU_BG_Base + (*pbyNameTable << 6) + nYBit;
-      MapperPPU(PATTBL(pbyChrData));
-
       ++pbyNameTable;
     }
 
@@ -1230,10 +1220,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 #else
       putBG(nX);
 #endif
-
-      // Callback at PPU read/write
-      pbyChrData = PPU_BG_Base + (*pbyNameTable << 6) + nYBit;
-      MapperPPU(PATTBL(pbyChrData));
 
       ++pbyNameTable;
     }
@@ -1300,10 +1286,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     }
 #endif
 
-    // Callback at PPU read/write
-    pbyChrData = PPU_BG_Base + (*pbyNameTable << 6) + nYBit;
-    MapperPPU(PATTBL(pbyChrData));
-
     /*-------------------------------------------------------------------*/
     /*  Backgroud Clipping                                               */
     /*-------------------------------------------------------------------*/
@@ -1335,9 +1317,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*-------------------------------------------------------------------*/
   /*  Render a sprite                                                  */
   /*-------------------------------------------------------------------*/
-
-  /* MMC5 VROM switch */
-  MapperRenderScreen(0);
 
   if (PPU_R1 & R1_SHOW_SP)
   {

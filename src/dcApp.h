@@ -116,6 +116,7 @@ struct DcAppHostApi {
 
 typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);
 typedef void (*DcAppVoidF)(void);
+typedef void (*DcAppCore1EntryF)(void *context);
 struct ToolWorkspaceSpan;
 
 struct DcAppCatalogEntry {
@@ -146,6 +147,9 @@ void dcAppAbortActive(void);
 void dcAppRefreshActive(void);
 bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP);
 bool dcAppGetAuxScratch(struct ToolWorkspaceSpan *spanP);
+bool dcAppCore1Start(DcAppCore1EntryF entry, void *context, void *stackTop);
+void dcAppCore1Join(void);
+void dcAppCore1ForceStop(void);
 const struct DcAppCatalogEntry *dcAppCatalogEntries(uint_fast8_t *countP);
 const struct DcAppCatalogEntry *dcAppCatalogFind(uint32_t appId);
 const char *dcAppLastError(void);

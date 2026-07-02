@@ -781,37 +781,25 @@ static void uiPrvUpscalerMain(void)
         }
 }
 
+static void uiPrvUpscalerCore1Entry(void *context)
+{
+	(void)context;
+	uiPrvUpscalerMain();
+}
+
 static void uiPrvUpscalerInit(void)
 {
-        static uint32_t mUpscalerStack[32];
-        uint32_t cmds[] = {0, 0, 1, SCB->VTOR, ((uintptr_t)mUpscalerStack) + sizeof(mUpscalerStack), (uintptr_t)&uiPrvUpscalerMain};
-        uint32_t idx = 0;
+        static uint32_t mUpscalerStack[64];
 
         uiPrvGbUpscalerBuildMaps();
-        
-        //first, reset the core
-        psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;
-        while (!(psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS));
-        psm_hw->frce_off &=~ PSM_FRCE_OFF_PROC1_BITS;
-        while (psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS);
-        
-        
-        //then bring it up to our code
-        do {
-                uint32_t tx = cmds[idx];
-                if (idx < 2) {
-                        uiPrvFifoDump();
-                        asm volatile("sev");
-                }
-                uiPrvFifoTx(tx);
-                idx = (uiPrvFifoRx() == tx) ? idx + 1 : 0;
-        } while (idx < sizeof(cmds) / sizeof(*cmds));
+	if (!dcAppCore1Start(uiPrvUpscalerCore1Entry, NULL,
+			mUpscalerStack + sizeof(mUpscalerStack) / sizeof(mUpscalerStack[0])))
+		pr("Unable to start GB Core1 upscaler\n");
 }
 
 static void uiPrvUpscalerDeinit(void)
 {
-        psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;
-        while (!(psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS));
+	dcAppCore1ForceStop();
 }
 
 void gbDrawLine(uint8_t lineNum, PIXFMT* pixels)

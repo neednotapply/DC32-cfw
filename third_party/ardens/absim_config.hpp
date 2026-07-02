@@ -17,6 +17,12 @@
 
 #endif
 
+#if defined(ARDENS_EMBEDDED) && (defined(__GNUC__) || defined(__clang__))
+#define ARDENS_HOT [[gnu::section(".fastcode.ardens")]]
+#else
+#define ARDENS_HOT
+#endif
+
 #if defined(ARDENS_EMBEDDED)
 #ifndef ARDENS_NO_DEBUGGER
 #define ARDENS_NO_DEBUGGER 1

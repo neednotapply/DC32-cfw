@@ -64,6 +64,21 @@ struct pqueue
         return least_cycle;
     }
 
+    ARDENS_FORCEINLINE uint64_t cycle(pqueue_type type) const
+    {
+        return cycles[type];
+    }
+
+    ARDENS_FORCEINLINE void reschedule(uint64_t cycle, pqueue_type type)
+    {
+        cycles[type] = cycle;
+        if(cycle == UINT64_MAX)
+            scheduled &= ~(1u << type);
+        else
+            scheduled |= 1u << type;
+        update_least();
+    }
+
     ARDENS_FORCEINLINE void pop()
     {
         scheduled &= ~(1 << least_index);

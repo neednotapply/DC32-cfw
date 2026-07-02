@@ -3,7 +3,7 @@
 namespace absim
 {
 
-void atmega32u4_t::spi_handle_st_spcr_or_spsr(
+ARDENS_HOT void atmega32u4_t::spi_handle_st_spcr_or_spsr(
     atmega32u4_t& cpu, uint16_t ptr, uint8_t x)
 {
     cpu.update_spi();
@@ -73,7 +73,7 @@ static uint8_t reverse_bits(uint8_t byte)
     return REVERSE[byte];
 }
 
-void atmega32u4_t::spi_handle_st_spdr(
+ARDENS_HOT void atmega32u4_t::spi_handle_st_spdr(
     atmega32u4_t& cpu, uint16_t ptr, uint8_t x)
 {
     cpu.update_spi();
@@ -99,13 +99,15 @@ void atmega32u4_t::spi_handle_st_spdr(
     else
         cpu.spi_data_byte = spcr & DORD ? reverse_bits(x) : x;
 
-    cpu.SPDR() = cpu.spi_datain_byte;
+    uint8_t data_in = cpu.spi_datain_byte;
     cpu.spi_busy = false;
     cpu.spsr_read_after_transmit = false;
     cpu.spi_done_cycle = cpu.cycle_count;
     cpu.spi_transmit_zero_cycle = UINT64_MAX;
     spsr = uint8_t((spsr | SPIF) & ~WCOL);
-    cpu.embedded_spi_fast_writes += 1;
+    if(cpu.embedded_spi_sink)
+        data_in = cpu.embedded_spi_sink(cpu.embedded_spi_sink_context, cpu.spi_data_byte, cpu.data[0x2b]);
+    cpu.SPDR() = data_in;
     return;
 #endif
 
@@ -130,7 +132,7 @@ void atmega32u4_t::spi_handle_st_spdr(
     }
 }
 
-uint8_t atmega32u4_t::spi_handle_ld_spsr(atmega32u4_t& cpu, uint16_t ptr)
+ARDENS_HOT uint8_t atmega32u4_t::spi_handle_ld_spsr(atmega32u4_t& cpu, uint16_t ptr)
 {
     cpu.update_spi();
     auto r = cpu.SPSR();
@@ -139,7 +141,7 @@ uint8_t atmega32u4_t::spi_handle_ld_spsr(atmega32u4_t& cpu, uint16_t ptr)
     return r;
 }
 
-uint8_t atmega32u4_t::spi_handle_ld_spdr(atmega32u4_t& cpu, uint16_t ptr)
+ARDENS_HOT uint8_t atmega32u4_t::spi_handle_ld_spdr(atmega32u4_t& cpu, uint16_t ptr)
 {
     cpu.update_spi();
     if(cpu.spsr_read_after_transmit)

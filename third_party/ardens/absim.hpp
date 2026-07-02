@@ -802,6 +802,10 @@ struct atmega32u4_t
 
 #ifdef ARDENS_EMBEDDED
     static constexpr uint16_t EMBEDDED_HLE_NONE = 0xffff;
+    using embedded_spi_sink_t = uint8_t (*)(void*, uint8_t, uint8_t);
+    using embedded_spi_bulk_sink_t = bool (*)(void*, uint8_t const*, uint32_t, uint8_t);
+    using embedded_port_sink_t = void (*)(void*, uint16_t, uint8_t);
+    using embedded_hle_sink_t = uint32_t (*)(void*, atmega32u4_t&, uint16_t, uint16_t, uint32_t);
     uint16_t embedded_delay_pc;
     uint16_t embedded_micros_pc;
     uint16_t embedded_timer0_millis_addr;
@@ -813,8 +817,29 @@ struct atmega32u4_t
     uint64_t embedded_delay_cycles;
     uint32_t embedded_timer0_fast_updates;
     uint32_t embedded_spi_fast_writes;
+    embedded_spi_sink_t embedded_spi_sink;
+    embedded_spi_bulk_sink_t embedded_spi_bulk_sink;
+    void* embedded_spi_sink_context;
+    embedded_port_sink_t embedded_port_sink;
+    void* embedded_port_sink_context;
+    embedded_hle_sink_t embedded_hle_sink;
+    void* embedded_hle_sink_context;
+    bool embedded_can_advance_timer0_delay(uint64_t cycles) const;
     bool embedded_advance_timer0_delay(uint64_t cycles);
+    uint32_t embedded_execute_fast(avr_instr_t i);
     uint32_t embedded_hle_call(uint16_t target, uint16_t ret_addr, uint32_t base_cycles);
+    bool embedded_timer3_speaker_only() const
+    {
+        uint8_t tccr3a = data[0x90];
+        uint8_t tccr3b = data[0x91];
+        uint8_t wgm = (tccr3a & 0x03u) | ((tccr3b >> 1) & 0x0cu);
+        return (tccr3a & 0xc0u) == 0x40u && (tccr3a & 0x3fu) == 0 && wgm == 4u;
+    }
+    bool embedded_timer4_speaker_only() const
+    {
+        return (data[0xc0] & 0xc0u) == 0x40u && (data[0xc0] & 0x3fu) == 0 &&
+            (data[0xc3] & 0x03u) == 0;
+    }
 #endif
 
     // lock bits
@@ -852,6 +877,9 @@ struct atmega32u4_t
 
     // execute at least one cycle (return how many cycles were executed)
     uint32_t advance_cycle();
+#ifdef ARDENS_EMBEDDED
+    bool advance_until(uint64_t deadline);
+#endif
 
     // update delayed peripheral states
     void update_all();

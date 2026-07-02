@@ -16,7 +16,6 @@
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
-#include "InfoNES_pAPU.h"
 #include <pico.h>
 #include <stdio.h>
 
@@ -146,26 +145,8 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
   case 0x4000: /* Sound */
     if (wAddr == 0x4015)
     {
-      // APU status (read register is separate from write register)
+      // Audio is permanently disabled; only the existing frame IRQ is visible.
       byRet = 0;
-      if (ApuC1Atl > 0)
-        byRet |= (1 << 0);
-      if (ApuC2Atl > 0)
-        byRet |= (1 << 1);
-      if (!ApuC3Holdnote)
-      {
-        if (ApuC3Atl > 0)
-          byRet |= (1 << 2);
-      }
-      else
-      {
-        if (ApuC3Llc > 0)
-          byRet |= (1 << 2);
-      }
-      if (ApuC4Atl > 0)
-        byRet |= (1 << 3);
-      if (ApuC5DmaLength > 0)
-        byRet |= (1 << 4);
 
       // FrameIRQ
       if (APU_Reg[0x15] & 0x40)
@@ -189,8 +170,8 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     }
     else
     {
-      /* Return Mapper Register*/
-      return MapperReadApu(wAddr);
+      /* All currently supported mappers use the open-bus implementation. */
+      return (BYTE)(wAddr >> 8);
     }
     break;
     // The other sound registers are not readable.
@@ -257,8 +238,6 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       PPU_R0 = byData;
       PPU_Increment = (PPU_R0 & R0_INC_ADDR) ? 32 : 1;
       PPU_NameTableBank = NAME_TABLE0 + (PPU_R0 & R0_NAME_ADDR);
-      PPU_BG_Base = (PPU_R0 & R0_BG_ADDR) ? ChrBuf + 256 * 64 : ChrBuf;
-      PPU_SP_Base = (PPU_R0 & R0_SP_ADDR) ? ChrBuf + 256 * 64 : ChrBuf;
       PPU_SP_Height = (PPU_R0 & R0_SP_SIZE) ? 16 : 8;
 
       // Account for Loopy's scrolling discoveries
@@ -350,7 +329,6 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       if (addr < 0x2000 && byVramWriteEnable)
       {
         // Pattern Data
-        ChrBufUpdate |= (1 << (addr >> 10));
         PPUBANK[addr >> 10][addr & 0x3ff] = byData;
       }
       else if (addr < 0x3f00) /* 0x2000 - 0x3eff */
@@ -403,9 +381,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     case 0x11:
     case 0x12:
     case 0x13:
-      // Call Function corresponding to Sound Registers
-      if (!APU_Mute)
-        pAPUSoundRegs[wAddr & 0x1f](wAddr, byData);
+      // Audio synthesis is intentionally omitted.
       break;
 
     case 0x14: /* 0x4014 */
@@ -439,8 +415,6 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 0x15: /* 0x4015 */
-      if (!APU_Mute)
-        InfoNES_pAPUWriteControl(wAddr, byData);
 #if 0
           /* Unknown */
           if ( byData & 0x10 ) 
@@ -478,8 +452,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     }
     else
     {
-      /* Write to Mapper ($4018-$5FFF) */
-      MapperApu(wAddr, byData);
+      /* Current supported mappers have no registers in this range. */
     }
     break;
 

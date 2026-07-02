@@ -320,7 +320,7 @@ void Map4_Write( WORD wAddr, BYTE byData )
 /*-------------------------------------------------------------------*/
 /*  Mapper 4 H-Sync Function                                         */
 /*-------------------------------------------------------------------*/
-void Map4_HSync()
+void __not_in_flash_func(Map4_HSync)()
 {
 /*
  *  Callback at HSync

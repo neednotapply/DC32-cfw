@@ -231,7 +231,6 @@ extern WORD PalTable[];
 /*-------------------------------------------------------------------*/
 
 extern BYTE APU_Reg[];
-extern int APU_Mute;
 
 extern DWORD PAD1_Latch;
 extern DWORD PAD2_Latch;
@@ -342,16 +341,13 @@ void InfoNES_Mirroring(int nType);
 /* The main loop of InfoNES. region: 0=NTSC, 1=PAL, 2=Dendy. */
 void InfoNES_Main(int region);
 
-/* Select region (0/1/2) for timing. Must be called before InfoNES_Init() /
-   InfoNES_pAPUInit() so region-dependent constants are picked up.
-   InfoNES_Main() calls this for you. */
+/* Select region (0/1/2) for timing. InfoNES_Main() calls this for you. */
 void InfoNES_SetRegion(int region);
 
 /* Returns the currently selected region (0/1/2). */
 int InfoNES_GetRegion();
 
-/* True for PAL or Dendy (anything that uses the PAL CPU clock + 50 Hz pacing
-   + PAL APU period tables). Used by audio init and frame pacing. */
+/* True for PAL or Dendy; used by frame pacing. */
 bool InfoNES_IsPal();
 
 /* The loop of emulation */

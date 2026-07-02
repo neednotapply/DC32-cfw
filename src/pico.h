@@ -13,7 +13,11 @@ typedef  unsigned int uint;
 #endif
 
 #ifndef __not_in_flash_func
-	#define __not_in_flash_func(fn) fn
+	#ifdef NES_FASTCODE_ENABLED
+		#define __not_in_flash_func(fn) __attribute__((section(".fastcode." #fn))) fn
+	#else
+		#define __not_in_flash_func(fn) fn
+	#endif
 #endif
 #ifndef __not_in_flash
 	#define __not_in_flash(name)

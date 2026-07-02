@@ -200,10 +200,16 @@ void atmega32u4_t::usb_st_handler(atmega32u4_t& cpu, uint16_t ptr, uint8_t x)
         cpu.schedule_interrupt_check();
         break;
     case ADDR_UDCON:
+#ifdef ARDENS_GAME_ONLY
+        // The badge cannot expose the emulated USB device. Preserve attachment
+        // register state without scheduling a 1 kHz stream of fake SOF events.
+        cpu.usb_next_sofi_cycle = UINT64_MAX;
+#else
         if((cpu.data[ptr] & 1) && !(x & 1))
             cpu.usb_next_sofi_cycle = cpu.cycle_count + 16000;
         if(x & 1)
             cpu.usb_next_sofi_cycle = UINT64_MAX;
+#endif
         usb_set_next_update_cycle(cpu);
         cpu.usb_attached = ((x & 1) != 0);
         break;

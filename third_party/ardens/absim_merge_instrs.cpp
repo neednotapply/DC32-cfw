@@ -105,6 +105,54 @@ void atmega32u4_t::merge_instrs()
         auto& i0 = prog[n + 0];
         auto  i1 = decoded_prog[n + 1];
 
+#ifdef ARDENS_EMBEDDED
+        if(n + 5 < decoded_prog.size())
+        {
+            auto i2 = decoded_prog[n + 2];
+            auto i3 = decoded_prog[n + 3];
+            auto i4 = decoded_prog[n + 4];
+            auto i5 = decoded_prog[n + 5];
+            if(decoded_prog[n + 0].func == INSTR_MERGED_ST_Z_INC &&
+                i1.func == INSTR_MERGED_ST_Z_INC && i2.func == INSTR_MERGED_ST_Z_INC &&
+                i3.func == INSTR_MERGED_ST_Z_INC &&
+                decoded_prog[n + 0].src == i1.src && i1.src == i2.src && i2.src == i3.src &&
+                i4.func == INSTR_INC && i5.func == INSTR_BRBC && i5.src == 1 &&
+                (int16_t)i5.word == -6)
+            {
+                i0.func = INSTR_MERGED_FILL4_INC_BRNE;
+                i0.src = decoded_prog[n + 0].src;
+                i0.dst = i4.dst;
+                continue;
+            }
+        }
+        if(n + 8 < decoded_prog.size())
+        {
+            auto const& d0 = decoded_prog[n + 0];
+            auto const& d1 = decoded_prog[n + 1];
+            auto const& d2 = decoded_prog[n + 2];
+            auto const& d3 = decoded_prog[n + 3];
+            auto const& d4 = decoded_prog[n + 4];
+            auto const& d5 = decoded_prog[n + 5];
+            auto const& d6 = decoded_prog[n + 6];
+            auto const& d7 = decoded_prog[n + 7];
+            auto const& d8 = decoded_prog[n + 8];
+            if(d0.func == INSTR_MERGED_LD_Z && d0.src == 0 &&
+                d1.func == INSTR_MERGED_OUT && d1.dst == 0x2e && d1.src == 0 &&
+                d2.func == INSTR_CPSE && d2.src == 1 &&
+                d3.func == INSTR_MOV && d3.dst == 0 && d3.src == 1 &&
+                d4.func == INSTR_SBIW && d4.dst == 26 && d4.src == 1 &&
+                d5.func == INSTR_SBRC && d5.dst == 26 && d5.src == 1 &&
+                d6.func == INSTR_RJMP && (int16_t)d6.word == -3 &&
+                d7.func == INSTR_MERGED_ST_Z_INC && d7.src == 0 &&
+                d8.func == INSTR_BRBC && d8.src == 1 && (int16_t)d8.word == -9)
+            {
+                i0.func = INSTR_MERGED_ARDUBOY_DISPLAY;
+                i0.src = d2.dst;
+                continue;
+            }
+        }
+#endif
+
         if(i0.func == INSTR_LDI && i1.func == INSTR_LDI)
         {
             i0.func = INSTR_MERGED_LDI2;

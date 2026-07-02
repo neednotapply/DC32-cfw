@@ -36,6 +36,10 @@ void atmega32u4_t::st_handle_port(
 {
     // TODO: handle pullup behavior
     cpu.data[ptr] = x;
+#ifdef ARDENS_EMBEDDED
+    if(cpu.embedded_port_sink)
+        cpu.embedded_port_sink(cpu.embedded_port_sink_context, ptr, x);
+#endif
 }
 
 void atmega32u4_t::st_handle_mcucr(
@@ -107,6 +111,14 @@ void atmega32u4_t::update_watchdog()
     }
 
     update_watchdog_prescaler();
+
+#ifdef ARDENS_GAME_ONLY
+    if((WDTCSR() & ((1u << 6) | (1u << 3))) == 0)
+    {
+        watchdog_next_cycle = UINT64_MAX;
+        return;
+    }
+#endif
 
     // normalize divider cycle in case divider decreased
     watchdog_divider_cycle %= watchdog_divider;
@@ -376,7 +388,308 @@ size_t atmega32u4_t::addr_to_disassembled_index(uint16_t addr)
 }
 #endif
 
-__attribute__((section(".fastcode"))) uint32_t atmega32u4_t::advance_cycle()
+#if defined(ARDENS_EMBEDDED) && defined(ARDENS_FAST_DISPATCH)
+ARDENS_FORCEINLINE static uint8_t embedded_flags_nzs(uint8_t sreg, uint32_t result)
+{
+    sreg &= uint8_t(~(SREG_N | SREG_Z | SREG_S));
+    if((result & 0xffu) == 0) sreg |= SREG_Z;
+    if(result & 0x80u) sreg |= SREG_N;
+    if(((sreg & SREG_N) != 0) != ((sreg & SREG_V) != 0)) sreg |= SREG_S;
+    return sreg;
+}
+
+ARDENS_FORCEINLINE static void embedded_sub_flags(
+    atmega32u4_t& cpu, uint32_t result, uint32_t dst, uint32_t src)
+{
+    uint32_t result_xor_src = result ^ src;
+    uint32_t hc = (result | src) ^ (dst & result_xor_src);
+    uint32_t v = ~result_xor_src & (result ^ dst);
+    uint8_t sreg = cpu.sreg() & uint8_t(~SREG_HSVNZC);
+    sreg |= uint8_t((hc & 0x08u) << 2);
+    sreg |= uint8_t(hc >> 7);
+    sreg |= uint8_t((v & 0x80u) >> 4);
+    cpu.sreg() = embedded_flags_nzs(sreg, result);
+}
+
+ARDENS_HOT ARDENS_NOINLINE uint32_t atmega32u4_t::embedded_execute_fast(avr_instr_t i)
+{
+    switch(i.func)
+    {
+    case INSTR_NOP:
+        pc += 1;
+        return 1;
+    case INSTR_MOV:
+        gpr(i.dst) = gpr(i.src);
+        pc += 1;
+        return 1;
+    case INSTR_MOVW:
+        reinterpret_cast<uint16_t*>(&data[0])[i.dst] =
+            reinterpret_cast<uint16_t*>(&data[0])[i.src];
+        pc += 1;
+        return 1;
+    case INSTR_LDI:
+        gpr(i.dst) = i.src;
+        pc += 1;
+        return 1;
+    case INSTR_MERGED_LDI2:
+        gpr(i.dst) = i.src;
+        gpr(i.m0) = i.m1;
+        pc += 2;
+        return 2;
+
+    case INSTR_AND:
+    case INSTR_OR:
+    case INSTR_EOR:
+    case INSTR_ANDI:
+    case INSTR_ORI:
+    {
+        uint8_t src = (i.func == INSTR_ANDI || i.func == INSTR_ORI) ? i.src : gpr(i.src);
+        uint8_t result = (i.func == INSTR_AND || i.func == INSTR_ANDI) ?
+            uint8_t(gpr(i.dst) & src) :
+            i.func == INSTR_EOR ? uint8_t(gpr(i.dst) ^ src) : uint8_t(gpr(i.dst) | src);
+        gpr(i.dst) = result;
+        sreg() = embedded_flags_nzs(sreg() & uint8_t(~SREG_V), result);
+        pc += 1;
+        return 1;
+    }
+    case INSTR_CLR:
+        gpr(i.dst) = 0;
+        sreg() = uint8_t((sreg() & ~0x1cu) | SREG_Z);
+        pc += 1;
+        return 1;
+    case INSTR_ADD:
+    case INSTR_ADC:
+    {
+        uint32_t dst = gpr(i.dst);
+        uint32_t src = gpr(i.src);
+        uint32_t result = (dst + src + (i.func == INSTR_ADC ? (sreg() & SREG_C) : 0u)) & 0xffu;
+        uint32_t dst_xor_src = dst ^ src;
+        uint32_t hc = (dst | src) ^ (result & dst_xor_src);
+        uint32_t v = ~dst_xor_src & (dst ^ result);
+        uint8_t flags = sreg() & uint8_t(~SREG_HSVNZC);
+        flags |= uint8_t((hc & 0x08u) << 2);
+        flags |= uint8_t(hc >> 7);
+        flags |= uint8_t((v & 0x80u) >> 4);
+        gpr(i.dst) = uint8_t(result);
+        sreg() = embedded_flags_nzs(flags, result);
+        pc += 1;
+        return 1;
+    }
+    case INSTR_SUB:
+    case INSTR_SUBI:
+    case INSTR_CP:
+    case INSTR_CPI:
+    {
+        uint32_t dst = gpr(i.dst);
+        uint32_t src = (i.func == INSTR_SUBI || i.func == INSTR_CPI) ? i.src : gpr(i.src);
+        uint32_t result = (dst - src) & 0xffu;
+        if(i.func == INSTR_SUB || i.func == INSTR_SUBI) gpr(i.dst) = uint8_t(result);
+        embedded_sub_flags(*this, result, dst, src);
+        pc += 1;
+        return 1;
+    }
+    case INSTR_SBC:
+    case INSTR_SBCI:
+    case INSTR_CPC:
+    {
+        uint8_t old_sreg = sreg();
+        uint32_t dst = gpr(i.dst);
+        uint32_t src = i.func == INSTR_SBCI ? i.src : gpr(i.src);
+        uint32_t result = (dst - src - (old_sreg & SREG_C)) & 0xffu;
+        uint32_t result_xor_src = result ^ src;
+        uint32_t hc = (result | src) ^ (dst & result_xor_src);
+        uint32_t v = ~result_xor_src & (result ^ dst);
+        uint32_t z = ~old_sreg & SREG_Z;
+        uint8_t flags = old_sreg & uint8_t(~SREG_HSVNZC);
+        flags |= uint8_t((hc & 0x08u) << 2);
+        flags |= uint8_t(hc >> 7);
+        flags |= uint8_t((v & 0x80u) >> 4);
+        if(i.func != INSTR_CPC) gpr(i.dst) = uint8_t(result);
+        sreg() = embedded_flags_nzs(flags, result | z);
+        pc += 1;
+        return 1;
+    }
+    case INSTR_INC:
+    case INSTR_DEC:
+    {
+        uint8_t old = gpr(i.dst);
+        uint8_t result = i.func == INSTR_INC ? uint8_t(old + 1u) : uint8_t(old - 1u);
+        uint8_t flags = sreg() & uint8_t(~SREG_V);
+        if((i.func == INSTR_INC && result == 0x80u) ||
+           (i.func == INSTR_DEC && old == 0x80u)) flags |= SREG_V;
+        gpr(i.dst) = result;
+        sreg() = embedded_flags_nzs(flags, result);
+        pc += 1;
+        return 1;
+    }
+    case INSTR_SWAP:
+    {
+        uint8_t value = gpr(i.dst);
+        gpr(i.dst) = uint8_t((value >> 4) | (value << 4));
+        pc += 1;
+        return 1;
+    }
+    case INSTR_COM:
+    {
+        uint8_t result = uint8_t(~gpr(i.dst));
+        gpr(i.dst) = result;
+        sreg() = embedded_flags_nzs(uint8_t((sreg() & ~(SREG_V | SREG_C)) | SREG_C), result);
+        pc += 1;
+        return 1;
+    }
+
+    case INSTR_ADIW:
+    case INSTR_SBIW:
+    {
+        uint16_t dst = gpr_word(i.dst);
+        uint16_t result = i.func == INSTR_ADIW ? uint16_t(dst + i.src) : uint16_t(dst - i.src);
+        uint8_t flags = sreg() & uint8_t(~(SREG_Z | SREG_V | SREG_C | SREG_N | SREG_S));
+        if(result == 0) flags |= SREG_Z;
+        if(i.func == INSTR_ADIW) {
+            flags |= uint8_t((~dst & result & 0x8000u) >> 12);
+            flags |= uint8_t((~result & dst & 0x8000u) >> 15);
+        } else {
+            flags |= uint8_t((dst & ~result & 0x8000u) >> 12);
+            flags |= uint8_t((result & ~dst & 0x8000u) >> 15);
+        }
+        flags |= uint8_t((result & 0x8000u) >> 13);
+        if(((flags & SREG_N) != 0) != ((flags & SREG_V) != 0)) flags |= SREG_S;
+        gpr(i.dst) = uint8_t(result);
+        gpr(i.dst + 1u) = uint8_t(result >> 8);
+        sreg() = flags;
+        pc += 1;
+        return 2;
+    }
+    case INSTR_BSET:
+        sreg() |= i.dst;
+        pc += 1;
+        return 1;
+    case INSTR_BCLR:
+        sreg() &= i.dst;
+        pc += 1;
+        return 1;
+
+    case INSTR_BRBS:
+    case INSTR_BRBC:
+    {
+        bool set = (sreg() & (1u << i.src)) != 0;
+        bool taken = i.func == INSTR_BRBS ? set : !set;
+        pc = taken ? uint16_t(pc + int16_t(i.word) + 1) : uint16_t(pc + 1u);
+        return taken ? 2u : 1u;
+    }
+    case INSTR_RJMP:
+        pc = uint16_t(pc + int16_t(i.word) + 1);
+        return 2;
+    case INSTR_JMP:
+        pc = i.word;
+        return 3;
+    case INSTR_IJMP:
+        pc = z_word();
+        return 2;
+
+    case INSTR_PUSH:
+        push(gpr(i.src));
+        pc += 1;
+        return 2;
+    case INSTR_POP:
+        gpr(i.src) = pop();
+        pc += 1;
+        return 2;
+
+    case INSTR_LPM:
+    {
+        uint16_t z = z_word();
+        uint8_t result = z < prog.size() ? prog[z] : 0;
+        if(spm_en_cycles != 0) {
+            if(spm_op == SPM_OP_BLB_SET) {
+                if(z == 0x0000) result = fuse_lo;
+                else if(z == 0x0001) result = lock;
+                else if(z == 0x0002) result = fuse_ext;
+                else if(z == 0x0003) result = fuse_hi;
+            } else if(spm_op == SPM_OP_SIG_READ) {
+                if(z == 0x0000) result = 0x1e;
+                else if(z == 0x0002) result = 0x95;
+                else if(z == 0x0004) result = 0x87;
+                else if(z == 0x0001) result = 0x6d;
+            }
+        }
+        gpr(i.dst) = result;
+        pc += 1;
+        if(i.word == 1) {
+            ++z;
+            gpr(30) = uint8_t(z);
+            gpr(31) = uint8_t(z >> 8);
+        }
+        return 3;
+    }
+
+    case INSTR_MERGED_LDS:
+        gpr(i.dst) = ld<true>(i.word);
+        pc += 2;
+        return 2;
+    case INSTR_MERGED_STS:
+        st<true>(i.word, gpr(i.src));
+        pc += 2;
+        return 2;
+    case INSTR_MERGED_LDD_Y:
+    case INSTR_MERGED_LDD_Z:
+    case INSTR_MERGED_STD_Y:
+    case INSTR_MERGED_STD_Z:
+    {
+        uint16_t ptr = (i.func == INSTR_MERGED_LDD_Y || i.func == INSTR_MERGED_STD_Y) ?
+            y_word() : z_word();
+        ptr = uint16_t(ptr + i.dst);
+        if(i.func == INSTR_MERGED_LDD_Y || i.func == INSTR_MERGED_LDD_Z)
+            gpr(i.src) = ld<true>(ptr);
+        else
+            st<true>(ptr, gpr(i.src));
+        pc += 1;
+        return 2;
+    }
+    case INSTR_MERGED_LD_ST:
+    {
+        uint16_t ptr = i.dst <= 2 ? z_word() : i.dst <= 10 ? y_word() : x_word();
+        if(i.dst & 0x2u) --ptr;
+        if(i.word) st<true>(ptr, gpr(i.src)); else gpr(i.src) = ld<true>(ptr);
+        if(i.dst & 0x1u) ++ptr;
+        if(i.dst & 0x3u) {
+            uint8_t base = i.dst <= 2 ? 30u : i.dst <= 10 ? 28u : 26u;
+            gpr(base) = uint8_t(ptr);
+            gpr(base + 1u) = uint8_t(ptr >> 8);
+        }
+        pc += 1;
+        return 2;
+    }
+    default:
+        break;
+    }
+
+    if(i.func >= INSTR_MERGED_LD_X && i.func <= INSTR_MERGED_ST_Z_DEC)
+    {
+        uint8_t offset = uint8_t(i.func - INSTR_MERGED_LD_X);
+        bool load = offset < 9u;
+        uint8_t mode = uint8_t(offset % 9u);
+        uint8_t reg = uint8_t(mode % 3u);
+        bool increment = mode >= 3u && mode < 6u;
+        bool decrement = mode >= 6u;
+        uint16_t ptr = reg == 0 ? x_word() : reg == 1 ? y_word() : z_word();
+        if(decrement) --ptr;
+        if(load) gpr(i.src) = ld<true>(ptr); else st<true>(ptr, gpr(i.src));
+        if(increment) ++ptr;
+        if(increment || decrement) {
+            uint8_t base = reg == 0 ? 26u : reg == 1 ? 28u : 30u;
+            gpr(base) = uint8_t(ptr);
+            gpr(base + 1u) = uint8_t(ptr >> 8);
+        }
+        pc += 1;
+        return 2;
+    }
+
+    return INSTR_MAP[i.func](*this, i);
+}
+#endif
+
+ARDENS_HOT uint32_t atmega32u4_t::advance_cycle()
 {
     uint32_t cycles = 1;
     just_interrupted = false;
@@ -439,7 +752,11 @@ __attribute__((section(".fastcode"))) uint32_t atmega32u4_t::advance_cycle()
             }
             auto const& i = decoded_prog[pc];
             prev_sreg = sreg();
+#ifdef ARDENS_FAST_DISPATCH
+            cycles = embedded_execute_fast(i);
+#else
             cycles = INSTR_MAP[i.func](*this, i);
+#endif
             assert(cycles <= MAX_INSTR_CYCLES);
             cycle_count += cycles;
         }
@@ -467,7 +784,11 @@ __attribute__((section(".fastcode"))) uint32_t atmega32u4_t::advance_cycle()
 #else
                     merged_prog[pc];
 #endif
+#ifdef ARDENS_FAST_DISPATCH
+                auto instr_cycles = embedded_execute_fast(i);
+#else
                 auto instr_cycles = INSTR_MAP[i.func](*this, i);
+#endif
                 assert(instr_cycles <= MAX_INSTR_CYCLES);
                 cycle_count += instr_cycles;
                 if(io_reg_accessed || should_autobreak())
@@ -518,6 +839,19 @@ __attribute__((section(".fastcode"))) uint32_t atmega32u4_t::advance_cycle()
 
     return cycles;
 }
+
+#ifdef ARDENS_EMBEDDED
+ARDENS_HOT bool atmega32u4_t::advance_until(uint64_t deadline)
+{
+    while(cycle_count < deadline)
+    {
+        if(pc >= decoded_prog.size())
+            return false;
+        advance_cycle();
+    }
+    return true;
+}
+#endif
 
 void atmega32u4_t::update_all()
 {

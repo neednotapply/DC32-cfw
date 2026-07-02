@@ -183,6 +183,8 @@ enum instr_id_t
     INSTR_MERGED_CP_CPC,
     INSTR_MERGED_SUBI_SBCI,
     INSTR_MERGED_DELAY,
+    INSTR_MERGED_FILL4_INC_BRNE,
+    INSTR_MERGED_ARDUBOY_DISPLAY,
 
     NUM_INSTR
 };
@@ -322,5 +324,7 @@ uint32_t instr_merged_sub_sbc  (atmega32u4_t& cpu, avr_instr_t const i);
 uint32_t instr_merged_cp_cpc   (atmega32u4_t& cpu, avr_instr_t const i);
 uint32_t instr_merged_subi_sbci(atmega32u4_t& cpu, avr_instr_t const i);
 uint32_t instr_merged_delay    (atmega32u4_t& cpu, avr_instr_t const i);
+uint32_t instr_merged_fill4_inc_brne(atmega32u4_t& cpu, avr_instr_t const i);
+uint32_t instr_merged_arduboy_display(atmega32u4_t& cpu, avr_instr_t const i);
 
 }

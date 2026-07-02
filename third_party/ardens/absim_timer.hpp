@@ -149,7 +149,7 @@ ARDENS_FORCEINLINE static void update_timer8_state(
     cpu.data[0x46] = uint8_t(tcnt);
 }
 
-void atmega32u4_t::update_timer0()
+ARDENS_HOT void atmega32u4_t::update_timer0()
 {
     // first compute what happened to tcnt/tifr during the cycles
     if(!(timer0.divider == 0 || (data[0x64] & (1 << 5))))
@@ -447,6 +447,16 @@ static void update_timer16(
     atmega32u4_t::timer16_t& timer)
 {
     // first compute what happened to tcnt/tifr during the cycles
+#ifdef ARDENS_GAME_ONLY
+    bool muted_speaker_timer = &timer == &cpu.timer3 && cpu.embedded_timer3_speaker_only();
+    if(muted_speaker_timer)
+    {
+        // Timer3A drives speaker pin PC6 in the standard Arduboy wiring. No
+        // externally observable audio state exists on the badge.
+        timer.prev_update_cycle = cpu.cycle_count;
+    }
+    else
+#endif
     if(!(timer.divider == 0 || (cpu.data[timer.prr_addr] & timer.prr_mask)) &&
         cpu.cycle_count > timer.prev_update_cycle)
     {
@@ -488,6 +498,14 @@ static void update_timer16(
         timer.count_down = false;
 
     timer.com3a = tccrNa >> 6;
+
+#ifdef ARDENS_GAME_ONLY
+    if(&timer == &cpu.timer3 && cpu.embedded_timer3_speaker_only())
+    {
+        timer.next_update_cycle = UINT64_MAX;
+        return;
+    }
+#endif
 
     // compute next update cycle
 
@@ -703,9 +721,18 @@ ARDENS_FORCEINLINE static void update_timer10_state(
     cpu.data[0xbe] = uint8_t(tcnt >> 0);
 }
 
-void atmega32u4_t::update_timer4()
+ARDENS_HOT void atmega32u4_t::update_timer4()
 {
     // first compute what happened to tcnt/tifr during the cycles
+#ifdef ARDENS_GAME_ONLY
+    if(embedded_timer4_speaker_only())
+    {
+        // Timer4A drives speaker pin PC7. Freeze its inaudible waveform while
+        // retaining all register writes and duration bookkeeping in guest code.
+        timer4.prev_update_cycle = cycle_count;
+    }
+    else
+#endif
     if(!(timer4.divider == 0 || (data[0x65] & 0x10)))
     {
         // timer clock is running and timer is not powered down...
@@ -768,6 +795,15 @@ void atmega32u4_t::update_timer4()
     timer4.phase_correct = (pwm4x && wgm == 1);
     if(!timer4.phase_correct)
         timer4.count_down = false;
+
+#ifdef ARDENS_GAME_ONLY
+    if(embedded_timer4_speaker_only())
+    {
+        timer4.com4a = 0;
+        timer4.next_update_cycle = UINT64_MAX;
+        return;
+    }
+#endif
 
     // determine whether we are pwm-ing to sound pins
     // (pins connected and freq at least 20 kHz)

@@ -3,6 +3,41 @@ cmake_minimum_required(VERSION 3.20)
 set(PICO_BOARD "defcon32_badge" CACHE STRING "Badge board name for SDK-compatible build metadata")
 project(dc32_badge_firmware C CXX ASM)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+option(DC32_NES_PERF_PROFILE "Enable NES on-device performance logging" OFF)
+option(DC32_ARDUBOY_HLE "Enable legacy routine-specific Arduboy graphics HLE" OFF)
+
+set(NES_PERF_ROM_DIR "${CMAKE_CURRENT_BINARY_DIR}/nes-perf")
+set(NES_CPU_PERF_ROM "${NES_PERF_ROM_DIR}/nes_cpu_perf.nes")
+set(NES_PPU_PERF_ROM "${NES_PERF_ROM_DIR}/nes_ppu_perf.nes")
+add_custom_command(
+    OUTPUT ${NES_CPU_PERF_ROM} ${NES_PPU_PERF_ROM}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_nes_perf_rom.py
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${NES_PERF_ROM_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_nes_perf_rom.py cpu ${NES_CPU_PERF_ROM}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_nes_perf_rom.py ppu ${NES_PPU_PERF_ROM}
+    VERBATIM
+)
+add_custom_target(nes_perf_roms DEPENDS ${NES_CPU_PERF_ROM} ${NES_PPU_PERF_ROM})
+
+set(ARDUBOY_PERF_ROM_DIR "${CMAKE_CURRENT_BINARY_DIR}/arduboy-perf")
+set(ARDUBOY_CPU_PERF_ROM "${ARDUBOY_PERF_ROM_DIR}/arduboy_cpu_perf.hex")
+set(ARDUBOY_SPI_PERF_ROM "${ARDUBOY_PERF_ROM_DIR}/arduboy_spi_perf.hex")
+set(ARDUBOY_TIMER_PERF_ROM "${ARDUBOY_PERF_ROM_DIR}/arduboy_timer_perf.hex")
+set(ARDUBOY_GRAPHICS_PERF_ROM "${ARDUBOY_PERF_ROM_DIR}/arduboy_graphics_perf.hex")
+set(ARDUBOY_FX_PERF_ROM "${ARDUBOY_PERF_ROM_DIR}/arduboy_fx_perf.arduboy")
+add_custom_command(
+    OUTPUT ${ARDUBOY_CPU_PERF_ROM} ${ARDUBOY_SPI_PERF_ROM} ${ARDUBOY_TIMER_PERF_ROM} ${ARDUBOY_GRAPHICS_PERF_ROM} ${ARDUBOY_FX_PERF_ROM}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${ARDUBOY_PERF_ROM_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py cpu ${ARDUBOY_CPU_PERF_ROM}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py spi ${ARDUBOY_SPI_PERF_ROM}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py timer ${ARDUBOY_TIMER_PERF_ROM}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py graphics ${ARDUBOY_GRAPHICS_PERF_ROM}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_arduboy_perf_hex.py fx ${ARDUBOY_FX_PERF_ROM}
+    VERBATIM
+)
+add_custom_target(arduboy_perf_roms DEPENDS
+    ${ARDUBOY_CPU_PERF_ROM} ${ARDUBOY_SPI_PERF_ROM} ${ARDUBOY_TIMER_PERF_ROM} ${ARDUBOY_GRAPHICS_PERF_ROM} ${ARDUBOY_FX_PERF_ROM})
 
 set(APP DC32-cfw)
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -65,7 +100,6 @@ set(GB_RUNTIME_SOURCES
 set(NES_RUNTIME_SOURCES
     ${SRC_DIR}/nes/InfoNES.cpp
     ${SRC_DIR}/nes/InfoNES_Mapper.cpp
-    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
     ${SRC_DIR}/nes/K6502.cpp
     ${SRC_DIR}/nes/nes_port.cpp
 )
@@ -197,7 +231,6 @@ target_compile_options(${APP} PRIVATE
 set_source_files_properties(
     ${SRC_DIR}/nes/InfoNES.cpp
     ${SRC_DIR}/nes/InfoNES_Mapper.cpp
-    ${SRC_DIR}/nes/InfoNES_pAPU.cpp
     ${SRC_DIR}/nes/K6502.cpp
     ${SRC_DIR}/nes/nes_port.cpp
     ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
@@ -208,14 +241,14 @@ set_source_files_properties(
 set_source_files_properties(
     ${ARDUBOY_RUNTIME_SOURCES}
     PROPERTIES
-        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;NDEBUG=1"
+        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;ARDENS_GAME_ONLY=1;NDEBUG=1"
         COMPILE_OPTIONS "-Wno-error"
 )
 
 set_source_files_properties(
     ${SRC_DIR}/arduboy/arduboy_ardens_port.cpp
     PROPERTIES
-        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;NDEBUG=1"
+        COMPILE_DEFINITIONS "ARDENS_EMBEDDED=1;ARDENS_GAME_ONLY=1;NDEBUG=1"
 )
 
 set_source_files_properties(
@@ -286,6 +319,9 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=dcAppDrawPresent
     -Wl,--undefined=dcAppDrawFrame
     -Wl,--undefined=dcAppDrawWaitRelease
+    -Wl,--undefined=dcAppCore1Start
+    -Wl,--undefined=dcAppCore1Join
+    -Wl,--undefined=dcAppCore1ForceStop
     -Wl,--undefined=dispSetFramerate
     -Wl,--undefined=dispPrvFrameCtrWait
     -Wl,--undefined=dispPrvWaitForScanoutStart
@@ -460,11 +496,18 @@ add_dcapp(dcapp_nes nes 2
     ${SRC_DIR}/apps/nes_app.c
     ${NES_RUNTIME_SOURCES}
 )
+target_compile_definitions(dcapp_nes PRIVATE NES_FASTCODE_ENABLED=1)
+if(DC32_NES_PERF_PROFILE)
+    target_compile_definitions(dcapp_nes PRIVATE NES_PERF_PROFILE=1)
+endif()
 
 add_dcapp(dcapp_arduboy arduboy 3
     ${SRC_DIR}/apps/arduboy_app.c
     ${ARDUBOY_RUNTIME_SOURCES}
 )
+if(DC32_ARDUBOY_HLE)
+    target_compile_definitions(dcapp_arduboy PRIVATE ARDUBOY_HLE_ENABLED=1)
+endif()
 
 add_dcapp(dcapp_ir ir 100
     ${SRC_DIR}/apps/ir_app.c

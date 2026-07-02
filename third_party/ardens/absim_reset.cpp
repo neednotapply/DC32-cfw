@@ -11,6 +11,18 @@ void atmega32u4_t::reset()
 {
     cycle_count = 0;
 
+#ifdef ARDENS_EMBEDDED
+    // A power-on reset detaches the host display sink. Guest watchdog resets
+    // use soft_reset() and must preserve it or display capture silently stops.
+    embedded_spi_sink = nullptr;
+    embedded_spi_bulk_sink = nullptr;
+    embedded_spi_sink_context = nullptr;
+    embedded_port_sink = nullptr;
+    embedded_port_sink_context = nullptr;
+    embedded_hle_sink = nullptr;
+    embedded_hle_sink_context = nullptr;
+#endif
+
     soft_reset();
 
     // power-on reset flag
@@ -55,8 +67,13 @@ void atmega32u4_t::reset()
 
     //st_handlers[0x25] = st_handle_port;
     //st_handlers[0x28] = st_handle_port;
+#ifdef ARDENS_EMBEDDED
+    st_handlers[0x2b] = st_handle_port;
+    st_handlers[0x2e] = st_handle_port;
+#else
     //st_handlers[0x2b] = st_handle_port;
     //st_handlers[0x2e] = st_handle_port;
+#endif
     //st_handlers[0x31] = st_handle_port;
 
     for(int i = 0x44; i <= 0x48; ++i)
@@ -234,8 +251,12 @@ void atmega32u4_t::soft_reset()
     watchdog_divider_cycle = 0;
     watchdog_prev_cycle = cycle_count;
     update_watchdog_prescaler();
+#ifdef ARDENS_GAME_ONLY
+    watchdog_next_cycle = UINT64_MAX;
+#else
     watchdog_next_cycle = cycle_count + watchdog_divider;
     peripheral_queue.schedule(watchdog_next_cycle, PQ_WATCHDOG);
+#endif
 
 #ifdef ARDENS_EMBEDDED
     embedded_delay_pc = EMBEDDED_HLE_NONE;

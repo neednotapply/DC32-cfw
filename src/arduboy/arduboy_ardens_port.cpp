@@ -20,8 +20,8 @@ extern "C" {
 #include "absim.hpp"
 
 #define ARDUBOY_CPU_FREQ 16000000u
-#define ARDUBOY_FRAME_CYCLES (ARDUBOY_CPU_FREQ / ARDUBOY_FRAME_RATE)
-#define ARDUBOY_CONTROL_POLL_CYCLES 4096u
+#define ARDUBOY_PRESENT_RATE 60u
+#define ARDUBOY_CONTROL_POLL_CYCLES 16384u
 #define ARDUBOY_EEPROM_SYNC_TICKS TICKS_PER_SECOND
 #define ARDUBOY_BOOT_WATCHDOG_TICKS (TICKS_PER_SECOND * 5u)
 #define ARDUBOY_BOOT_LOG_TICKS TICKS_PER_SECOND
@@ -34,7 +34,6 @@ extern "C" {
 #define ARDUBOY_ZIP64_SENTINEL 0xffffffffu
 #define ARDUBOY_FLASH_WRITE_CHUNK QSPI_WRITE_GRANULARITY
 #define ARDUBOY_PRESENT_INVALID 0xffffu
-#define ARDUBOY_PRESENT_Y_INVALID 0xffu
 #define ARDUBOY_PRESENT_STATE_INVALID 0xffu
 #define ARDUBOY_PRESENT_STATE_DISPLAY_ON 0x01u
 #define ARDUBOY_PRESENT_STATE_INVERTED 0x02u
@@ -43,7 +42,19 @@ extern "C" {
 #define ARDUBOY_AVR_PINB 0x23u
 #define ARDUBOY_AVR_PINE 0x2cu
 #define ARDUBOY_AVR_PINF 0x2fu
+#define ARDUBOY_AVR_DDRD 0x2au
 #define ARDUBOY_AVR_PORTD 0x2bu
+#define ARDUBOY_AVR_DDRE 0x2du
+#define ARDUBOY_AVR_PORTE 0x2eu
+#define ARDUBOY_FX_CACHE_META_SIZE QSPI_WRITE_GRANULARITY
+#define ARDUBOY_FX_CACHE_REGION_SIZE (QSPI_ROM_SIZE_MAX / 2u)
+#define ARDUBOY_FX_CACHE_META_ADDR \
+	(QSPI_ROM_START + ARDUBOY_FX_CACHE_REGION_SIZE - ARDUBOY_FX_CACHE_META_SIZE)
+#define ARDUBOY_FX_ADDRESS_SPACE 0x01000000u
+#define ARDUBOY_EXPANDED_PAGE_PIXELS 20u
+#define ARDUBOY_EXPANDED_PAGE_COUNT 8u
+#define ARDUBOY_EXPANDED_LINE_PIXELS (ARDUBOY_EXPANDED_PAGE_PIXELS * ARDUBOY_EXPANDED_PAGE_COUNT)
+#define ARDUBOY_FRAMEBUFFER_SIZE (128u * 64u / 8u)
 
 struct ArduboyZipMember {
 	uint32_t dataOffset;
@@ -68,23 +79,38 @@ enum ArduboyArdensFailReason {
 	ArduboyArdensFailNoDisplayIo,
 };
 
+enum ArduboyFxSpiState {
+	ArduboyFxSpiIdle,
+	ArduboyFxSpiReadAddress,
+	ArduboyFxSpiReadData,
+	ArduboyFxSpiReadStatus,
+	ArduboyFxSpiReadJedec,
+};
+
+enum ArduboyHleKind {
+	ArduboyHleNone,
+	ArduboyHleArdBitmap203,
+	ArduboyHleSpritesB,
+};
+
+struct ArduboyHleDescriptor {
+	uint16_t targetPc;
+	uint16_t framebufferAddr;
+	uint8_t kind;
+	uint8_t reserved;
+};
+
 struct ArduboyArdensRuntime {
 	absim::atmega32u4_t cpu;
 	absim::display_t display;
 	uint8_t *saveRam;
 	uint32_t saveRamSize;
+	void (*ledsTick)(void);
 	uint16_t presentSrcX[DISP_HEIGHT];
-	uint8_t presentSrcYPage[DISP_WIDTH];
-	uint8_t presentSrcYMask[DISP_WIDTH];
-	uint8_t presentSrcYPageFlipped[DISP_WIDTH];
-	uint8_t presentSrcYMaskFlipped[DISP_WIDTH];
 	uint64_t startTicks;
 	uint64_t lastBootLogTicks;
 	uint64_t lastEepromSyncTicks;
-	uint64_t lastFrameTicks;
 	uint64_t frameCount;
-	uint64_t executedCycles;
-	uint64_t advanceCalls;
 	uint32_t flashUsed;
 	uint32_t spiWrites;
 	uint32_t commandWrites;
@@ -92,7 +118,10 @@ struct ArduboyArdensRuntime {
 	uint32_t ignoredSpiWrites;
 	uint32_t displayUpdates;
 	uint32_t eepromSyncs;
-	uint16_t lastPc;
+	const uint8_t *fxData;
+	uint32_t fxDataSize;
+	uint32_t fxGuestBase;
+	uint32_t fxAddress;
 	uint16_t lastOpcode;
 	uint8_t lastSpiByte;
 	uint8_t lastPortD;
@@ -102,6 +131,17 @@ struct ArduboyArdensRuntime {
 	bool visibleFrameSeen;
 	bool failed;
 	uint8_t failReason;
+	uint8_t fxSpiState;
+	uint8_t fxAddressBytes;
+	uint8_t fxJedecByte;
+	bool fxSelected;
+	bool fxAwake;
+	ArduboyHleDescriptor graphicsHle;
+	ArduboyHleDescriptor spritesHle;
+	uint32_t graphicsHleHits;
+	uint32_t graphicsHleFallbacks;
+	uint32_t graphicsHleGuestCycles;
+	uint32_t bulkDisplayHits;
 };
 
 static_assert(sizeof(ArduboyArdensRuntime) + ARDUBOY_SAVE_RAM_SIZE <= 0x2b000u,
@@ -114,6 +154,10 @@ static uint16_t mPresentRowFirst, mPresentRowEnd;
 static uint16_t mPresentColFirst, mPresentColEnd;
 static uint8_t mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
 static bool mPresentFlipped;
+static uint8_t mExpandBits[4][ARDUBOY_EXPANDED_PAGE_COUNT][ARDUBOY_EXPANDED_PAGE_PIXELS];
+static uint8_t mExpandPages[4][ARDUBOY_EXPANDED_PAGE_COUNT];
+static bool mExpandPixelsReady;
+
 
 void arduboySetRotation(bool flipped)
 {
@@ -198,6 +242,485 @@ static bool arduboyPrvRawImm8(uint16_t pc, uint8_t *immP)
 		return false;
 	*immP = (uint8_t)(((w0 >> 4) & 0xf0u) | (w0 & 0x0fu));
 	return true;
+}
+
+static bool arduboyPrvRawRegImm8(uint16_t pc, uint16_t opcode, uint8_t reg, uint8_t *immP)
+{
+	uint16_t w0 = arduboyPrvArdensWord(pc);
+
+	if ((w0 & 0xf000u) != opcode || (uint8_t)(16u + ((w0 >> 4) & 0x0fu)) != reg)
+		return false;
+	if (immP)
+		*immP = (uint8_t)(((w0 >> 4) & 0xf0u) | (w0 & 0x0fu));
+	return true;
+}
+
+static uint32_t arduboyPrvDirectCallCount(uint16_t target)
+{
+	uint32_t calls = 0;
+	uint32_t words = (mArdens.flashUsed + 1u) / 2u;
+
+	for (uint32_t pc = 0; pc < words; pc++) {
+		uint16_t callTarget;
+		uint8_t callWords = 0;
+
+		if (arduboyPrvRawDirectCallTarget((uint16_t)pc, &callTarget, &callWords) && callTarget == target)
+			calls++;
+		if (callWords == 2u)
+			pc++;
+	}
+	return calls;
+}
+
+static bool arduboyPrvMatchesArdBitmap203(uint16_t target, uint16_t *framebufferAddrP)
+{
+	static const uint16_t prologue[] = {
+		0x922fu, 0x923fu, 0x924fu, 0x925fu, 0x926fu, 0x927fu, 0x928fu,
+		0x929fu, 0x92afu, 0x92bfu, 0x92cfu, 0x92dfu, 0x92efu, 0x92ffu,
+		0x930fu, 0x931fu, 0x93cfu, 0x93dfu, 0xb7cdu, 0xb7deu, 0x9761u,
+		0xb60fu, 0x94f8u, 0xbfdeu, 0xbe0fu, 0xbfcdu, 0x012cu, 0x011au,
+		0x872bu, 0x01fau, 0x9134u, 0x9631u, 0x9124u,
+	};
+	uint8_t low, high;
+
+	if ((uint32_t)target + sizeof(prologue) / sizeof(prologue[0]) >= ARDUBOY_FLASH_SIZE / 2u)
+		return false;
+	for (uint32_t i = 0; i < sizeof(prologue) / sizeof(prologue[0]); i++)
+		if (arduboyPrvArdensWord((uint16_t)(target + i)) != prologue[i])
+			return false;
+	/* The 2.0.3 routine is 0x1f6 words long. These independent checks make the
+	 * long common AVR save-register prologue insufficient to trigger HLE. */
+	if (arduboyPrvArdensWord((uint16_t)(target + 0x1f5u)) != 0x9508u ||
+		arduboyPrvArdensWord((uint16_t)(target + 0x124u)) != 0x01fbu ||
+		!arduboyPrvRawRegImm8((uint16_t)(target + 0x122u), 0x5000u, 22u, &low) ||
+		!arduboyPrvRawRegImm8((uint16_t)(target + 0x123u), 0x4000u, 23u, &high))
+		return false;
+	uint16_t framebufferAddr = (uint16_t)(0u - ((uint16_t)high << 8) - low);
+
+	if (framebufferAddr < 0x100u ||
+		(uint32_t)framebufferAddr + ARDUBOY_FRAMEBUFFER_SIZE > mArdens.cpu.data.size())
+		return false;
+	if (framebufferAddrP)
+		*framebufferAddrP = framebufferAddr;
+	return true;
+}
+
+static bool arduboyPrvMatchesSpritesB(uint16_t target, uint16_t *framebufferAddrP)
+{
+	static const uint16_t prologue[] = {
+		0x922fu, 0x923fu, 0x924fu, 0x925fu, 0x926fu, 0x927fu, 0x928fu,
+		0x929fu, 0x92afu, 0x92bfu, 0x92cfu, 0x92dfu, 0x92efu, 0x92ffu,
+		0x930fu, 0x931fu, 0x93cfu, 0x93dfu, 0xd000u, 0xd000u, 0xb7cdu,
+		0xb7deu, 0x2e60u,
+	};
+	uint8_t low, high;
+
+	for (uint32_t i = 0; i < sizeof(prologue) / sizeof(prologue[0]); i++)
+		if (arduboyPrvArdensWord((uint16_t)(target + i)) != prologue[i])
+			return false;
+	if (arduboyPrvArdensWord((uint16_t)(target + 0x153u)) != 0x9508u ||
+		arduboyPrvArdensWord((uint16_t)(target + 0x1bu)) != 0x01fau ||
+		!arduboyPrvRawRegImm8((uint16_t)(target + 0xe1u), 0x5000u, 26u, &low) ||
+		!arduboyPrvRawRegImm8((uint16_t)(target + 0xe2u), 0x4000u, 27u, &high))
+		return false;
+	uint16_t framebufferAddr = (uint16_t)(0u - ((uint16_t)high << 8) - low);
+	if (framebufferAddr < 0x100u ||
+		(uint32_t)framebufferAddr + ARDUBOY_FRAMEBUFFER_SIZE > mArdens.cpu.data.size())
+		return false;
+	if (framebufferAddrP)
+		*framebufferAddrP = framebufferAddr;
+	return true;
+}
+
+static void arduboyPrvDetectGraphicsHle(void)
+{
+	mArdens.graphicsHle.targetPc = absim::atmega32u4_t::EMBEDDED_HLE_NONE;
+	mArdens.graphicsHle.kind = ArduboyHleNone;
+	mArdens.spritesHle.targetPc = absim::atmega32u4_t::EMBEDDED_HLE_NONE;
+	mArdens.spritesHle.kind = ArduboyHleNone;
+#ifdef ARDUBOY_HLE_ENABLED
+	uint32_t words = (mArdens.flashUsed + 1u) / 2u;
+	for (uint32_t pc = 0; pc < words; pc++) {
+		uint16_t target, framebufferAddr;
+		uint8_t callWords = 0;
+
+		if (!arduboyPrvRawDirectCallTarget((uint16_t)pc, &target, &callWords))
+			continue;
+		if (target >= words)
+			continue;
+		if (mArdens.graphicsHle.kind == ArduboyHleNone &&
+			arduboyPrvMatchesArdBitmap203(target, &framebufferAddr) &&
+			arduboyPrvDirectCallCount(target) >= 4u) {
+			mArdens.graphicsHle.targetPc = target;
+			mArdens.graphicsHle.framebufferAddr = framebufferAddr;
+			mArdens.graphicsHle.kind = ArduboyHleArdBitmap203;
+		}
+		if (mArdens.spritesHle.kind == ArduboyHleNone &&
+			arduboyPrvMatchesSpritesB(target, &framebufferAddr) &&
+			arduboyPrvDirectCallCount(target) >= 2u) {
+			mArdens.spritesHle.targetPc = target;
+			mArdens.spritesHle.framebufferAddr = framebufferAddr;
+			mArdens.spritesHle.kind = ArduboyHleSpritesB;
+		}
+		if (mArdens.graphicsHle.kind != ArduboyHleNone && mArdens.spritesHle.kind != ArduboyHleNone)
+			break;
+		pc += callWords - 1u;
+	}
+#endif
+	pr("arduboy graphics hle: bitmap=%u/%04x/%04x sprites=%u/%04x/%04x\n",
+		(unsigned)mArdens.graphicsHle.kind, (unsigned)mArdens.graphicsHle.targetPc,
+		(unsigned)mArdens.graphicsHle.framebufferAddr,
+		(unsigned)mArdens.spritesHle.kind, (unsigned)mArdens.spritesHle.targetPc,
+		(unsigned)mArdens.spritesHle.framebufferAddr);
+}
+
+struct ArduboyHleBitmapInfo {
+	uint16_t bitmapAddr;
+	uint16_t decodedBits;
+	uint16_t spans;
+	uint8_t width;
+	uint8_t height;
+	uint8_t firstColor;
+	bool scanMode;
+	bool scanZigZag;
+};
+
+static bool arduboyPrvHleReadBit(const ArduboyArdensRuntime *runtime, uint16_t bitmapAddr,
+	uint32_t bitPos, uint8_t *valueP)
+{
+	uint32_t addr = (uint32_t)bitmapAddr + bitPos / 8u;
+
+	if (addr >= runtime->flashUsed)
+		return false;
+	*valueP = (uint8_t)((runtime->cpu.prog[addr] >> (bitPos & 7u)) & 1u);
+	return true;
+}
+
+static bool arduboyPrvHleInspectArdBitmap203(const ArduboyArdensRuntime *runtime,
+	uint16_t bitmapAddr, ArduboyHleBitmapInfo *infoP)
+{
+	if ((uint32_t)bitmapAddr + 2u > runtime->flashUsed)
+		return false;
+	uint8_t byte0 = runtime->cpu.prog[bitmapAddr + 0u];
+	uint8_t byte1 = runtime->cpu.prog[bitmapAddr + 1u];
+	uint32_t totalBits = (uint32_t)((byte0 & 0x7fu) + 1u) * ((byte1 & 0x3fu) + 1u);
+	uint32_t emitted = 0;
+	uint32_t encoderPos = 16;
+	uint32_t spans = 0;
+
+	while (emitted < totalBits) {
+		uint32_t sizeCounter = 1;
+		uint8_t bit;
+
+		while (true) {
+			if (!arduboyPrvHleReadBit(runtime, bitmapAddr, encoderPos++, &bit))
+				return false;
+			if (!bit)
+				break;
+			if (++sizeCounter > 15u)
+				return false;
+		}
+		uint32_t len;
+		if (sizeCounter == 1u) {
+			if (!arduboyPrvHleReadBit(runtime, bitmapAddr, encoderPos++, &bit))
+				return false;
+			len = 1u + bit;
+		}
+		else {
+			len = (1u << (sizeCounter - 1u)) + 1u;
+			for (uint32_t j = 0; j < sizeCounter - 1u; j++) {
+				if (!arduboyPrvHleReadBit(runtime, bitmapAddr, encoderPos++, &bit))
+					return false;
+				len += (uint32_t)bit << j;
+			}
+		}
+		if (len == 0 || len > totalBits - emitted)
+			return false;
+		emitted += len;
+		if (++spans > totalBits)
+			return false;
+	}
+
+	infoP->bitmapAddr = bitmapAddr;
+	infoP->decodedBits = (uint16_t)totalBits;
+	infoP->spans = (uint16_t)spans;
+	infoP->width = (uint8_t)((byte0 & 0x7fu) + 1u);
+	infoP->height = (uint8_t)((byte1 & 0x3fu) + 1u);
+	infoP->firstColor = (uint8_t)(byte0 >> 7);
+	infoP->scanMode = (byte1 & 0x40u) != 0;
+	infoP->scanZigZag = (byte1 & 0x80u) != 0;
+	return true;
+}
+
+static bool arduboyPrvHleDrawArdBitmap203(ArduboyArdensRuntime *runtime,
+	const ArduboyHleBitmapInfo *info, int16_t sx, int16_t sy, uint8_t color,
+	uint8_t align, uint8_t mirror, uint32_t *storesP)
+{
+	if (align & 0x02u)
+		sx = (int16_t)(sx - info->width / 2u);
+	else if (align & 0x01u)
+		sx = (int16_t)(sx - info->width);
+	if (align & 0x08u)
+		sy = (int16_t)(sy - info->height / 2u);
+	else if (align & 0x04u)
+		sy = (int16_t)(sy - info->height);
+	if ((int32_t)sx + info->width < 0 || sx > 127 ||
+		(int32_t)sy + info->height < 0 || sy > 63)
+		return true;
+
+	int32_t yAbs = sy < 0 ? -(int32_t)sy : sy;
+	int16_t yOffset = (int16_t)(yAbs % 8);
+	int16_t sRow = (int16_t)(sy / 8);
+	if (sy < 0 && yOffset > 0) {
+		sRow--;
+		yOffset = (int16_t)(8 - yOffset);
+	}
+	int16_t rows = (int16_t)((info->height + 7u) / 8u);
+	int16_t row = 0;
+	int16_t column = 0;
+	int16_t columnOffset = (mirror & 0x01u) ? (int16_t)(info->width - 1u) : 0;
+	bool scanMode = info->scanMode;
+	if (mirror & 0x02u) {
+		row = (int16_t)(rows - 1);
+		scanMode = !scanMode;
+	}
+
+	uint32_t encoderPos = 16;
+	uint32_t emitted = 0;
+	uint8_t spanColor = info->firstColor;
+	uint8_t decodedByte = 0;
+	uint8_t characterPos = 7;
+	uint8_t *framebuffer = runtime->cpu.data.data() + runtime->graphicsHle.framebufferAddr;
+
+	while (emitted < info->decodedBits) {
+		uint32_t sizeCounter = 1;
+		uint8_t bit;
+		do {
+			if (!arduboyPrvHleReadBit(runtime, info->bitmapAddr, encoderPos++, &bit))
+				return false;
+			if (bit)
+				sizeCounter++;
+		} while (bit);
+		uint32_t len;
+		if (sizeCounter == 1u) {
+			if (!arduboyPrvHleReadBit(runtime, info->bitmapAddr, encoderPos++, &bit))
+				return false;
+			len = 1u + bit;
+		}
+		else {
+			len = (1u << (sizeCounter - 1u)) + 1u;
+			for (uint32_t j = 0; j < sizeCounter - 1u; j++) {
+				if (!arduboyPrvHleReadBit(runtime, info->bitmapAddr, encoderPos++, &bit))
+					return false;
+				len += (uint32_t)bit << j;
+			}
+		}
+
+		for (uint32_t i = 0; i < len; i++, emitted++) {
+			if (spanColor)
+				decodedByte |= (uint8_t)(1u << (scanMode ? characterPos : 7u - characterPos));
+			characterPos--;
+			if (characterPos != 0xffu)
+				continue;
+
+			int16_t bufferRow = (int16_t)(sRow + row);
+			int16_t screenX = (int16_t)(sx + columnOffset);
+			if (decodedByte && bufferRow < 8 && screenX >= 0 && screenX < 128) {
+				uint16_t bitmapData = (uint16_t)decodedByte << yOffset;
+				if (bufferRow >= 0) {
+					uint8_t *dst = framebuffer + bufferRow * 128 + screenX;
+					*dst = color ? (uint8_t)(*dst | bitmapData) :
+						(uint8_t)(*dst & ~(uint8_t)bitmapData);
+					(*storesP)++;
+				}
+				if (yOffset && bufferRow < 7 && bufferRow > -2) {
+					uint8_t *dst = framebuffer + (bufferRow + 1) * 128 + screenX;
+					uint8_t upper = (uint8_t)(bitmapData >> 8);
+					*dst = color ? (uint8_t)(*dst | upper) : (uint8_t)(*dst & ~upper);
+					(*storesP)++;
+				}
+			}
+			if (info->scanZigZag)
+				scanMode = !scanMode;
+			column++;
+			columnOffset += (mirror & 0x01u) ? -1 : 1;
+			if (column >= info->width) {
+				column = 0;
+				row += (mirror & 0x02u) ? -1 : 1;
+				columnOffset = (mirror & 0x01u) ? (int16_t)(info->width - 1u) : 0;
+			}
+			decodedByte = 0;
+			characterPos = 7;
+		}
+		spanColor ^= 1u;
+	}
+	return true;
+}
+
+static bool arduboyPrvHleDrawSpritesB(ArduboyArdensRuntime *runtime,
+	int16_t x, int16_t y, uint16_t bitmapAddr, uint8_t frame, uint8_t mode,
+	uint32_t *sourceBytesP, uint32_t *storesP)
+{
+	if (mode != 2u && mode != 3u && mode != 250u && mode != 251u)
+		return false;
+	if ((uint32_t)bitmapAddr + 2u > runtime->flashUsed)
+		return false;
+	uint8_t width = runtime->cpu.prog[bitmapAddr + 0u];
+	uint8_t height = runtime->cpu.prog[bitmapAddr + 1u];
+	if (!width || !height)
+		return false;
+	uint32_t rows = (height + 7u) / 8u;
+	uint32_t step = mode == 3u ? 2u : 1u;
+	uint32_t frameBytes = (uint32_t)width * rows * step;
+	uint32_t dataAddr = (uint32_t)bitmapAddr + 2u + (uint32_t)frame * frameBytes;
+	if (dataAddr + frameBytes > runtime->flashUsed)
+		return false;
+	if ((int32_t)x + width <= 0 || x > 127 || (int32_t)y + height <= 0 || y > 63)
+		return true;
+
+	int16_t yOffset = (int16_t)((uint16_t)y & 7u);
+	int16_t startRow = (int16_t)(y / 8);
+	if (y < 0 && yOffset > 0)
+		startRow--;
+	uint16_t xOffset = x < 0 ? (uint16_t)(-(int32_t)x) : 0u;
+	uint16_t renderedWidth = (int32_t)x + width > 127 ?
+		(uint16_t)(128 - x - xOffset) : (uint16_t)(width - xOffset);
+	uint16_t startHeight = startRow < -1 ? (uint16_t)(-startRow - 1) : 0u;
+	int16_t loopHeight = (int16_t)rows;
+	if (startRow + loopHeight > 8)
+		loopHeight = (int16_t)(8 - startRow);
+	loopHeight = (int16_t)(loopHeight - startHeight);
+	if (loopHeight <= 0 || renderedWidth == 0)
+		return true;
+
+	startRow = (int16_t)(startRow + startHeight);
+	int32_t framebufferOffset = (int32_t)startRow * 128 + x + xOffset;
+	uint32_t sourceOffset = ((uint32_t)startHeight * width + xOffset) * step;
+	uint32_t stride = ((uint32_t)width - renderedWidth) * step;
+	uint8_t *framebuffer = runtime->cpu.data.data() + runtime->spritesHle.framebufferAddr;
+	uint16_t shift = (uint16_t)(1u << yOffset);
+
+	for (int16_t row = 0; row < loopHeight; row++) {
+		for (uint16_t column = 0; column < renderedWidth; column++) {
+			uint16_t bitmapData = (uint16_t)runtime->cpu.prog[dataAddr + sourceOffset] * shift;
+			uint16_t maskData = (uint16_t)~bitmapData;
+			if (mode == 2u)
+				maskData = (uint16_t)~(0xffu * shift);
+			else if (mode == 251u)
+				bitmapData = 0;
+			else
+				maskData = (uint16_t)~((uint16_t)runtime->cpu.prog[dataAddr + sourceOffset + step - 1u] * shift);
+
+			if (startRow >= 0 && framebufferOffset >= 0 && framebufferOffset < (int32_t)ARDUBOY_FRAMEBUFFER_SIZE) {
+				uint8_t *dst = framebuffer + framebufferOffset;
+				*dst = (uint8_t)((*dst & (uint8_t)maskData) | (uint8_t)bitmapData);
+				(*storesP)++;
+			}
+			if (yOffset && startRow < 7 && framebufferOffset + 128 >= 0 &&
+				framebufferOffset + 128 < (int32_t)ARDUBOY_FRAMEBUFFER_SIZE) {
+				uint8_t *dst = framebuffer + framebufferOffset + 128;
+				*dst = (uint8_t)((*dst & (uint8_t)(maskData >> 8)) | (uint8_t)(bitmapData >> 8));
+				(*storesP)++;
+			}
+			framebufferOffset++;
+			sourceOffset += step;
+		}
+		startRow++;
+		sourceOffset += stride;
+		framebufferOffset += 128 - renderedWidth;
+	}
+	*sourceBytesP = (uint32_t)loopHeight * renderedWidth * step;
+	return true;
+}
+
+static bool arduboyPrvHleCanAdvance(absim::atmega32u4_t& cpu, uint32_t cycles)
+{
+	cpu.update_all();
+	return cpu.embedded_can_advance_timer0_delay(cycles);
+}
+
+static void arduboyPrvHleAdvance(absim::atmega32u4_t& cpu, uint32_t cycles)
+{
+	cpu.cycle_count += cycles;
+	(void)cpu.embedded_advance_timer0_delay(cycles);
+}
+
+static uint32_t __attribute__((section(".fastcode.arduboy_hle"), noinline, noclone))
+	arduboyPrvGraphicsHle(void *context, absim::atmega32u4_t& cpu,
+	uint16_t target, uint16_t retAddr, uint32_t baseCycles)
+{
+	ArduboyArdensRuntime *runtime = (ArduboyArdensRuntime*)context;
+	if (!runtime)
+		return 0;
+	if (runtime->spritesHle.kind == ArduboyHleSpritesB && target == runtime->spritesHle.targetPc) {
+		uint16_t bitmapAddr = cpu.gpr_word(20);
+		uint8_t mode = cpu.gpr(16);
+		if ((uint32_t)bitmapAddr + 2u > runtime->flashUsed ||
+			(mode != 2u && mode != 3u && mode != 250u && mode != 251u)) {
+			runtime->graphicsHleFallbacks++;
+			return 0;
+		}
+		uint8_t width = cpu.prog[bitmapAddr + 0u];
+		uint8_t height = cpu.prog[bitmapAddr + 1u];
+		uint32_t rows = (height + 7u) / 8u;
+		uint32_t step = mode == 3u ? 2u : 1u;
+		uint32_t frameBytes = (uint32_t)width * rows * step;
+		uint32_t dataAddr = (uint32_t)bitmapAddr + 2u + (uint32_t)cpu.gpr(18) * frameBytes;
+		if (!width || !height || dataAddr + frameBytes > runtime->flashUsed) {
+			runtime->graphicsHleFallbacks++;
+			return 0;
+		}
+		uint32_t maxCycles = 300u + frameBytes * 80u +
+			(uint32_t)width * (rows + 1u) * 35u;
+		if (!arduboyPrvHleCanAdvance(cpu, maxCycles)) {
+			runtime->graphicsHleFallbacks++;
+			return 0;
+		}
+		uint32_t sourceBytes = 0, stores = 0;
+		if (!arduboyPrvHleDrawSpritesB(runtime,
+			(int16_t)cpu.gpr_word(24), (int16_t)cpu.gpr_word(22), cpu.gpr_word(20),
+			cpu.gpr(18), cpu.gpr(16), &sourceBytes, &stores)) {
+			runtime->graphicsHleFallbacks++;
+			return 0;
+		}
+		uint32_t cycles = 300u + sourceBytes * 80u + stores * 35u;
+		arduboyPrvHleAdvance(cpu, cycles);
+		cpu.pc = retAddr;
+		runtime->graphicsHleHits++;
+		runtime->graphicsHleGuestCycles += cycles;
+		return baseCycles;
+	}
+	if (runtime->graphicsHle.kind != ArduboyHleArdBitmap203 ||
+		target != runtime->graphicsHle.targetPc)
+		return 0;
+
+	ArduboyHleBitmapInfo info;
+	uint16_t bitmapAddr = cpu.gpr_word(20);
+	if (!arduboyPrvHleInspectArdBitmap203(runtime, bitmapAddr, &info)) {
+		runtime->graphicsHleFallbacks++;
+		return 0;
+	}
+	uint32_t maxCycles = 400u + (uint32_t)info.decodedBits * 18u +
+		(uint32_t)info.spans * 55u + (uint32_t)info.decodedBits * 2u * 25u;
+	if (!arduboyPrvHleCanAdvance(cpu, maxCycles)) {
+		runtime->graphicsHleFallbacks++;
+		return 0;
+	}
+	uint32_t stores = 0;
+	if (!arduboyPrvHleDrawArdBitmap203(runtime, &info,
+		(int16_t)cpu.gpr_word(24), (int16_t)cpu.gpr_word(22), cpu.gpr(18),
+		cpu.gpr(16), cpu.gpr(14), &stores)) {
+		runtime->graphicsHleFallbacks++;
+		return 0;
+	}
+
+	uint32_t cycles = 400u + (uint32_t)info.decodedBits * 18u +
+		(uint32_t)info.spans * 55u + stores * 25u;
+	arduboyPrvHleAdvance(cpu, cycles);
+	cpu.pc = retAddr;
+	runtime->graphicsHleHits++;
+	runtime->graphicsHleGuestCycles += cycles;
+	return baseCycles;
 }
 
 static bool arduboyPrvRawLds(uint16_t pc, uint8_t *regP, uint16_t *addrP)
@@ -451,6 +974,7 @@ static void arduboyPrvDetectEmbeddedHleTargets(void)
 		(unsigned)mArdens.cpu.embedded_timer0_millis_addr,
 		(unsigned)mArdens.cpu.embedded_timer0_fract_addr,
 		(unsigned)mArdens.cpu.embedded_timer0_overflow_addr);
+	arduboyPrvDetectGraphicsHle();
 }
 
 static bool arduboyPrvEndsWithNoCase(const char *str, uint32_t len, const char *suffix)
@@ -739,7 +1263,7 @@ static bool arduboyPrvFlashWriterWrite(ArduboyFlashWriter *writer, const uint8_t
 
 bool arduboyExtractPackageToFlash(const void *packageData, uint32_t packageSize,
 	uint32_t flashAddr, uint32_t maxSize, void *inflateDict, uint32_t inflateDictSize,
-	void *writeBuf, uint32_t writeBufSize, uint32_t *hexSizeP)
+	void *writeBuf, uint32_t writeBufSize, uint32_t *hexSizeP, uint32_t *fxDataSizeP)
 {
 	ArduboyZipMember member;
 	const uint8_t *packageBytes = (const uint8_t*)packageData;
@@ -779,6 +1303,8 @@ bool arduboyExtractPackageToFlash(const void *packageData, uint32_t packageSize,
 		return false;
 	if (hexSizeP)
 		*hexSizeP = member.uncompressedSize;
+	if (fxDataSizeP)
+		*fxDataSizeP = 0;
 	return true;
 }
 
@@ -788,11 +1314,35 @@ static void arduboyPrvFill(uint16_t *dst, uint32_t count, uint16_t color)
 		*dst++ = color;
 }
 
+static void arduboyPrvBuildExpandPixels(void)
+{
+	if (mExpandPixelsReady)
+		return;
+	for (uint32_t state = 0; state < 4; state++) {
+		bool comScanReverse = (state & 1u) != 0;
+		bool flipped = (state & 2u) != 0;
+		for (uint32_t group = 0; group < ARDUBOY_EXPANDED_PAGE_COUNT; group++) {
+			for (uint32_t x = 0; x < ARDUBOY_EXPANDED_PAGE_PIXELS; x++) {
+				uint32_t output = group * ARDUBOY_EXPANDED_PAGE_PIXELS + x;
+				uint32_t original = flipped ? ARDUBOY_EXPANDED_LINE_PIXELS - 1u - output : output;
+				uint32_t sourceY = ((ARDUBOY_EXPANDED_LINE_PIXELS - 1u - original) *
+					ARDUBOY_DISPLAY_HEIGHT) / ARDUBOY_EXPANDED_LINE_PIXELS;
+				if (!comScanReverse)
+					sourceY = ARDUBOY_DISPLAY_HEIGHT - 1u - sourceY;
+				if (x == 0)
+					mExpandPages[state][group] = (uint8_t)(sourceY >> 3);
+				mExpandBits[state][group][x] = (uint8_t)(1u << (sourceY & 7u));
+			}
+		}
+	}
+	mExpandPixelsReady = true;
+}
+
 static void arduboyPrvUpdatePresentMap(void)
 {
 	uint32_t logicalW = DISP_HEIGHT;
 	uint32_t logicalH = DISP_WIDTH;
-	uint32_t dstW, dstH, dstX, dstY;
+	uint32_t dstW, dstH, dstX;
 
 	if ((uint64_t)logicalW * ARDUBOY_DISPLAY_HEIGHT <= (uint64_t)logicalH * ARDUBOY_DISPLAY_WIDTH) {
 		dstW = logicalW;
@@ -803,7 +1353,6 @@ static void arduboyPrvUpdatePresentMap(void)
 		dstW = (logicalH * ARDUBOY_DISPLAY_WIDTH) / ARDUBOY_DISPLAY_HEIGHT;
 	}
 	dstX = (logicalW - dstW) / 2u;
-	dstY = (logicalH - dstH) / 2u;
 
 	mPresentRowFirst = DISP_HEIGHT;
 	mPresentRowEnd = 0;
@@ -820,32 +1369,11 @@ static void arduboyPrvUpdatePresentMap(void)
 		mArdens.presentSrcX[y] = srcX;
 	}
 
-	mPresentColFirst = DISP_WIDTH;
-	mPresentColEnd = 0;
-	for (uint32_t x = 0; x < DISP_WIDTH; x++) {
-		uint32_t logicalY = DISP_WIDTH - 1u - x;
-		uint8_t page = ARDUBOY_PRESENT_Y_INVALID;
-		uint8_t mask = 0;
-		uint8_t pageFlipped = ARDUBOY_PRESENT_Y_INVALID;
-		uint8_t maskFlipped = 0;
-
-		if (logicalY >= dstY && logicalY < dstY + dstH) {
-			uint32_t srcY = ((logicalY - dstY) * ARDUBOY_DISPLAY_HEIGHT) / dstH;
-			uint32_t srcYFlipped = ARDUBOY_DISPLAY_HEIGHT - 1u - srcY;
-
-			page = (uint8_t)(srcY >> 3);
-			mask = (uint8_t)(1u << (srcY & 7u));
-			pageFlipped = (uint8_t)(srcYFlipped >> 3);
-			maskFlipped = (uint8_t)(1u << (srcYFlipped & 7u));
-			if (mPresentColFirst == DISP_WIDTH)
-				mPresentColFirst = (uint16_t)x;
-			mPresentColEnd = (uint16_t)(x + 1u);
-		}
-		mArdens.presentSrcYPage[x] = page;
-		mArdens.presentSrcYMask[x] = mask;
-		mArdens.presentSrcYPageFlipped[x] = pageFlipped;
-		mArdens.presentSrcYMaskFlipped[x] = maskFlipped;
-	}
+	static_assert(ARDUBOY_EXPANDED_LINE_PIXELS == 160u,
+		"Arduboy expansion table must cover the 160-pixel scaled display height");
+	mPresentColFirst = (uint16_t)((DISP_WIDTH - dstH) / 2u);
+	mPresentColEnd = (uint16_t)(mPresentColFirst + dstH);
+	arduboyPrvBuildExpandPixels();
 
 	memset(dispGetFb(), 0, DISP_WIDTH * DISP_HEIGHT * DISP_BPP / 8);
 	mPresentLastState = ARDUBOY_PRESENT_STATE_INVALID;
@@ -854,7 +1382,7 @@ static void arduboyPrvUpdatePresentMap(void)
 void arduboyRefreshDisplayOptions(void)
 {
 	(void)arduboyPrvRuntime();
-	dispSetFramerate(ARDUBOY_FRAME_RATE);
+	dispSetFramerate(ARDUBOY_PRESENT_RATE);
 	arduboyPrvUpdatePresentMap();
 	mArdens.displayDirty = true;
 }
@@ -867,19 +1395,17 @@ static bool arduboyPrvVramHasNonzero(void)
 	return false;
 }
 
-static void arduboyPrvPresentFrame(bool force)
+static void __attribute__((section(".fastcode.arduboy_present"), noinline, noclone))
+	arduboyPrvPresentFrame(bool force)
 {
 	uint16_t *fb = (uint16_t*)dispGetFb();
 	bool displayOn = mArdens.display.display_on;
 	bool inverted = mArdens.display.inverse_display;
 	bool comScanReverse = mArdens.display.com_scan_direction;
-	const uint8_t *srcYPage = comScanReverse ? mArdens.presentSrcYPage : mArdens.presentSrcYPageFlipped;
-	const uint8_t *srcYMask = comScanReverse ? mArdens.presentSrcYMask : mArdens.presentSrcYMaskFlipped;
 	uint8_t presentState = (displayOn ? ARDUBOY_PRESENT_STATE_DISPLAY_ON : 0u) |
 		(inverted ? ARDUBOY_PRESENT_STATE_INVERTED : 0u) |
 		(comScanReverse ? 0x04u : 0u);
 	bool clearFrame = force || presentState != mPresentLastState;
-	uint16_t onColor = inverted ? 0x0000u : 0xffffu;
 	uint16_t offColor = inverted ? 0xffffu : 0x0000u;
 
 	if (!force && !clearFrame && !mArdens.displayDirty)
@@ -888,38 +1414,36 @@ static void arduboyPrvPresentFrame(bool force)
 		arduboyPrvFill(fb, DISP_WIDTH * DISP_HEIGHT, offColor);
 		mPresentLastState = presentState;
 	}
-	if (!displayOn && !clearFrame)
+	if (!displayOn) {
+		mArdens.displayDirty = false;
 		return;
+	}
 
+	uint32_t expandState = (comScanReverse ? 1u : 0u) | (mPresentFlipped ? 2u : 0u);
 	for (uint32_t y = mPresentRowFirst; y < mPresentRowEnd; y++) {
 		uint16_t srcX = mArdens.presentSrcX[y];
 
 		if (srcX == ARDUBOY_PRESENT_INVALID)
 			continue;
 		srcX = ARDUBOY_DISPLAY_WIDTH - 1u - srcX;
-		for (uint32_t x = mPresentColFirst; x < mPresentColEnd; x++) {
-			uint8_t page = srcYPage[x];
-			uint8_t mask = srcYMask[x];
-			bool pixelOn = displayOn && page != ARDUBOY_PRESENT_Y_INVALID &&
-				(mArdens.display.ram[(uint32_t)page * ARDUBOY_DISPLAY_WIDTH + srcX] & mask);
-
-			uint32_t dst = y * DISP_WIDTH + x;
-
-			if (mPresentFlipped)
-				dst = DISP_WIDTH * DISP_HEIGHT - 1u - dst;
-			fb[dst] = pixelOn ? onColor : offColor;
+		uint32_t dstY = mPresentFlipped ? DISP_HEIGHT - 1u - y : y;
+		uint16_t *dst = fb + dstY * DISP_WIDTH + mPresentColFirst;
+		for (uint32_t group = 0; group < ARDUBOY_EXPANDED_PAGE_COUNT; group++) {
+			uint8_t page = mExpandPages[expandState][group];
+			uint8_t value = mArdens.display.ram[(uint32_t)page * ARDUBOY_DISPLAY_WIDTH + srcX];
+			uint16_t *groupDst = dst + group * ARDUBOY_EXPANDED_PAGE_PIXELS;
+			const uint8_t *bits = mExpandBits[expandState][group];
+			uint16_t invertMask = inverted ? 0xffffu : 0u;
+			for (uint32_t x = 0; x < ARDUBOY_EXPANDED_PAGE_PIXELS; x++)
+				groupDst[x] = (uint16_t)-(uint16_t)((value & bits[x]) != 0u) ^ invertMask;
 		}
 	}
 
-	mArdens.displayDirty = false;
 	mArdens.displayUpdates++;
-	if (displayOn && arduboyPrvVramHasNonzero()) {
+	mArdens.displayDirty = false;
+	mArdens.displayEverOn = true;
+	if (!mArdens.visibleFrameSeen && arduboyPrvVramHasNonzero())
 		mArdens.visibleFrameSeen = true;
-		mArdens.displayEverOn = true;
-	}
-	else if (displayOn) {
-		mArdens.displayEverOn = true;
-	}
 }
 
 static void arduboyPrvDebugPutPixel(uint16_t *fb, uint32_t x, uint32_t y, uint16_t color)
@@ -946,11 +1470,12 @@ static void arduboyPrvDebugFillRect(uint16_t *fb, uint32_t x, uint32_t y, uint32
 			arduboyPrvDebugPutPixel(fb, xx, yy, color);
 }
 
-static uint32_t arduboyPrvDebugDrawChar(uint16_t *fb, uint32_t x, uint32_t y, char ch, uint16_t color)
+static uint32_t arduboyPrvDebugDrawChar(uint16_t *fb, uint32_t x, uint32_t y,
+	char ch, enum Font font, uint16_t color)
 {
 	FontGlyphInfo gi;
 
-	if (!fontGetGlyphInfo(&gi, FontSmall, (unsigned char)ch))
+	if (!fontGetGlyphInfo(&gi, font, (unsigned char)ch))
 		return 4;
 	for (uint32_t yy = 0; yy < gi.height; yy++)
 		for (uint32_t xx = 0; xx < gi.width; xx++)
@@ -959,10 +1484,11 @@ static uint32_t arduboyPrvDebugDrawChar(uint16_t *fb, uint32_t x, uint32_t y, ch
 	return gi.width + 1u;
 }
 
-static void arduboyPrvDebugDrawText(uint16_t *fb, uint32_t x, uint32_t y, const char *text, uint16_t color)
+static void arduboyPrvDebugDrawText(uint16_t *fb, uint32_t x, uint32_t y,
+	const char *text, uint16_t color)
 {
 	while (*text)
-		x += arduboyPrvDebugDrawChar(fb, x, y, *text++, color);
+		x += arduboyPrvDebugDrawChar(fb, x, y, *text++, FontSmall, color);
 }
 
 static const char *arduboyPrvFailReasonText(uint8_t reason)
@@ -1043,6 +1569,8 @@ static void arduboyPrvFailureLoop(const char *reason)
 	mArdens.failed = true;
 	while (!mArdens.abortRequested) {
 		arduboyPrvShowFailureScreen(reason);
+		if (mArdens.ledsTick)
+			mArdens.ledsTick();
 		if (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
 			arduboyPortInGameMenu();
 			while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER)
@@ -1054,14 +1582,12 @@ static void arduboyPrvFailureLoop(const char *reason)
 	}
 }
 
-static void arduboyPrvApplyButtons(void)
+static void arduboyPrvApplyButtons(uint_fast8_t keys)
 {
-	uint_fast8_t keys = uiGetKeysRaw();
-
 	mArdens.cpu.data[ARDUBOY_AVR_PINB] =
-		(uint8_t)((mArdens.cpu.data[ARDUBOY_AVR_PINB] & 0xefu) | ((keys & KEY_BIT_B) ? 0u : 0x10u));
+		(uint8_t)((mArdens.cpu.data[ARDUBOY_AVR_PINB] & 0xefu) | ((keys & KEY_BIT_A) ? 0u : 0x10u));
 	mArdens.cpu.data[ARDUBOY_AVR_PINE] =
-		(uint8_t)((mArdens.cpu.data[ARDUBOY_AVR_PINE] & 0xbfu) | ((keys & KEY_BIT_A) ? 0u : 0x40u));
+		(uint8_t)((mArdens.cpu.data[ARDUBOY_AVR_PINE] & 0xbfu) | ((keys & KEY_BIT_B) ? 0u : 0x40u));
 	mArdens.cpu.data[ARDUBOY_AVR_PINF] = (uint8_t)((mArdens.cpu.data[ARDUBOY_AVR_PINF] & 0x0fu) |
 		((keys & KEY_BIT_UP) ? 0u : 0x80u) |
 		((keys & KEY_BIT_RIGHT) ? 0u : 0x40u) |
@@ -1083,20 +1609,10 @@ static void arduboyPrvSyncEepromToSave(bool force)
 	mArdens.eepromSyncs++;
 }
 
-static bool arduboyPrvServiceRuntimeControls(void)
-{
-	if (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
-		arduboyPrvSyncEepromToSave(true);
-		arduboyPortInGameMenu();
-		while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER)
-			;
-		return !mArdens.abortRequested;
-	}
-	return true;
-}
-
 static void arduboyPrvLogBootProgress(uint64_t now)
 {
+	if (mArdens.visibleFrameSeen)
+		return;
 	uint64_t elapsed = now >= mArdens.startTicks ? now - mArdens.startTicks : 0;
 	uint32_t cps = elapsed ? (uint32_t)((mArdens.cpu.cycle_count * (uint64_t)TICKS_PER_SECOND) / elapsed) : 0;
 	uint32_t ms = (uint32_t)(elapsed / (TICKS_PER_SECOND / 1000u));
@@ -1133,33 +1649,165 @@ static void arduboyPrvStop(uint8_t reason)
 	arduboyPrvFailureLoop(arduboyPrvFailReasonText(reason));
 }
 
-static void arduboyPrvCaptureCompletedSpiByte(uint8_t displayPort)
+static void arduboyPrvFxSetSelected(ArduboyArdensRuntime *runtime, bool selected)
 {
-	if (mArdens.cpu.cycle_count < mArdens.cpu.spi_done_cycle)
+	if (runtime->fxSelected == selected)
 		return;
+	runtime->fxSelected = selected;
+	if (!selected) {
+		runtime->fxSpiState = ArduboyFxSpiIdle;
+		runtime->fxAddressBytes = 0;
+		runtime->fxJedecByte = 0;
+	}
+}
 
-	uint8_t byte = mArdens.cpu.spi_data_byte;
+static void arduboyPrvFxUpdateSelected(ArduboyArdensRuntime *runtime)
+{
+	uint8_t ddrd = runtime->cpu.data[ARDUBOY_AVR_DDRD];
+	uint8_t portd = runtime->cpu.data[ARDUBOY_AVR_PORTD];
+	uint8_t ddre = runtime->cpu.data[ARDUBOY_AVR_DDRE];
+	uint8_t porte = runtime->cpu.data[ARDUBOY_AVR_PORTE];
+	bool selected = ((ddrd & (1u << 1)) && !(portd & (1u << 1))) ||
+		 ((ddrd & (1u << 2)) && !(portd & (1u << 2))) ||
+		 ((ddre & (1u << 2)) && !(porte & (1u << 2)));
 
-	mArdens.spiWrites++;
-	mArdens.lastSpiByte = byte;
-	mArdens.lastPortD = displayPort;
+	arduboyPrvFxSetSelected(runtime, selected);
+}
+
+static uint8_t arduboyPrvFxRead(const ArduboyArdensRuntime *runtime, uint32_t address)
+{
+	address &= ARDUBOY_FX_ADDRESS_SPACE - 1u;
+	if (address == 0)
+		return 0x41u;
+	if (address == 1)
+		return 0x52u;
+	if (runtime->fxData && address >= runtime->fxGuestBase &&
+			address - runtime->fxGuestBase < runtime->fxDataSize)
+		return runtime->fxData[address - runtime->fxGuestBase];
+	return 0xffu;
+}
+
+static uint8_t arduboyPrvFxTransfer(ArduboyArdensRuntime *runtime, uint8_t byte)
+{
+	if (!runtime->fxSelected)
+		return 0xffu;
+	if (runtime->fxSpiState == ArduboyFxSpiReadAddress) {
+		runtime->fxAddress = ((runtime->fxAddress << 8) | byte) & (ARDUBOY_FX_ADDRESS_SPACE - 1u);
+		if (++runtime->fxAddressBytes == 3)
+			runtime->fxSpiState = ArduboyFxSpiReadData;
+		return 0;
+	}
+	if (runtime->fxSpiState == ArduboyFxSpiReadData) {
+		uint8_t result = arduboyPrvFxRead(runtime, runtime->fxAddress);
+
+		runtime->fxAddress = (runtime->fxAddress + 1u) & (ARDUBOY_FX_ADDRESS_SPACE - 1u);
+		return result;
+	}
+	if (runtime->fxSpiState == ArduboyFxSpiReadStatus)
+		return 0;
+	if (runtime->fxSpiState == ArduboyFxSpiReadJedec) {
+		static const uint8_t jedec[] = {0xefu, 0x40u, 0x18u};
+		uint8_t result = runtime->fxJedecByte < sizeof(jedec) ? jedec[runtime->fxJedecByte] : 0xffu;
+
+		runtime->fxJedecByte++;
+		return result;
+	}
+
+	if (!runtime->fxAwake) {
+		if (byte == 0xabu)
+			runtime->fxAwake = true;
+		return 0;
+	}
+	switch (byte) {
+	case 0x03u:
+		runtime->fxAddress = 0;
+		runtime->fxAddressBytes = 0;
+		runtime->fxSpiState = ArduboyFxSpiReadAddress;
+		break;
+	case 0x05u:
+		runtime->fxSpiState = ArduboyFxSpiReadStatus;
+		break;
+	case 0x9fu:
+		runtime->fxJedecByte = 0;
+		runtime->fxSpiState = ArduboyFxSpiReadJedec;
+		break;
+	case 0xb9u:
+		runtime->fxAwake = false;
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+static void arduboyPrvCapturePort(void *context, uint16_t ptr, uint8_t value)
+{
+	(void)ptr;
+	(void)value;
+	ArduboyArdensRuntime *runtime = (ArduboyArdensRuntime*)context;
+
+	if (runtime)
+		arduboyPrvFxUpdateSelected(runtime);
+}
+
+static uint8_t __attribute__((section(".fastcode.arduboy_spi_sink"), noinline, noclone)) arduboyPrvCaptureSpiByte(
+	void *context, uint8_t byte, uint8_t displayPort)
+{
+	ArduboyArdensRuntime *runtime = (ArduboyArdensRuntime*)context;
+	if (!runtime)
+		return 0xffu;
+
+	bool trackDiagnostics = !runtime->visibleFrameSeen;
+	if (trackDiagnostics) {
+		runtime->spiWrites++;
+		runtime->lastSpiByte = byte;
+		runtime->lastPortD = displayPort;
+	}
+	arduboyPrvFxUpdateSelected(runtime);
 	if (!(displayPort & (1u << 6))) {
 		if (displayPort & (1u << 4)) {
-			mArdens.display.send_data(byte);
-			mArdens.dataWrites++;
+			runtime->display.send_data(byte);
+			if (trackDiagnostics)
+				runtime->dataWrites++;
 		}
 		else {
-			mArdens.display.send_command(byte);
-			mArdens.commandWrites++;
+			runtime->display.send_command(byte);
+			if (trackDiagnostics)
+				runtime->commandWrites++;
 		}
-		mArdens.displayDirty = true;
+		runtime->displayDirty = true;
 	}
-	else {
-		mArdens.ignoredSpiWrites++;
-	}
+	else if (!runtime->fxSelected && trackDiagnostics)
+		runtime->ignoredSpiWrites++;
+	if (runtime->fxSelected)
+		return arduboyPrvFxTransfer(runtime, byte);
+	return 0xffu;
+}
 
-	mArdens.cpu.spi_datain_byte = 0xffu;
-	mArdens.cpu.spi_done_cycle = UINT64_MAX;
+static bool __attribute__((section(".fastcode.arduboy_spi_bulk"), noinline, noclone))
+	arduboyPrvCaptureSpiBulk(void *context, const uint8_t *bytes, uint32_t count, uint8_t displayPort)
+{
+	ArduboyArdensRuntime *runtime = (ArduboyArdensRuntime*)context;
+	if (!runtime || !bytes || count == 0)
+		return false;
+	arduboyPrvFxUpdateSelected(runtime);
+	/* This superinstruction only represents Arduboy2's framebuffer transfer.
+	 * Command traffic and FX-selected transfers retain byte-exact emulation. */
+	if (runtime->fxSelected || (displayPort & (1u << 6)) || !(displayPort & (1u << 4)))
+		return false;
+
+	for (uint32_t i = 0; i < count; i++)
+		runtime->display.send_data(bytes[i]);
+	runtime->lastSpiByte = bytes[count - 1u];
+	runtime->lastPortD = displayPort;
+	runtime->displayDirty = true;
+	runtime->bulkDisplayHits++;
+	bool trackDiagnostics = !runtime->visibleFrameSeen;
+	if (trackDiagnostics) {
+		runtime->spiWrites += count;
+		runtime->dataWrites += count;
+	}
+	return true;
 }
 
 void arduboyAbort(void)
@@ -1168,9 +1816,38 @@ void arduboyAbort(void)
 	mArdens.abortRequested = true;
 }
 
-void arduboyRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize)
+static void arduboyPrvInitFxCache(void)
+{
+	const ArduboyFxCacheHeader *header = (const ArduboyFxCacheHeader*)ARDUBOY_FX_CACHE_META_ADDR;
+	uint32_t metaOffset = ARDUBOY_FX_CACHE_REGION_SIZE - ARDUBOY_FX_CACHE_META_SIZE;
+
+	if (header->magic != ARDUBOY_FX_CACHE_MAGIC || header->version != ARDUBOY_FX_CACHE_VERSION ||
+			header->dataOffset >= metaOffset || header->dataSize > metaOffset - header->dataOffset ||
+			header->dataSize > ARDUBOY_FX_ADDRESS_SPACE)
+		return;
+	mArdens.fxData = (const uint8_t*)(QSPI_ROM_START + header->dataOffset);
+	mArdens.fxDataSize = header->dataSize;
+	mArdens.fxGuestBase = (ARDUBOY_FX_ADDRESS_SPACE - header->dataSize) & (ARDUBOY_FX_ADDRESS_SPACE - 1u);
+}
+
+static void arduboyPrvFinalizeFxAddress(void)
+{
+	if (!mArdens.fxData || mArdens.flashUsed < 0x18u)
+		return;
+	if (mArdens.cpu.prog[0x14] == 0x18u && mArdens.cpu.prog[0x15] == 0x95u) {
+		uint32_t page = ((uint32_t)mArdens.cpu.prog[0x16] << 8) | mArdens.cpu.prog[0x17];
+
+		mArdens.fxGuestBase = page << 8;
+	}
+	pr("arduboy fx: data=%lu guest=%06lx\n", (unsigned long)mArdens.fxDataSize,
+		(unsigned long)mArdens.fxGuestBase);
+}
+
+void arduboyRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveRamSize,
+	void (*ledsTick)(void))
 {
 	ArduboyRomInfo info;
+	uint64_t frameBaseCycle;
 	uint64_t nextControlCycle;
 
 	if (!arduboyAnalyzeRom(rom, romSize, &info) || info.isPackage)
@@ -1180,10 +1857,11 @@ void arduboyRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveR
 	memset(&mArdens, 0, sizeof(mArdens));
 	mArdens.saveRam = (uint8_t*)saveRam;
 	mArdens.saveRamSize = saveRamSize;
+	mArdens.ledsTick = ledsTick;
 	mArdens.startTicks = getTime();
 	mArdens.lastBootLogTicks = mArdens.startTicks;
 	mArdens.lastEepromSyncTicks = mArdens.startTicks;
-	mArdens.lastFrameTicks = mArdens.startTicks;
+	arduboyPrvInitFxCache();
 
 	arduboyRefreshDisplayOptions();
 	memset(mArdens.cpu.prog.data(), 0xff, mArdens.cpu.prog.size());
@@ -1208,61 +1886,79 @@ void arduboyRun(const void *rom, uint32_t romSize, void *saveRam, uint32_t saveR
 	}
 	mArdens.cpu.program_loaded = true;
 	mArdens.cpu.last_addr = (uint16_t)((mArdens.flashUsed + 1u) & ~1u);
+	arduboyPrvFinalizeFxAddress();
 	mArdens.cpu.decode();
 	arduboyPrvDetectEmbeddedHleTargets();
 	mArdens.cpu.pc = 0;
 	mArdens.cpu.executing_instr_pc = 0;
 	mArdens.cpu.spi_datain_byte = 0xffu;
-	nextControlCycle = ARDUBOY_CONTROL_POLL_CYCLES;
+	mArdens.cpu.embedded_spi_sink = arduboyPrvCaptureSpiByte;
+	mArdens.cpu.embedded_spi_bulk_sink = arduboyPrvCaptureSpiBulk;
+	mArdens.cpu.embedded_spi_sink_context = &mArdens;
+	mArdens.cpu.embedded_port_sink = arduboyPrvCapturePort;
+	mArdens.cpu.embedded_port_sink_context = &mArdens;
+#ifdef ARDUBOY_HLE_ENABLED
+	mArdens.cpu.embedded_hle_sink = arduboyPrvGraphicsHle;
+	mArdens.cpu.embedded_hle_sink_context = &mArdens;
+#endif
+	frameBaseCycle = mArdens.cpu.cycle_count;
+	nextControlCycle = frameBaseCycle + ARDUBOY_CONTROL_POLL_CYCLES;
+	dispPrvFrameCtrReset();
 
-	pr("arduboy ardens start: flash=%lu save=%lu backend=ardens audio=disabled\n",
+	pr("arduboy ardens start: flash=%lu save=%lu backend=single-core audio=disabled\n",
 		(unsigned long)mArdens.flashUsed, (unsigned long)saveRamSize);
 
 	while (!mArdens.abortRequested) {
-		uint64_t frameEnd = mArdens.cpu.cycle_count + ARDUBOY_FRAME_CYCLES;
+		uint64_t frameEnd = frameBaseCycle +
+			((mArdens.frameCount + 1u) * ARDUBOY_CPU_FREQ) / ARDUBOY_PRESENT_RATE;
 		uint64_t now;
 
-		arduboyPrvApplyButtons();
-		while (!mArdens.abortRequested && mArdens.cpu.cycle_count < frameEnd) {
-			uint8_t displayPort = mArdens.cpu.data[ARDUBOY_AVR_PORTD];
-			uint64_t before = mArdens.cpu.cycle_count;
+		if (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
+			arduboyPrvSyncEepromToSave(true);
+			arduboyPortInGameMenu();
+			while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER)
+				;
+			if (mArdens.abortRequested)
+				break;
+			dispPrvFrameCtrReset();
+		}
 
+		arduboyPrvApplyButtons(uiGetKeysRaw());
+		while (!mArdens.abortRequested && mArdens.cpu.cycle_count < frameEnd) {
 			if (mArdens.cpu.pc >= ARDUBOY_FLASH_SIZE / 2u) {
-				arduboyPrvStop(ArduboyArdensFailInvalidPc);
+				mArdens.failReason = ArduboyArdensFailInvalidPc;
+				mArdens.failed = true;
 				break;
 			}
-			mArdens.lastPc = mArdens.cpu.pc;
 			mArdens.lastOpcode = mArdens.cpu.decoded_prog[mArdens.cpu.pc].word;
 			mArdens.cpu.advance_cycle();
-			arduboyPrvCaptureCompletedSpiByte(displayPort);
-			mArdens.advanceCalls++;
-			if (mArdens.cpu.cycle_count > before)
-				mArdens.executedCycles += mArdens.cpu.cycle_count - before;
 			if (mArdens.cpu.cycle_count >= nextControlCycle) {
 				nextControlCycle = mArdens.cpu.cycle_count + ARDUBOY_CONTROL_POLL_CYCLES;
-				if (!arduboyPrvServiceRuntimeControls())
-					break;
-				arduboyPrvApplyButtons();
+				arduboyPrvApplyButtons(uiGetKeysRaw());
 			}
 		}
 		if (mArdens.abortRequested || mArdens.failed)
 			break;
 
-		arduboyPrvSyncEepromToSave(false);
 		arduboyPrvPresentFrame(mArdens.frameCount == 0);
+		if (mArdens.ledsTick)
+			mArdens.ledsTick();
+		arduboyPrvSyncEepromToSave(false);
 		mArdens.frameCount++;
 
 		now = getTime();
 		arduboyPrvLogBootProgress(now);
 		if (!mArdens.visibleFrameSeen && now - mArdens.startTicks >= ARDUBOY_BOOT_WATCHDOG_TICKS) {
-			arduboyPrvStop((mArdens.spiWrites || mArdens.commandWrites || mArdens.dataWrites) ?
-				ArduboyArdensFailBootWatchdog : ArduboyArdensFailNoDisplayIo);
+			mArdens.failReason = (mArdens.spiWrites || mArdens.commandWrites || mArdens.dataWrites) ?
+				ArduboyArdensFailBootWatchdog : ArduboyArdensFailNoDisplayIo;
+			mArdens.failed = true;
 			break;
 		}
-
 		dispPrvFrameCtrWait();
 	}
 
+	if (mArdens.failed)
+		arduboyPrvStop(mArdens.failReason);
 	arduboyPrvSyncEepromToSave(true);
 	dispSetFramerate(ARDUBOY_FRAME_RATE);
 }

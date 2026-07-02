@@ -13,6 +13,11 @@
 #include "sd.h"
 #include "timebase.h"
 #include "toolWorkspace.h"
+#include "RP2350.h"
+#include "hardware/regs/sio.h"
+#include "hardware/regs/psm.h"
+#include "hardware/structs/sio.h"
+#include "hardware/structs/psm.h"
 
 typedef char DcAppHeaderSizeCheck[(sizeof(struct DcAppImageHeader) == DCAPP_HEADER_SIZE) ? 1 : -1];
 
@@ -23,6 +28,10 @@ static DcAppVoidF mActiveAbort;
 static DcAppVoidF mActiveRefresh;
 static struct ToolWorkspaceSpan mActiveScratch;
 static bool mActiveScratchValid;
+static volatile DcAppCore1EntryF mCore1Entry;
+static volatile void *mCore1Context;
+static volatile bool mCore1Owned;
+static volatile bool mCore1Done;
 static char mLastError[128];
 static const uint32_t mDcAppBuildContractWords[DCAPP_CONTRACT_HASH_WORDS] = {
 	DCAPP_BUILD_CONTRACT_WORDS
@@ -439,6 +448,99 @@ bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP)
 	return true;
 }
 
+static void dcAppPrvCore1FifoDrain(void)
+{
+	while (sio_hw->fifo_st & SIO_FIFO_ST_VLD_BITS)
+		(void)sio_hw->fifo_rd;
+}
+
+static void dcAppPrvCore1FifoWrite(uint32_t value)
+{
+	while (!(sio_hw->fifo_st & SIO_FIFO_ST_RDY_BITS))
+		;
+	sio_hw->fifo_wr = value;
+	__asm volatile("sev" ::: "memory");
+}
+
+static uint32_t dcAppPrvCore1FifoRead(void)
+{
+	while (!(sio_hw->fifo_st & SIO_FIFO_ST_VLD_BITS))
+		__asm volatile("wfe");
+	return sio_hw->fifo_rd;
+}
+
+static void dcAppPrvCore1Main(void)
+{
+	DcAppCore1EntryF entry;
+	void *context;
+
+	__asm volatile("cpsid i\ndmb" ::: "memory");
+	entry = mCore1Entry;
+	context = (void*)mCore1Context;
+	if (entry)
+		entry(context);
+	__asm volatile("dmb" ::: "memory");
+	mCore1Done = true;
+	__asm volatile("sev" ::: "memory");
+	for (;;)
+		__asm volatile("wfe");
+}
+
+void dcAppCore1ForceStop(void)
+{
+	if (!mCore1Owned)
+		return;
+	psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;
+	while (!(psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS))
+		;
+	mCore1Entry = NULL;
+	mCore1Context = NULL;
+	mCore1Done = false;
+	mCore1Owned = false;
+	__asm volatile("dmb" ::: "memory");
+}
+
+bool dcAppCore1Start(DcAppCore1EntryF entry, void *context, void *stackTop)
+{
+	uint32_t commands[] = {0u, 0u, 1u, SCB->VTOR, (uint32_t)(uintptr_t)stackTop,
+		(uint32_t)(uintptr_t)dcAppPrvCore1Main};
+	uint32_t index = 0;
+
+	if (!entry || !stackTop || mCore1Owned)
+		return false;
+	psm_hw->frce_off |= PSM_FRCE_OFF_PROC1_BITS;
+	while (!(psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS))
+		;
+	mCore1Entry = entry;
+	mCore1Context = context;
+	mCore1Done = false;
+	mCore1Owned = true;
+	__asm volatile("dmb" ::: "memory");
+	psm_hw->frce_off &= ~PSM_FRCE_OFF_PROC1_BITS;
+	while (psm_hw->frce_off & PSM_FRCE_OFF_PROC1_BITS)
+		;
+
+	while (index < sizeof(commands) / sizeof(commands[0])) {
+		uint32_t value = commands[index];
+		if (index < 2u) {
+			dcAppPrvCore1FifoDrain();
+			__asm volatile("sev" ::: "memory");
+		}
+		dcAppPrvCore1FifoWrite(value);
+		index = dcAppPrvCore1FifoRead() == value ? index + 1u : 0u;
+	}
+	return true;
+}
+
+void dcAppCore1Join(void)
+{
+	if (!mCore1Owned)
+		return;
+	while (!mCore1Done)
+		__asm volatile("wfe");
+	dcAppCore1ForceStop();
+}
+
 bool dcAppGetAuxScratch(struct ToolWorkspaceSpan *spanP)
 {
 	if (!mActiveScratchValid)
@@ -602,6 +704,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	mActiveAbort = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.abortOffset);
 	mActiveRefresh = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.refreshOffset);
 	ret = entry(&mHostApi, args);
+	dcAppCore1ForceStop();
 	audioPwmStop();
 	dcAppPrvClearActiveAppContext();
 	if (ret) {

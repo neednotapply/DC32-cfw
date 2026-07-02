@@ -267,7 +267,7 @@ void display_t::send_command(uint8_t byte)
     ++command_byte_index;
 }
 
-void display_t::send_data(uint8_t byte)
+ARDENS_HOT void display_t::send_data(uint8_t byte)
 {
     if(type != SH1106 || uint8_t(data_col - 2) < 128)
     {

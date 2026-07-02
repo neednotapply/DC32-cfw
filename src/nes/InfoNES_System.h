@@ -36,6 +36,21 @@ void InfoNES_ReleaseRom();
 /* Transfer the contents of work frame on the screen */
 int InfoNES_LoadFrame();
 
+/* Pace every emulated frame independently from the rendered frame rate. */
+void InfoNES_FrameBoundary();
+
+#ifdef NES_PERF_PROFILE
+enum InfoNES_PerfSection {
+    INFONES_PERF_CPU,
+    INFONES_PERF_PPU,
+};
+void InfoNES_PerfStart(enum InfoNES_PerfSection section);
+void InfoNES_PerfStop(enum InfoNES_PerfSection section);
+#else
+#define InfoNES_PerfStart(section) ((void)0)
+#define InfoNES_PerfStop(section) ((void)0)
+#endif
+
 /* Get a joypad state */
 void InfoNES_PadState(DWORD *pdwPad1, DWORD *pdwPad2, DWORD *pdwSystem);
 
@@ -58,22 +73,6 @@ void InfoNES_DebugPrint(const char *pszMsg);
 
 /* Wait */
 inline void InfoNES_Wait() {}
-
-/* Sound Initialize */
-void InfoNES_SoundInit(void);
-
-/* Sound Open */
-int InfoNES_SoundOpen(int samples_per_sync, int sample_rate);
-
-/* Sound Close */
-void InfoNES_SoundClose(void);
-
-/* Sound Output waves - NES APU (2 Pulse, 1 Triangle, 1 Noise, 1 DPCM) plus
- * an optional 6th input for expansion audio that needs its own mix headroom
- * (currently Sunsoft 5B via Mapper 69). Pass NULL for `wave6` when no
- * expansion audio is active. */
-void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3, BYTE *wave4, BYTE *wave5, BYTE *wave6);
-int InfoNES_GetSoundBufferSize();
 
 /* Print system message */
 void InfoNES_MessageBox(const char *pszMsg, ...);

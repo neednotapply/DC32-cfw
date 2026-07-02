@@ -143,6 +143,8 @@ instr_func_t const INSTR_MAP[NUM_INSTR] =
     instr_merged_cp_cpc,
     instr_merged_subi_sbci,
     instr_merged_delay,
+    instr_merged_fill4_inc_brne,
+    instr_merged_arduboy_display,
 };
 
 bool instr_is_two_words(avr_instr_t i)
@@ -316,7 +318,7 @@ static void embedded_st32(std::array<uint8_t, atmega32u4_t::DATA_SIZE_BYTES>& da
     data[addr + 3u] = uint8_t(value >> 24);
 }
 
-bool atmega32u4_t::embedded_advance_timer0_delay(uint64_t cycles)
+bool atmega32u4_t::embedded_can_advance_timer0_delay(uint64_t cycles) const
 {
     if(cycles == 0)
         return true;
@@ -328,9 +330,32 @@ bool atmega32u4_t::embedded_advance_timer0_delay(uint64_t cycles)
         timer0.top != 0xff || timer0.tov != 0xff)
         return false;
 
+    // Only Arduino's standard TIMER0 overflow ISR is replaced. If another
+    // interrupt or peripheral is due, exact execution must service it.
+    if(!(data[0x5f] & SREG_I) || data[0x6e] != 0x01u || (data[0x35] & 0x01u))
+        return false;
+    uint64_t end_cycle = cycle_count + cycles;
+    for(uint32_t type = PQ_SPI; type < NUM_PQ; ++type)
+    {
+        if(type != PQ_TIMER0 && peripheral_queue.cycle((pqueue_type)type) <= end_cycle)
+            return false;
+    }
+    return true;
+}
+
+bool atmega32u4_t::embedded_advance_timer0_delay(uint64_t cycles)
+{
     uint64_t timer_cycles64 = timer0.prescaler_cycle + cycles;
     uint64_t timer_ticks = timer_cycles64 / timer0.divider;
     timer0.prescaler_cycle = (uint32_t)(timer_cycles64 % timer0.divider);
+
+    uint32_t old_tcnt = timer0.tcnt;
+    uint32_t compare_a_distance = ((uint32_t)data[0x47] - old_tcnt) & 0xffu;
+    uint32_t compare_b_distance = ((uint32_t)data[0x48] - old_tcnt) & 0xffu;
+    if(timer_ticks >= 256u || (compare_a_distance && compare_a_distance <= timer_ticks))
+        tifr0() |= 0x02u;
+    if(timer_ticks >= 256u || (compare_b_distance && compare_b_distance <= timer_ticks))
+        tifr0() |= 0x04u;
 
     uint64_t total_ticks = timer0.tcnt + timer_ticks;
     uint32_t overflows = (uint32_t)(total_ticks >> 8);
@@ -360,13 +385,22 @@ bool atmega32u4_t::embedded_advance_timer0_delay(uint64_t cycles)
     else
         next_cycles = 1;
     timer0.next_update_cycle = cycle_count + next_cycles;
-    peripheral_queue.schedule(timer0.next_update_cycle, PQ_TIMER0);
+    peripheral_queue.reschedule(timer0.next_update_cycle, PQ_TIMER0);
     embedded_timer0_fast_updates += 1;
     return true;
 }
 
 uint32_t atmega32u4_t::embedded_hle_call(uint16_t target, uint16_t ret_addr, uint32_t base_cycles)
 {
+    if(embedded_hle_sink)
+    {
+        uint32_t result = embedded_hle_sink(
+            embedded_hle_sink_context, *this, target, ret_addr, base_cycles);
+        if(result)
+        {
+            return result;
+        }
+    }
     if(embedded_delay_pc == EMBEDDED_HLE_NONE || target != embedded_delay_pc)
         return 0;
 
@@ -379,18 +413,19 @@ uint32_t atmega32u4_t::embedded_hle_call(uint16_t target, uint16_t ret_addr, uin
     if(ms > 60000u)
         return 0;
 
+    uint64_t delay_cycles = (uint64_t)ms * 16000u;
     update_all();
+    if(delay_cycles && !embedded_can_advance_timer0_delay(delay_cycles))
+        return 0;
+
     embedded_delay_hits += 1;
     embedded_delay_last_ms = ms;
     embedded_delay_ms_total += ms;
-
-    uint64_t delay_cycles = (uint64_t)ms * 16000u;
     if(delay_cycles)
     {
         cycle_count += delay_cycles;
         embedded_delay_cycles += delay_cycles;
-        if(!embedded_advance_timer0_delay(delay_cycles))
-            update_all();
+        (void)embedded_advance_timer0_delay(delay_cycles);
     }
 
     pc = ret_addr;
@@ -1617,6 +1652,98 @@ uint32_t instr_merged_delay(atmega32u4_t& cpu, avr_instr_t i)
 {
     cpu.pc += i.src;
     return i.word;
+}
+
+ARDENS_HOT uint32_t instr_merged_fill4_inc_brne(atmega32u4_t& cpu, avr_instr_t i)
+{
+#ifdef ARDENS_EMBEDDED
+    uint32_t loops = cpu.gpr(i.dst) ? 256u - cpu.gpr(i.dst) : 256u;
+    uint16_t ptr = cpu.z_word();
+    uint64_t next_cycle = cpu.peripheral_queue.next_cycle();
+    uint64_t safe_cycles = next_cycle > cpu.cycle_count ? next_cycle - cpu.cycle_count : 0;
+    uint32_t chunk = (uint32_t)std::min<uint64_t>(loops, safe_cycles / 11u);
+    uint32_t bytes = chunk * 4u;
+    bool finishing = chunk == loops;
+    uint32_t cycles = chunk * 11u - (finishing ? 1u : 0u);
+
+    if(chunk && ptr >= 0x100u &&
+        (uint32_t)ptr + bytes <= cpu.data.size())
+    {
+        memset(cpu.data.data() + ptr, cpu.gpr(i.src), bytes);
+        ptr = (uint16_t)(ptr + bytes);
+        cpu.gpr(30) = (uint8_t)ptr;
+        cpu.gpr(31) = (uint8_t)(ptr >> 8);
+        uint8_t result = (uint8_t)(cpu.gpr(i.dst) + chunk);
+        cpu.gpr(i.dst) = result;
+        uint8_t sreg = cpu.sreg() & ~(SREG_V | SREG_N | SREG_Z | SREG_S);
+        if(result == 0x80u) sreg |= SREG_V;
+        if(result == 0) sreg |= SREG_Z;
+        if(result & 0x80u) sreg |= SREG_N;
+        if(((sreg & SREG_N) != 0) != ((sreg & SREG_V) != 0)) sreg |= SREG_S;
+        cpu.sreg() = sreg;
+        if(finishing)
+            cpu.pc += 6;
+        return cycles;
+    }
+#endif
+    uint16_t fallback_ptr = cpu.z_word();
+    cpu.st<true>(fallback_ptr, cpu.gpr(i.src));
+    fallback_ptr += 1;
+    cpu.gpr(30) = (uint8_t)fallback_ptr;
+    cpu.gpr(31) = (uint8_t)(fallback_ptr >> 8);
+    cpu.pc += 1;
+    return 2;
+}
+
+ARDENS_HOT uint32_t instr_merged_arduboy_display(atmega32u4_t& cpu, avr_instr_t i)
+{
+#ifdef ARDENS_EMBEDDED
+    uint16_t counter = cpu.x_word();
+    uint16_t ptr = cpu.z_word();
+    uint32_t count = counter / 2u;
+    uint64_t next_cycle = cpu.peripheral_queue.next_cycle();
+    uint64_t safe_cycles = next_cycle > cpu.cycle_count ? next_cycle - cpu.cycle_count : 0;
+    uint32_t chunk = (uint32_t)std::min<uint64_t>(count, safe_cycles / 18u);
+    bool finishing = chunk == count;
+    uint32_t cycles = chunk ? chunk * 18u - (finishing ? 1u : 0u) : 0u;
+    uint8_t spcr = cpu.SPCR();
+
+    if(counter && !(counter & 1u) && chunk &&
+        ptr >= 0x100u && (uint32_t)ptr + chunk <= cpu.data.size() &&
+        (spcr & 0x70u) == 0x50u && cpu.embedded_spi_bulk_sink &&
+        cpu.embedded_spi_bulk_sink(cpu.embedded_spi_sink_context,
+            cpu.data.data() + ptr, chunk, cpu.data[0x2b]))
+    {
+        bool clear = cpu.gpr(i.src) != 0;
+        uint8_t last = cpu.data[ptr + chunk - 1u];
+        if(clear)
+            memset(cpu.data.data() + ptr, 0, chunk);
+        ptr = (uint16_t)(ptr + chunk);
+        cpu.gpr(30) = (uint8_t)ptr;
+        cpu.gpr(31) = (uint8_t)(ptr >> 8);
+        uint16_t result = (uint16_t)(counter - chunk * 2u);
+        cpu.gpr(26) = (uint8_t)result;
+        cpu.gpr(27) = (uint8_t)(result >> 8);
+        cpu.gpr(0) = clear ? 0 : last;
+        cpu.spi_data_byte = last;
+        cpu.spi_busy = false;
+        cpu.spsr_read_after_transmit = false;
+        cpu.spi_done_cycle = cpu.cycle_count;
+        cpu.spi_transmit_zero_cycle = UINT64_MAX;
+        cpu.SPSR() = (uint8_t)((cpu.SPSR() | 0x80u) & ~0x40u);
+        cpu.SPDR() = 0xffu;
+        cpu.embedded_spi_fast_writes += chunk;
+        uint8_t sreg = cpu.sreg() & ~(SREG_Z | SREG_V | SREG_C | SREG_N | SREG_S);
+        if(result == 0) sreg |= SREG_Z;
+        cpu.sreg() = sreg;
+        if(finishing)
+            cpu.pc += 9;
+        return cycles;
+    }
+#endif
+    cpu.gpr(0) = cpu.ld<true>(cpu.z_word());
+    cpu.pc += 1;
+    return 2;
 }
 
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 
 extern "C" {
+#include "memMap.h"
 #include "qspi.h"
 }
 
@@ -17,11 +18,16 @@ extern "C" {
 #define ARDUBOY_ZIP_GP_ENCRYPTED 0x0001u
 #define ARDUBOY_ZIP64_SENTINEL 0xffffffffu
 #define ARDUBOY_FLASH_WRITE_CHUNK QSPI_WRITE_GRANULARITY
+#define ARDUBOY_FX_CACHE_META_SIZE QSPI_WRITE_GRANULARITY
+#define ARDUBOY_FX_CACHE_REGION_SIZE (QSPI_ROM_SIZE_MAX / 2u)
+#define ARDUBOY_FX_CACHE_META_ADDR \
+	(QSPI_ROM_START + ARDUBOY_FX_CACHE_REGION_SIZE - ARDUBOY_FX_CACHE_META_SIZE)
 
 struct ArduboyZipMember {
 	uint32_t dataOffset;
 	uint32_t compressedSize;
 	uint32_t uncompressedSize;
+	uint32_t crc32;
 	uint16_t method;
 };
 
@@ -168,7 +174,8 @@ static bool arduboyPrvHexParse(const void *rom, uint32_t size, ArduboyHexDataF d
 	return flashUsed != 0;
 }
 
-static bool arduboyPrvFindZipHexMember(const void *packageData, uint32_t packageSize, ArduboyZipMember *memberP)
+static bool arduboyPrvFindZipMember(const void *packageData, uint32_t packageSize,
+	const char *suffix, ArduboyZipMember *memberP)
 {
 	const uint8_t *zip = (const uint8_t*)packageData;
 	uint32_t eocd = UINT32_MAX, entries, centralSize, centralOffset, p;
@@ -214,7 +221,7 @@ static bool arduboyPrvFindZipHexMember(const void *packageData, uint32_t package
 		if (!(flags & ARDUBOY_ZIP_GP_ENCRYPTED) &&
 				(method == ARDUBOY_ZIP_METHOD_STORED || method == ARDUBOY_ZIP_METHOD_DEFLATE) &&
 				compressedSize != ARDUBOY_ZIP64_SENTINEL && uncompressedSize != ARDUBOY_ZIP64_SENTINEL &&
-				arduboyPrvEndsWithNoCase(name, nameLen, ".hex")) {
+				arduboyPrvEndsWithNoCase(name, nameLen, suffix)) {
 			const uint8_t *local;
 			uint32_t dataOffset;
 
@@ -231,12 +238,27 @@ static bool arduboyPrvFindZipHexMember(const void *packageData, uint32_t package
 			memberP->dataOffset = dataOffset;
 			memberP->compressedSize = compressedSize;
 			memberP->uncompressedSize = uncompressedSize;
+			memberP->crc32 = arduboyPrvRd32(cent + 16);
 			memberP->method = method;
 			return true;
 		}
 		p += 46u + nameLen + extraLen + commentLen;
 	}
 	return false;
+}
+
+static bool arduboyPrvFindZipHexMember(const void *packageData, uint32_t packageSize,
+	ArduboyZipMember *memberP)
+{
+	return arduboyPrvFindZipMember(packageData, packageSize, ".hex", memberP);
+}
+
+static bool arduboyPrvFindZipFxMember(const void *packageData, uint32_t packageSize,
+	ArduboyZipMember *memberP)
+{
+	if (arduboyPrvFindZipMember(packageData, packageSize, "fxdata.bin", memberP))
+		return true;
+	return arduboyPrvFindZipMember(packageData, packageSize, "-data.bin", memberP);
 }
 
 static bool arduboyPrvLooksLikePackage(const void *rom, uint32_t size)
@@ -308,47 +330,107 @@ static bool arduboyPrvFlashWriterWrite(ArduboyFlashWriter *writer, const uint8_t
 	return true;
 }
 
+static bool arduboyPrvWriteZipMember(const uint8_t *packageBytes,
+	const ArduboyZipMember *member, ArduboyFlashWriter *writer,
+	void *inflateDict, uint32_t inflateDictSize)
+{
+	if (member->method == ARDUBOY_ZIP_METHOD_STORED)
+		return arduboyPrvFlashWriterWrite(writer, packageBytes + member->dataOffset,
+			member->uncompressedSize);
+	if (member->method != ARDUBOY_ZIP_METHOD_DEFLATE || !inflateDict || inflateDictSize < TINFL_LZ_DICT_SIZE)
+		return false;
+
+	tinfl_decompressor inflator;
+	uint32_t inputOffset = 0, outputSize = 0, dictOffset = 0;
+
+	tinfl_init(&inflator);
+	for (;;) {
+		size_t inputNow = member->compressedSize - inputOffset;
+		size_t outputNow = TINFL_LZ_DICT_SIZE - dictOffset;
+		tinfl_status status = tinfl_decompress(&inflator,
+			packageBytes + member->dataOffset + inputOffset, &inputNow,
+			(uint8_t*)inflateDict, (uint8_t*)inflateDict + dictOffset, &outputNow, 0);
+
+		inputOffset += (uint32_t)inputNow;
+		if (outputNow && !arduboyPrvFlashWriterWrite(writer,
+				(const uint8_t*)inflateDict + dictOffset, (uint32_t)outputNow))
+			return false;
+		outputSize += (uint32_t)outputNow;
+		dictOffset = (dictOffset + (uint32_t)outputNow) & (TINFL_LZ_DICT_SIZE - 1u);
+		if (status == TINFL_STATUS_DONE)
+			break;
+		if (status != TINFL_STATUS_HAS_MORE_OUTPUT || (!inputNow && !outputNow))
+			return false;
+	}
+	return inputOffset == member->compressedSize && outputSize == member->uncompressedSize;
+}
+
+extern "C" bool arduboyClearFxCache(void)
+{
+	uint32_t eraseAddr = ARDUBOY_FX_CACHE_META_ADDR & ~(QSPI_ERASE_GRANULARITY - 1u);
+
+	return flashWrite(eraseAddr, QSPI_ERASE_GRANULARITY, NULL, 0);
+}
+
 extern "C" bool arduboyExtractPackageToFlash(const void *packageData, uint32_t packageSize,
 	uint32_t flashAddr, uint32_t maxSize, void *inflateDict, uint32_t inflateDictSize,
-	void *writeBuf, uint32_t writeBufSize, uint32_t *hexSizeP)
+	void *writeBuf, uint32_t writeBufSize, uint32_t *hexSizeP, uint32_t *fxDataSizeP)
 {
-	ArduboyZipMember member;
+	ArduboyZipMember hexMember, fxMember;
 	const uint8_t *packageBytes = (const uint8_t*)packageData;
 	ArduboyFlashWriter writer;
+	ArduboyFxCacheHeader header;
+	uint32_t dataOffset, metaOffset;
+	bool haveFx;
 
 	if (!packageBytes || !writeBuf || writeBufSize < ARDUBOY_FLASH_WRITE_CHUNK)
 		return false;
-	if (!arduboyPrvFindZipHexMember(packageData, packageSize, &member))
+	if (!arduboyPrvFindZipHexMember(packageData, packageSize, &hexMember))
 		return false;
-	if (member.uncompressedSize > maxSize)
+	haveFx = arduboyPrvFindZipFxMember(packageData, packageSize, &fxMember);
+	metaOffset = maxSize - ARDUBOY_FX_CACHE_META_SIZE;
+	dataOffset = (hexMember.uncompressedSize + ARDUBOY_FLASH_WRITE_CHUNK - 1u) &
+		~(ARDUBOY_FLASH_WRITE_CHUNK - 1u);
+	if (maxSize < ARDUBOY_FX_CACHE_META_SIZE || flashAddr % QSPI_ERASE_GRANULARITY ||
+		maxSize % QSPI_ERASE_GRANULARITY || hexMember.uncompressedSize > metaOffset ||
+		(haveFx && (dataOffset > metaOffset || fxMember.uncompressedSize > metaOffset - dataOffset)))
+		return false;
+	if (!flashWrite(flashAddr, maxSize, NULL, 0))
 		return false;
 
 	memset(&writer, 0, sizeof(writer));
 	writer.addr = flashAddr;
-	writer.maxSize = maxSize;
+	writer.maxSize = metaOffset;
 	writer.buf = (uint8_t*)writeBuf;
-
-	if (member.method == ARDUBOY_ZIP_METHOD_STORED) {
-		if (!arduboyPrvFlashWriterWrite(&writer, packageBytes + member.dataOffset, member.uncompressedSize))
-			return false;
-	}
-	else {
-		size_t outSize;
-
-		if (!inflateDict || inflateDictSize < 32768u)
-			return false;
-		outSize = tinfl_decompress_mem_to_mem(inflateDict, inflateDictSize,
-			packageBytes + member.dataOffset, member.compressedSize,
-			TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
-		if (outSize == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED || outSize != member.uncompressedSize)
-			return false;
-		if (!arduboyPrvFlashWriterWrite(&writer, (const uint8_t*)inflateDict, (uint32_t)outSize))
-			return false;
-	}
-
+	if (!arduboyPrvWriteZipMember(packageBytes, &hexMember, &writer, inflateDict, inflateDictSize))
+		return false;
 	if (!arduboyPrvFlashWriterFlush(&writer, true))
 		return false;
+
+	if (haveFx) {
+		memset(&writer, 0, sizeof(writer));
+		writer.addr = flashAddr + dataOffset;
+		writer.maxSize = metaOffset - dataOffset;
+		writer.buf = (uint8_t*)writeBuf;
+		if (!arduboyPrvWriteZipMember(packageBytes, &fxMember, &writer, inflateDict, inflateDictSize) ||
+				!arduboyPrvFlashWriterFlush(&writer, true))
+			return false;
+
+		header = (ArduboyFxCacheHeader){
+			.magic = ARDUBOY_FX_CACHE_MAGIC,
+			.version = ARDUBOY_FX_CACHE_VERSION,
+			.dataOffset = dataOffset,
+			.dataSize = fxMember.uncompressedSize,
+			.dataCrc32 = fxMember.crc32,
+		};
+		memset(writeBuf, 0xff, ARDUBOY_FX_CACHE_META_SIZE);
+		memcpy(writeBuf, &header, sizeof(header));
+		if (!flashWrite(flashAddr + metaOffset, 0, writeBuf, ARDUBOY_FX_CACHE_META_SIZE))
+			return false;
+	}
 	if (hexSizeP)
-		*hexSizeP = member.uncompressedSize;
+		*hexSizeP = hexMember.uncompressedSize;
+	if (fxDataSizeP)
+		*fxDataSizeP = haveFx ? fxMember.uncompressedSize : 0;
 	return true;
 }

@@ -13,10 +13,10 @@ const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_he
 
 int dcAppEntry(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
 {
-	(void)host;
 	if (!args)
 		return -1;
-	nesRun(args->rom, args->romSize, args->saveRam, args->saveRamSize);
+	nesRun(args->rom, args->romSize, args->saveRam, args->saveRamSize,
+		host ? host->ledsTick : 0);
 	return 0;
 }
 

@@ -58,12 +58,16 @@ FLAPPY_REPO = "https://github.com/VadimBoev/FlappyBird"
 FLAPPY_COMMIT = "3b3060cdf6b38b819e5a649bc92d11776decd0b4"
 FLAPPY_TAG = "v1.9.2"
 FLAPPY_ARCHIVE_SHA256 = "e06e8553e747be5851edfe90486dda3afcb5b2a9ddac4827f4a7911a6fb39d51"
+YSOCCER_REPO = "https://sourceforge.net/p/ysoccer/code/"
+YSOCCER_COMMIT = "689d8b5cb162e5f270a4d6df44b5eeb82b6170d7"
 OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
 OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
 CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
 PIPEDREAMER_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "pipe-pipedreamer.pak"
 XSCORCH_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "scorch-xscorch.pak"
 XSOKOBAN_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "sokoban-xsokoban.pak"
+SOCCER_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "soccer-ysoccer.pak"
+SOCCER_LICENSE_SOURCE = REPO_ROOT / "third_party" / "ysoccer19" / "COPYING"
 
 ROM_DIRS = {
     "AB": "Arduboy",
@@ -97,6 +101,7 @@ APP_BINARIES = (
     "pipe.DC32",
     "sokoban.DC32",
     "openjazz.DC32",
+    "soccer.DC32",
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
@@ -108,6 +113,8 @@ APP_DATA_FILES = {
     "APPS/pipe-pipedreamer.pak": PIPEDREAMER_PACK_SOURCE,
     "APPS/scorch-xscorch.pak": XSCORCH_PACK_SOURCE,
     "APPS/sokoban-xsokoban.pak": XSOKOBAN_PACK_SOURCE,
+    "APPS/soccer-ysoccer.pak": SOCCER_PACK_SOURCE,
+    "APPS/LICENSES/ysoccer-COPYING.txt": SOCCER_LICENSE_SOURCE,
 }
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
@@ -217,6 +224,16 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "sd_path": "APPS/flappy.DC32",
                 "notes": "Native silent DC32 adaptation of the upstream C/OpenGL ES game flow using generated pre-scaled RGB332 sprites from the pinned PNG assets.",
             },
+            "soccer": {
+                "repository": YSOCCER_REPO,
+                "commit": YSOCCER_COMMIT,
+                "pack_schema": 5,
+                "bundled_teams": 24,
+                "license": "third_party/ysoccer19/COPYING",
+                "sd_path": "APPS/soccer.DC32",
+                "data_path": "APPS/soccer-ysoccer.pak",
+                "notes": "GPL-2.0 native C adaptation using pinned YSoccer 19 match sources and GPL sprites. The launch-time universal XIP cache ships 24 recognizable national teams; additional SWOS teams require user import.",
+            },
             "openjazz_shareware": {
                 "publisher": "Epic MegaGames",
                 "archive": "JAZZ.ZIP",
@@ -232,9 +249,10 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                     "pipe": 209,
                     "sokoban": 211,
                     "openjazz": 212,
+                    "soccer": 213,
                 },
                 "sd_path": "APPS/",
-                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Sokoban is an XSokoban-derived port, and Jazz Jackrabbit is an OpenJazz-derived port bundled with Epic MegaGames' unmodified shareware archive.",
+                "notes": "Chip's Challenge is a Tile World-derived port, Scorched Earth is an xscorch-derived port, Pipe Dream is a PipeDreamer-derived port, Sokoban is an XSokoban-derived port, Jazz Jackrabbit is an OpenJazz-derived port, and Sensible Soccer is a GPL-2.0 YSoccer 19-derived native adaptation.",
             },
         },
     }
@@ -591,6 +609,7 @@ def write_ports_readme(apps_dir: Path) -> None:
         "- 209 Pipe Dream: /APPS/pipe.DC32 plus /APPS/pipe-pipedreamer.pak\n"
         "- 211 Sokoban: /APPS/sokoban.DC32 plus /APPS/sokoban-xsokoban.pak\n"
         "- 212 Jazz Jackrabbit: /APPS/openjazz.DC32 plus the original Epic MegaGames /APPS/JAZZ.ZIP shareware archive; first launch creates /APPS/openjazz.pak and a validated XIP graphics cache\n"
+        "- 213 Sensible Soccer (YSoccer): /APPS/soccer.DC32 plus /APPS/soccer-ysoccer.pak; GPL-2.0 text is in /APPS/LICENSES/ysoccer-COPYING.txt; saves live below /SAVE/PORTS/SOCCER\n"
         "\n"
         "Required user data:\n"
         "- Chip's Challenge: /APPS/chips.pak\n"

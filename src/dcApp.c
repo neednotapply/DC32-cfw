@@ -58,6 +58,7 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdPipe, "Pipe Dream", "/APPS/pipe.DC32", true},
 	{DcAppIdSokoban, "Sokoban", "/APPS/sokoban.DC32", true},
 	{DcAppIdOpenJazz, "Jazz Jackrabbit", "/APPS/openjazz.DC32", true},
+	{DcAppIdSoccer, "Sensible Soccer (YSoccer)", "/APPS/soccer.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
 	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},

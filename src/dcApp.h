@@ -41,6 +41,7 @@ enum DcAppId {
 	DcAppIdPipe = 209,
 	DcAppIdSokoban = 211,
 	DcAppIdOpenJazz = 212,
+	DcAppIdSoccer = 213,
 	DcAppIdStarfield = 220,
 	DcAppIdSpiro = 221,
 	DcAppIdCube = 222,

@@ -6,7 +6,7 @@
 
 - SD file browser with app and media launchers
 - Game Boy, Game Boy Color, NES, and Arduboy emulation
-- Native ports: Pong, Tetris, Arkanoid, Flappy Bird, T-Rex Runner, DOOM, Chip's Challenge, Scorched Earth, Pipe Dream, Sokoban, and Jazz Jackrabbit
+- Native ports: Pong, Tetris, Arkanoid, Flappy Bird, T-Rex Runner, DOOM, Chip's Challenge, Scorched Earth, Pipe Dream, Sokoban, Jazz Jackrabbit, and Sensible Soccer (YSoccer)
 - USB Storage, BadUSB, Autoclicker, and USB Gamepad tools
 - Universal IR transmitter and Flipper-style `.ir` file support
 - RTTTL/WAV music and JPEG/BMP/DCI/DCA image viewing
@@ -46,6 +46,7 @@ Audio provides universal mute and volume. Screen provides rotation and brightnes
 | `/ROMS/NES` | NES ROMs |
 | `/SAVE/AB`, `/SAVE/GB`, `/SAVE/GBC`, `/SAVE/NES` | Emulator saves named from the ROM filename |
 | `/SAVE/PORTS` | Native-port saves |
+| `/SAVE/PORTS/SOCCER` | Sensible Soccer competitions, teams, tactics, replays, highlights, and import/export files |
 | `/IR` | Universal remote and Flipper-style IR files |
 | `/BADUSB` | `.txt` and `.badusb` scripts |
 | `/MUSIC` | `.rtttl`, RTTTL `.txt`, and PCM `.wav` files |

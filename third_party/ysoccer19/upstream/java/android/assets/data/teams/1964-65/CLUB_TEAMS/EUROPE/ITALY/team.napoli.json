@@ -1,0 +1,542 @@
+{
+"name": "NAPOLI",
+"type": "CLUB",
+"country": "ITA",
+"league": "SERIE B",
+"city": "NAPOLI",
+"stadium": "SAN PAOLO",
+"coach": {
+	"name": "BRUNO PESAOLA",
+	"nationality": "ARG"
+},
+"tactics": "SWEEP",
+"kits": [
+	{
+		"style": "PLAIN",
+		"shirt1": "#47bfeb",
+		"shirt2": "#dfe8eb",
+		"shorts": "#dfe8eb",
+		"socks": "#47bfeb"
+	},
+	{
+		"style": "DIAGONAL",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#47bfeb",
+		"shorts": "#dfe8eb",
+		"socks": "#dfe8eb"
+	},
+	{
+		"style": "PLAIN",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#47bfeb",
+		"shorts": "#47bfeb",
+		"socks": "#dfe8eb"
+	}
+],
+"players": [
+	{
+		"name": "CLAUDIO BANDONI",
+		"shirtName": "BANDONI",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 1,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"value": 24
+	},
+	{
+		"name": "MAURO GATTI",
+		"shirtName": "GATTI",
+		"nationality": "ITA",
+		"role": "LEFT_BACK",
+		"number": 4,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 3,
+			"heading": 3,
+			"tackling": 4,
+			"control": 3,
+			"speed": 6,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"SPEED",
+			"TACKLING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "DINO PANZANATO",
+		"shirtName": "PANZANATO",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 2,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 6,
+			"tackling": 6,
+			"control": 4,
+			"speed": 5,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "PIERLUIGI RONZON",
+		"shirtName": "RONZON",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 3,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 5,
+			"tackling": 5,
+			"control": 4,
+			"speed": 4,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "PIETRO ADORNI",
+		"shirtName": "ADORNI",
+		"nationality": "ITA",
+		"role": "RIGHT_BACK",
+		"number": 5,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 2,
+			"heading": 5,
+			"tackling": 5,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "VINCENZO MONTEFUSCO",
+		"shirtName": "MONTEFUSCO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 9,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 3,
+			"tackling": 4,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "ANTONIO JULIANO",
+		"shirtName": "JULIANO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 7,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 3,
+			"control": 4,
+			"speed": 4,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"CONTROL",
+			"HEADING"
+		]
+	},
+	{
+		"name": "FLAVIO EMOLI",
+		"shirtName": "EMOLI",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 8,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 3,
+			"control": 4,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"CONTROL",
+			"HEADING"
+		]
+	},
+	{
+		"name": "ANTONIO GIRARDO",
+		"shirtName": "GIRARDO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 6,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 4,
+			"control": 4,
+			"speed": 4,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "CANÉ",
+		"shirtName": "CANÉ",
+		"nationality": "BRA",
+		"role": "RIGHT_WINGER",
+		"number": 10,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 4,
+			"heading": 2,
+			"tackling": 2,
+			"control": 4,
+			"speed": 4,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"CONTROL",
+			"SPEED",
+			"PASSING"
+		]
+	},
+	{
+		"name": "GASTONE BEAN",
+		"shirtName": "BEAN",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 11,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 4,
+			"heading": 3,
+			"tackling": 3,
+			"control": 3,
+			"speed": 4,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"FINISHING",
+			"SPEED",
+			"SHOOTING"
+		]
+	},
+	{
+		"name": "PACIFICO CUMAN",
+		"shirtName": "CUMAN",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 12,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"value": 22
+	},
+	{
+		"name": "MARIO ZURLINI",
+		"shirtName": "ZURLINI",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 13,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 2,
+			"heading": 4,
+			"tackling": 4,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "ANGELO SPANIO",
+		"shirtName": "SPANIO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 14,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 3,
+			"tackling": 3,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "GIANNI CORELLI",
+		"shirtName": "CORELLI",
+		"nationality": "ITA",
+		"role": "RIGHT_WINGER",
+		"number": 15,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 3,
+			"heading": 3,
+			"tackling": 2,
+			"control": 3,
+			"speed": 4,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"SPEED",
+			"CONTROL",
+			"PASSING"
+		]
+	},
+	{
+		"name": "GIOVANNI FANELLO",
+		"shirtName": "FANELLO",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 16,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 4,
+			"heading": 3,
+			"tackling": 2,
+			"control": 2,
+			"speed": 4,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"FINISHING",
+			"SPEED",
+			"SHOOTING"
+		]
+	},
+	{
+		"name": "DOLO MISTONE",
+		"shirtName": "MISTONE",
+		"nationality": "ITA",
+		"role": "RIGHT_BACK",
+		"number": 17,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 2,
+			"heading": 4,
+			"tackling": 4,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "SALVATORE DI GAETANO",
+		"shirtName": "DI GAETANO",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 18,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 2,
+			"shooting": 1,
+			"heading": 3,
+			"tackling": 3,
+			"control": 2,
+			"speed": 2,
+			"finishing": 1
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "ACHILLE FRASCHINI",
+		"shirtName": "FRASCHINI",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 19,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 2,
+			"control": 3,
+			"speed": 3,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"PASSING",
+			"HEADING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "GIOVANNI BOLZONI",
+		"shirtName": "BOLZONI",
+		"nationality": "ITA",
+		"role": "RIGHT_WINGER",
+		"number": 20,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 2,
+			"shooting": 3,
+			"heading": 3,
+			"tackling": 1,
+			"control": 2,
+			"speed": 4,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"SPEED",
+			"HEADING",
+			"FINISHING"
+		]
+	},
+	{
+		"name": "JUAN CARLOS TACCHI",
+		"shirtName": "TACCHI",
+		"nationality": "ARG",
+		"role": "ATTACKER",
+		"number": 21,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 2,
+			"shooting": 3,
+			"heading": 2,
+			"tackling": 2,
+			"control": 3,
+			"speed": 2,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"SHOOTING",
+			"CONTROL",
+			"HEADING"
+		]
+	},
+	{
+		"name": "CORRADO CORRADI",
+		"shirtName": "CORRADI",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 22,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 1,
+			"shooting": 3,
+			"heading": 2,
+			"tackling": 1,
+			"control": 2,
+			"speed": 2,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"SHOOTING",
+			"HEADING",
+			"FINISHING"
+		]
+	}
+]
+}

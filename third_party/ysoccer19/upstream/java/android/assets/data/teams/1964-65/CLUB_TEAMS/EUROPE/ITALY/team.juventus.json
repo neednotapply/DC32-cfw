@@ -1,0 +1,471 @@
+{
+"name": "JUVENTUS",
+"type": "CLUB",
+"country": "ITA",
+"league": "SERIE A",
+"city": "TORINO",
+"stadium": "COMUNALE",
+"coach": {
+	"name": "HERIBERTO HERRERA",
+	"nationality": "PAR"
+},
+"tactics": "4-4-2",
+"kits": [
+	{
+		"style": "VERTICAL",
+		"shirt1": "#1e1e1e",
+		"shirt2": "#dfe8eb",
+		"shirt3": "#000000",
+		"shorts": "#dfe8eb",
+		"socks": "#dfe8eb"
+	},
+	{
+		"style": "PLAIN",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#1e1e1e",
+		"shirt3": "#000000",
+		"shorts": "#1e1e1e",
+		"socks": "#dfe8eb"
+	},
+	{
+		"style": "PLAIN",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#1e1e1e",
+		"shirt3": "#000000",
+		"shorts": "#dfe8eb",
+		"socks": "#dfe8eb"
+	}
+],
+"players": [
+	{
+		"name": "ROBERTO ANZOLIN",
+		"shirtName": "ANZOLIN",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 1,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"value": 40
+	},
+	{
+		"name": "ADOLFO GORI",
+		"shirtName": "GORI",
+		"nationality": "ITA",
+		"role": "RIGHT_BACK",
+		"number": 2,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 5,
+			"heading": 6,
+			"tackling": 7,
+			"control": 5,
+			"speed": 5,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "ERNESTO CÀSTANO",
+		"shirtName": "CÀSTANO",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 3,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 4,
+			"heading": 6,
+			"tackling": 6,
+			"control": 7,
+			"speed": 6,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"CONTROL",
+			"TACKLING",
+			"HEADING"
+		]
+	},
+	{
+		"name": "GIANCARLO BERCELLINO I",
+		"shirtName": "BERCELLINO",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 5,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 6,
+			"heading": 7,
+			"tackling": 6,
+			"control": 6,
+			"speed": 6,
+			"finishing": 5
+		},
+		"bestSkills": [
+			"HEADING",
+			"TACKLING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "GIANFRANCO LEONCINI",
+		"shirtName": "LEONCINI",
+		"nationality": "ITA",
+		"role": "LEFT_BACK",
+		"number": 7,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 4,
+			"heading": 6,
+			"tackling": 5,
+			"control": 6,
+			"speed": 6,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"SPEED",
+			"PASSING",
+			"HEADING"
+		]
+	},
+	{
+		"name": "GINO STACCHINI",
+		"shirtName": "STACCHINI",
+		"nationality": "ITA",
+		"role": "RIGHT_WINGER",
+		"number": 8,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 5,
+			"heading": 5,
+			"tackling": 4,
+			"control": 6,
+			"speed": 7,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"SPEED",
+			"CONTROL",
+			"PASSING"
+		]
+	},
+	{
+		"name": "SANDRO SALVADORE",
+		"shirtName": "SALVADORE",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 4,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 7,
+			"shooting": 5,
+			"heading": 7,
+			"tackling": 7,
+			"control": 7,
+			"speed": 6,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "LUIS DEL SOL",
+		"shirtName": "DEL SOL",
+		"nationality": "ESP",
+		"role": "MIDFIELDER",
+		"number": 6,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 7,
+			"shooting": 6,
+			"heading": 6,
+			"tackling": 7,
+			"control": 7,
+			"speed": 7,
+			"finishing": 6
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "GIAMPAOLO MENICHELLI",
+		"shirtName": "MENICHELLI",
+		"nationality": "ITA",
+		"role": "LEFT_WINGER",
+		"number": 9,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 6,
+			"heading": 5,
+			"tackling": 4,
+			"control": 6,
+			"speed": 7,
+			"finishing": 6
+		},
+		"bestSkills": [
+			"SPEED",
+			"CONTROL",
+			"PASSING"
+		]
+	},
+	{
+		"name": "DINO DA COSTA",
+		"shirtName": "DA COSTA",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 10,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 7,
+			"heading": 6,
+			"tackling": 4,
+			"control": 6,
+			"speed": 6,
+			"finishing": 7
+		},
+		"bestSkills": [
+			"FINISHING",
+			"SHOOTING",
+			"HEADING"
+		]
+	},
+	{
+		"name": "OMAR SIVORI",
+		"shirtName": "SIVORI",
+		"nationality": "ARG",
+		"role": "ATTACKER",
+		"number": 11,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 7,
+			"shooting": 7,
+			"heading": 5,
+			"tackling": 6,
+			"control": 7,
+			"speed": 7,
+			"finishing": 7
+		},
+		"bestSkills": [
+			"FINISHING",
+			"SPEED",
+			"SHOOTING"
+		]
+	},
+	{
+		"name": "CARLO MATTREL",
+		"shirtName": "MATTREL",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 12,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"value": 33
+	},
+	{
+		"name": "BENITO SARTI",
+		"shirtName": "SARTI",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 13,
+		"skinColor": "PINK",
+		"hairColor": "BROWN",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 5,
+			"heading": 7,
+			"tackling": 7,
+			"control": 6,
+			"speed": 6,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "CARLO DELL'OMODARME",
+		"shirtName": "DELL'OMODARME",
+		"nationality": "ITA",
+		"role": "RIGHT_WINGER",
+		"number": 14,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 4,
+			"heading": 5,
+			"tackling": 5,
+			"control": 6,
+			"speed": 7,
+			"finishing": 5
+		},
+		"bestSkills": [
+			"SPEED",
+			"CONTROL",
+			"PASSING"
+		]
+	},
+	{
+		"name": "NESTOR COMBIN",
+		"shirtName": "COMBIN",
+		"nationality": "FRA",
+		"role": "ATTACKER",
+		"number": 15,
+		"skinColor": "MULATTO",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 6,
+			"heading": 5,
+			"tackling": 4,
+			"control": 4,
+			"speed": 5,
+			"finishing": 6
+		},
+		"bestSkills": [
+			"FINISHING",
+			"SHOOTING",
+			"HEADING"
+		]
+	},
+	{
+		"name": "VINCENZO TRASPEDINI",
+		"shirtName": "TRASPEDINI",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 16,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 5,
+			"heading": 6,
+			"tackling": 4,
+			"control": 5,
+			"speed": 5,
+			"finishing": 5
+		},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "ALBERTO CORAMINI",
+		"shirtName": "CORAMINI",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 17,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 4,
+			"heading": 6,
+			"tackling": 6,
+			"control": 4,
+			"speed": 5,
+			"finishing": 2
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "GIOVANNI SACCO",
+		"shirtName": "SACCO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 18,
+		"skinColor": "PINK",
+		"hairColor": "BROWN",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 5,
+			"shooting": 4,
+			"heading": 6,
+			"tackling": 5,
+			"control": 6,
+			"speed": 5,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"CONTROL",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "BRUNO MAZZIA",
+		"shirtName": "MAZZIA",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 19,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 6,
+			"shooting": 4,
+			"heading": 5,
+			"tackling": 5,
+			"control": 6,
+			"speed": 5,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"PASSING",
+			"CONTROL",
+			"TACKLING"
+		]
+	}
+]
+}

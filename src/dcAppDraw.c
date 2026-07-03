@@ -4,6 +4,9 @@
 #include "dispDefcon.h"
 #include "ui.h"
 
+static uint16_t mDcAppDrawRgb332To565[256];
+static bool mDcAppDrawPaletteReady;
+
 static int32_t dcAppDrawPrvAbsI32(int32_t v)
 {
 	return v < 0 ? -v : v;
@@ -26,6 +29,15 @@ static uint16_t dcAppDrawPrvRgb332ToRgb565(uint8_t color)
 	g = (g << 3) | g;
 	b = (b << 3) | (b << 1) | (b >> 1);
 	return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+static void dcAppDrawPrvInitPalette(void)
+{
+	if (mDcAppDrawPaletteReady)
+		return;
+	for (uint32_t i = 0; i < 256u; i++)
+		mDcAppDrawRgb332To565[i] = dcAppDrawPrvRgb332ToRgb565((uint8_t)i);
+	mDcAppDrawPaletteReady = true;
 }
 
 static uint32_t dcAppDrawPrvDisplayIndex(const struct Canvas *cnv, uint32_t x, uint32_t y)
@@ -52,6 +64,7 @@ bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, co
 		return false;
 
 	memset(ctx, 0, sizeof(*ctx));
+	dcAppDrawPrvInitPalette();
 	ctx->host = host;
 	ctx->fb = (uint8_t*)backbuffer;
 	ctx->w = w;
@@ -152,7 +165,7 @@ void dcAppDrawPresent(struct DcAppDrawCtx *ctx)
 			uint16_t *out = dst + x * ctx->h;
 
 			for (int32_t y = (int32_t)ctx->h - 1; y >= 0; y--)
-				*out++ = dcAppDrawPrvRgb332ToRgb565(ctx->fb[(uint32_t)y * ctx->w + x]);
+				*out++ = mDcAppDrawRgb332To565[ctx->fb[(uint32_t)y * ctx->w + x]];
 		}
 		return;
 	}
@@ -160,12 +173,13 @@ void dcAppDrawPresent(struct DcAppDrawCtx *ctx)
 		uint32_t count = ctx->w * ctx->h;
 
 		for (uint32_t i = 0; i < count; i++)
-			dst[i] = dcAppDrawPrvRgb332ToRgb565(ctx->fb[i]);
+			dst[i] = mDcAppDrawRgb332To565[ctx->fb[i]];
 		return;
 	}
 	for (uint32_t y = 0; y < ctx->h; y++)
 		for (uint32_t x = 0; x < ctx->w; x++)
-			dst[dcAppDrawPrvDisplayIndex(cnv, x, y)] = dcAppDrawPrvRgb332ToRgb565(ctx->fb[y * ctx->w + x]);
+			dst[dcAppDrawPrvDisplayIndex(cnv, x, y)] =
+				mDcAppDrawRgb332To565[ctx->fb[y * ctx->w + x]];
 }
 
 bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)

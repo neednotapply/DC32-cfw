@@ -1,0 +1,284 @@
+{
+"name": "PISA",
+"type": "CLUB",
+"country": "ITA",
+"league": "SERIE C GIRONE B",
+"city": "PISA",
+"stadium": "",
+"coach": {
+	"name": "UMBERTO PINARDI",
+	"nationality": "ITA"
+},
+"tactics": "4-4-2",
+"kits": [
+	{
+		"style": "VERTICAL",
+		"shirt1": "#1e1e1e",
+		"shirt2": "#0b7dd5",
+		"shorts": "#1e1e1e",
+		"socks": "#1e1e1e"
+	},
+	{
+		"style": "DOUBLE_STRIPE",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#0b7dd5",
+		"shorts": "#dfe8eb",
+		"socks": "#1e1e1e"
+	},
+	{
+		"style": "STRIP",
+		"shirt1": "#f61c1c",
+		"shirt2": "#dfe8eb",
+		"shorts": "#f61c1c",
+		"socks": "#f61c1c"
+	}
+],
+"players": [
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 1,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {}
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 2,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 3,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 4,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 5,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 6,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 7,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 8,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 9,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 10,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 11,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 12,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {}
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 13,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 14,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 15,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 16,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	}
+]
+}

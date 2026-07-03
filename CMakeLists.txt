@@ -846,6 +846,35 @@ set(OPENJAZZ_APP_SOURCES
     ${OPENJAZZ_SOURCE_DIR}/ext/stb/stb_rect_pack.c
 )
 
+set(SOCCER_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/soccer")
+set(SOCCER_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/soccer-ysoccer.pak")
+set(SOCCER_UPSTREAM_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ysoccer19/upstream/java/android/assets")
+file(GLOB_RECURSE SOCCER_UPSTREAM_ASSET_FILES CONFIGURE_DEPENDS
+    "${SOCCER_UPSTREAM_ASSETS}/*"
+)
+add_custom_command(
+    OUTPUT ${SOCCER_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_soccer_assets.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ysoccer19/DC32-README.md
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ysoccer19/COPYING
+        ${SOCCER_UPSTREAM_ASSET_FILES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SOCCER_ASSET_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_soccer_assets.py
+        --source ${SOCCER_UPSTREAM_ASSETS}
+        --output ${SOCCER_PAK}
+    VERBATIM
+)
+add_custom_target(dcapp_soccer_assets ALL DEPENDS ${SOCCER_PAK})
+
+set(SOCCER_APP_SOURCES
+    ${SRC_DIR}/apps/soccer/soccer_app.c
+    ${SRC_DIR}/apps/soccer/soccer_core.c
+    ${SRC_DIR}/apps/soccer/soccer_port.c
+    ${SRC_DIR}/apps/port/port_runtime.c
+)
+
 set_source_files_properties(
     ${OPENJAZZ_SOURCE_DIR}/src/main.cpp
     PROPERTIES COMPILE_DEFINITIONS "main=openjazz_main"
@@ -1458,6 +1487,21 @@ target_compile_options(dcapp_openjazz PRIVATE
     -Wno-unused-function
     -Wno-sign-compare
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
+)
+
+add_dcapp(dcapp_soccer soccer 213 LARGE_XIP
+    ${SOCCER_APP_SOURCES}
+)
+
+add_dependencies(dcapp_soccer_dcapp dcapp_soccer_assets)
+
+target_include_directories(dcapp_soccer BEFORE PRIVATE
+    ${SRC_DIR}/apps/soccer
+    ${SRC_DIR}/apps/port
+)
+
+target_compile_options(dcapp_soccer PRIVATE
+    -Wno-error
 )
 
 add_dcapp(dcapp_starfield starfield 220

@@ -9712,6 +9712,7 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	case DcAppIdPipe:
 	case DcAppIdSokoban:
 	case DcAppIdOpenJazz:
+	case DcAppIdSoccer:
 		return UiToolPorts;
 	default:
 		return entry->launcherVisible ? UiToolGames : UiToolBrowser;
@@ -9733,7 +9734,7 @@ static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppTool
 	enum DcAppResult result;
 
 	settingsGet(&settings);
-	if (appId >= DcAppIdPong && appId <= DcAppIdOpenJazz)
+	if (appId >= DcAppIdPong && appId <= DcAppIdSoccer)
 		args.rotate = settings.rotation;
 	result = dcAppRunTool(appId, &args);
 
@@ -10716,6 +10717,7 @@ static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Pipe Dream", UiCategoryEntrySdApp, UiToolPorts, DcAppIdPipe},
 		{"Sokoban", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSokoban},
 		{"Jazz Jackrabbit", UiCategoryEntrySdApp, UiToolPorts, DcAppIdOpenJazz},
+		{"Sensible Soccer (YSoccer)", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSoccer},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

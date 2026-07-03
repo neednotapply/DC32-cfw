@@ -1,0 +1,394 @@
+{
+"name": "POTENZA",
+"type": "CLUB",
+"country": "ITA",
+"league": "SERIE B",
+"city": "POTENZA",
+"stadium": "ALFREDO VIVIANI",
+"coach": {
+	"name": "EGIZIO RUBINO",
+	"nationality": "ITA"
+},
+"tactics": "4-4-2",
+"kits": [
+	{
+		"style": "VERTICAL",
+		"shirt1": "#be1319",
+		"shirt2": "#241b5c",
+		"shorts": "#241b5c",
+		"socks": "#241b5c"
+	},
+	{
+		"style": "PLAIN",
+		"shirt1": "#dfe8eb",
+		"shirt2": "#1e1e1e",
+		"shorts": "#dfe8eb",
+		"socks": "#dfe8eb"
+	},
+	{
+		"style": "PLAIN",
+		"shirt1": "#afb2b9",
+		"shirt2": "#993333",
+		"shorts": "#afb2b9",
+		"socks": "#afb2b9"
+	}
+],
+"players": [
+	{
+		"name": "BRUNO DUCATI",
+		"shirtName": "DUCATI",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 1,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"value": 21
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 2,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "PAOLO VAINI",
+		"shirtName": "VAINI",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 3,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 4,
+			"control": 2,
+			"speed": 3,
+			"finishing": 1
+		},
+		"bestSkills": [
+			"HEADING",
+			"TACKLING"
+		]
+	},
+	{
+		"name": "SILVANO MERKUZA",
+		"shirtName": "MERKUZA",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 6,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 4,
+			"control": 3,
+			"speed": 3,
+			"finishing": 1
+		},
+		"bestSkills": [
+			"PASSING",
+			"HEADING",
+			"TACKLING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 4,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 5,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "DOMENICO CASATI",
+		"shirtName": "CASATI",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 7,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 2,
+			"heading": 3,
+			"tackling": 4,
+			"control": 3,
+			"speed": 3,
+			"finishing": 1
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING"
+		]
+	},
+	{
+		"name": "VINCENZO ROSITO",
+		"shirtName": "ROSITO",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 9,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 4,
+			"heading": 3,
+			"tackling": 2,
+			"control": 4,
+			"speed": 4,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"SHOOTING",
+			"CONTROL",
+			"SPEED"
+		]
+	},
+	{
+		"name": "PILADE CANUTI",
+		"shirtName": "CANUTI",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 8,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 4,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 3,
+			"control": 3,
+			"speed": 4,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"PASSING",
+			"HEADING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "SILVINO BERCELLINO",
+		"shirtName": "BERCELLINO II",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 10,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 3,
+			"heading": 4,
+			"tackling": 2,
+			"control": 4,
+			"speed": 3,
+			"finishing": 4
+		},
+		"bestSkills": [
+			"FINISHING",
+			"CONTROL",
+			"HEADING"
+		]
+	},
+	{
+		"name": "ROBERTO BONINSEGNA",
+		"shirtName": "BONINSEGNA",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 11,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 3,
+			"shooting": 4,
+			"heading": 5,
+			"tackling": 2,
+			"control": 3,
+			"speed": 4,
+			"finishing": 3
+		},
+		"bestSkills": [
+			"HEADING",
+			"SPEED",
+			"SHOOTING"
+		]
+	},
+	{
+		"name": "LUCIANO MASIERO",
+		"shirtName": "MASIERO",
+		"nationality": "ITA",
+		"role": "GOALKEEPER",
+		"number": 12,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"value": 18
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "DEFENDER",
+		"number": 13,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"TACKLING",
+			"HEADING",
+			"PASSING"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "MIDFIELDER",
+		"number": 14,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"PASSING",
+			"TACKLING",
+			"CONTROL"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 15,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	},
+	{
+		"name": "",
+		"shirtName": "",
+		"nationality": "ITA",
+		"role": "ATTACKER",
+		"number": 16,
+		"skinColor": "PINK",
+		"hairColor": "BLACK",
+		"hairStyle": "SMOOTH_A",
+		"skills": {
+			"passing": 0,
+			"shooting": 0,
+			"heading": 0,
+			"tackling": 0,
+			"control": 0,
+			"speed": 0,
+			"finishing": 0
+		},
+		"bestSkills": [
+			"HEADING",
+			"FINISHING",
+			"SPEED"
+		]
+	}
+]
+}

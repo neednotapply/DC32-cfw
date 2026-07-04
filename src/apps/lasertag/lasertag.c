@@ -447,6 +447,7 @@ static uint32_t ltReadSyncUrlPrefix(struct LtApp *app)
 	struct FatfsFil *file;
 	char *prefix = (char *)mLtQrTemp;
 	uint32_t got = 0;
+	bool isHttps, isHttp;
 
 	if (!app->args || !app->args->vol)
 		return 0;
@@ -460,7 +461,9 @@ static uint32_t ltReadSyncUrlPrefix(struct LtApp *app)
 		prefix[got - 1u] == ' ' || prefix[got - 1u] == '\t'))
 		got--;
 	prefix[got] = 0;
-	if (strncmp(prefix, "https://", 8) && strncmp(prefix, "http://", 7))
+	isHttps = got >= 8u && !memcmp(prefix, "https://", 8);
+	isHttp = got >= 7u && !memcmp(prefix, "http://", 7);
+	if (!isHttps && !isHttp)
 		return 0;
 	return got;
 }

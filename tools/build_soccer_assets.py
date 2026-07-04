@@ -66,7 +66,7 @@ PINNED_ASSET_SHA256 = {
     "images/stadium/generic_00.png": "4ff9203bf8034a0107f82e991117712e04bfb434a551421276764dc21fb1dbc8",
     "sounds/kick.ogg": "9962149e7bf7754509c5d87c1202dc61d1e4f02f37ba02f3f96626be06d246bb",
     "data/teams/1964-65/CLUB_TEAMS/EUROPE/ITALY/team.ac_milan.json":
-        "9db1c106a43470b6a546a13148bd5fd7e0bf16057b8cb74c94c7e2c7ec488bd9",
+        "8b5e1bfd0f9c1866de0d53996c5f83d1b7d4d5b1760065748dd3083f6e1feeb1",
 }
 
 ROLE_COLORS = {
@@ -116,12 +116,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def pinned_asset_digest(path: Path) -> str:
+    data = path.read_bytes()
+    if path.suffix.casefold() == ".json":
+        data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
 def validate_source(source: Path) -> None:
     for relative, expected in PINNED_ASSET_SHA256.items():
         path = source / relative
         if not path.exists():
             raise ValueError(f"missing pinned YSoccer asset: {relative}")
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = pinned_asset_digest(path)
         if digest != expected:
             raise ValueError(f"pinned YSoccer asset changed: {relative} ({digest})")
 

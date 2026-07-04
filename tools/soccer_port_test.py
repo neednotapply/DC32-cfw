@@ -47,6 +47,28 @@ def load_builder():
     return module
 
 
+def check_pinned_asset_line_endings() -> None:
+    builder = load_builder()
+    source = ROOT / "third_party" / "ysoccer19" / "upstream" / "java" / "android" / "assets"
+    json_relative = Path(
+        "data/teams/1964-65/CLUB_TEAMS/EUROPE/ITALY/team.ac_milan.json")
+    with tempfile.TemporaryDirectory() as temp:
+        test_source = Path(temp)
+        for relative in builder.PINNED_ASSET_SHA256:
+            relative_path = Path(relative)
+            target = test_source / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = (source / relative_path).read_bytes()
+            if relative_path == json_relative:
+                data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            target.write_bytes(data)
+
+        builder.validate_source(test_source)
+        json_path = test_source / json_relative
+        json_path.write_bytes(json_path.read_bytes().replace(b"\n", b"\r\n"))
+        builder.validate_source(test_source)
+
+
 def check_pack() -> None:
     builder = load_builder()
     source = ROOT / "third_party" / "ysoccer19" / "upstream" / "java" / "android" / "assets"
@@ -463,6 +485,7 @@ def check_budgets() -> None:
 
 
 def main() -> int:
+    check_pinned_asset_line_endings()
     check_pack()
     check_wiring()
     check_game_contracts()

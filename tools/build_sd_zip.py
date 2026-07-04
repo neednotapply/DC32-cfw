@@ -60,6 +60,12 @@ FLAPPY_TAG = "v1.9.2"
 FLAPPY_ARCHIVE_SHA256 = "e06e8553e747be5851edfe90486dda3afcb5b2a9ddac4827f4a7911a6fb39d51"
 YSOCCER_REPO = "https://sourceforge.net/p/ysoccer/code/"
 YSOCCER_COMMIT = "689d8b5cb162e5f270a4d6df44b5eeb82b6170d7"
+OPENLASIR_REPO = "https://github.com/danielweidman/OpenLASIR.git"
+OPENLASIR_COMMIT = "414504887e761fe0f3e1d3251567f0c29cdcec13"
+OPENLASIR_LICENSE = REPO_ROOT / "third_party" / "openlasir" / "LICENSE"
+QRCODEGEN_REPO = "https://github.com/nayuki/QR-Code-generator.git"
+QRCODEGEN_COMMIT = "2c9044de6b049ca25cb3cd1649ed7e27aa055138"
+QRCODEGEN_LICENSE = REPO_ROOT / "third_party" / "qrcodegen" / "LICENSE"
 OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
 OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
 CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
@@ -90,6 +96,7 @@ APP_BINARIES = (
     "badusb.DC32",
     "autoclicker.DC32",
     "gamepad.DC32",
+    "lasertag.DC32",
     "pong.DC32",
     "tetris.DC32",
     "arkanoid.DC32",
@@ -115,6 +122,8 @@ APP_DATA_FILES = {
     "APPS/sokoban-xsokoban.pak": XSOKOBAN_PACK_SOURCE,
     "APPS/soccer-ysoccer.pak": SOCCER_PACK_SOURCE,
     "APPS/LICENSES/ysoccer-COPYING.txt": SOCCER_LICENSE_SOURCE,
+    "APPS/LICENSES/openlasir-LICENSE.txt": OPENLASIR_LICENSE,
+    "APPS/LICENSES/qrcodegen-LICENSE.txt": QRCODEGEN_LICENSE,
 }
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
@@ -233,6 +242,18 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "sd_path": "APPS/soccer.DC32",
                 "data_path": "APPS/soccer-ysoccer.pak",
                 "notes": "GPL-2.0 native C adaptation using pinned YSoccer 19 match sources and GPL sprites. The launch-time universal XIP cache ships 24 recognizable national teams; additional SWOS teams require user import.",
+            },
+            "lasertag": {
+                "repository": OPENLASIR_REPO,
+                "commit": OPENLASIR_COMMIT,
+                "licenses": [
+                    "third_party/openlasir/LICENSE",
+                    "third_party/qrcodegen/LICENSE",
+                ],
+                "qr_repository": QRCODEGEN_REPO,
+                "qr_commit": QRCODEGEN_COMMIT,
+                "sd_path": "APPS/lasertag.DC32",
+                "notes": "OpenLASIR mode-0 laser tag with DC32-native transmit/receive, persistent statistics, and a versioned unsigned QR/file sync export.",
             },
             "openjazz_shareware": {
                 "publisher": "Epic MegaGames",
@@ -708,7 +729,9 @@ contains generated pre-scaled RGB332 copies of that source's visible PNG sprites
 Scorched Earth, Pipe Dream, Sokoban, and Jazz Jackrabbit are included as
 source-derived/data-compatible ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
-shareware data only.
+shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
+{OPENLASIR_COMMIT} and uses Project Nayuki QR Code generator commit
+{QRCODEGEN_COMMIT}.
 
 ## APPS
 
@@ -740,6 +763,16 @@ shareware data only.
 - Archive SHA-256: {FLAPPY_ARCHIVE_SHA256}
 - SD path: APPS/flappy.DC32
 - Notes: The Android Native Activity, OpenGL ES, OpenSLES, APK build scripts, and MP3 playback are not included. The badge app ports the source game states, physics, scoring, result panel, and visible PNG sprites into a silent native DC32 app.
+
+## Laser Tag
+
+- Repository: {OPENLASIR_REPO}
+- Commit: {OPENLASIR_COMMIT}
+- License: MIT (`APPS/LICENSES/openlasir-LICENSE.txt`)
+- QR generator: {QRCODEGEN_REPO} commit {QRCODEGEN_COMMIT}
+- QR license: MIT (`APPS/LICENSES/qrcodegen-LICENSE.txt`)
+- SD path: APPS/lasertag.DC32
+- Notes: Implements bidirectional OpenLASIR mode-0 play with DC32-native PIO receive capture, manual-fire rate limits, hit lockout, hardware-bound locked identity, persistent statistics, and a versioned unsigned QR/file sync export. The export is not Dani's private leaderboard submission format.
 
 ## Tetris
 

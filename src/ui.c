@@ -9205,6 +9205,7 @@ static void uiPrvDrawGameAction(struct Canvas *cnv, uint32_t row, const char *ti
 
 enum UiToolId {
 	UiToolBrowser,
+	UiToolInfrared,
 	UiToolIr,
 	UiToolUsbStorage,
 	UiToolBadUsb,
@@ -9228,6 +9229,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 {
 	switch (tool) {
 		case UiToolBrowser: return "File Browser";
+		case UiToolInfrared: return "Infrared";
 		case UiToolIr: return "Universal IR";
 		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
@@ -9258,6 +9260,7 @@ static enum BootGuardMode uiPrvBootGuardModeForTool(enum UiToolId tool)
 		case UiToolRunGame:
 			return BootGuardModeGame;
 
+		case UiToolInfrared:
 		case UiToolIr:
 			return BootGuardModeIr;
 
@@ -9561,6 +9564,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 {
 	static const char *names[UiToolNum] = {
 		[UiToolBrowser] = "File Browser",
+		[UiToolInfrared] = "Infrared",
 		[UiToolIr] = "Universal IR",
 		[UiToolUsbStorage] = "USB Storage",
 		[UiToolBadUsb] = "BadUSB",
@@ -9579,7 +9583,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 	};
 	static const enum UiToolId toolOrder[] = {
 		UiToolBrowser,
-		UiToolIr,
+		UiToolInfrared,
 		UiToolUsb,
 		UiToolMedia,
 		UiToolGames,
@@ -9592,6 +9596,8 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 
 	mToolExitEnabled = false;
 	uiPrvClearToolExit();
+	if (curTool == UiToolIr)
+		curTool = UiToolInfrared;
 
 	uiPrvSetHeaderTitle("Main Menu");
 	uiPrvReset(cnv, false);
@@ -9687,6 +9693,8 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	switch (entry->appId) {
 	case DcAppIdToolIr:
 		return UiToolIr;
+	case DcAppIdToolLaserTag:
+		return UiToolInfrared;
 	case DcAppIdToolImage:
 		return UiToolImage;
 	case DcAppIdToolMusic:
@@ -10548,6 +10556,16 @@ static void uiPrvRunCategoryToolEntry(struct Canvas *cnv, enum UiToolId tool, Ui
 	uiPrvSetHeaderTitle(uiPrvToolHeaderTitle(tool));
 
 	switch (tool) {
+		case UiToolIr:
+		#ifndef NO_SD_CARD
+			uiPrvEnterTool(tool);
+			(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionMain, NULL, NULL, NULL, NULL);
+			uiPrvExitTool(tool);
+		#else
+			uiAlert(cnv, "Universal IR requires SD card support", DialogTypeOk);
+		#endif
+			break;
+
 		case UiToolUsbStorage:
 		#ifndef NO_SD_CARD
 			uiPrvEnterTool(tool);
@@ -10690,6 +10708,17 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
 }
 
+static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry entries[] = {
+		{"Universal IR", UiCategoryEntryTool, UiToolIr, 0},
+		{"Laser Tag", UiCategoryEntrySdApp, UiToolInfrared, DcAppIdToolLaserTag},
+	};
+
+	return uiPrvCategoryTool(cnv, UiToolInfrared, "Infrared", entries,
+		sizeof(entries) / sizeof(*entries), runGameF, userData);
+}
+
 static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
 {
 	static const struct UiCategoryEntry entries[] = {
@@ -10773,6 +10802,10 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 				(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionMain, NULL, NULL, NULL, NULL);
 				uiPrvExitTool(activeTool);
 			#endif
+				break;
+
+			case UiToolInfrared:
+				activeTool = uiPrvInfraredCategoryTool(cnv, runGameF, userData);
 				break;
 
 			case UiToolUsbStorage:

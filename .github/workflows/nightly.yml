@@ -2,8 +2,7 @@ name: Nightly Release
 
 on:
   schedule:
-    # Midnight Pacific is 07:00 UTC during daylight saving time and 08:00 UTC otherwise.
-    - cron: "15 7 * * *"
+    # 00:15 Pacific Standard Time / 01:15 Pacific Daylight Time.
     - cron: "15 8 * * *"
   workflow_dispatch:
 
@@ -20,28 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check Pacific schedule window
-        id: schedule
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" != "schedule" ]]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          pacific_hour="$(TZ=America/Los_Angeles date +%H)"
-          pacific_time="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "Pacific time: $pacific_time"
-
-          if [[ "$pacific_hour" == "00" || "$pacific_hour" == "01" ]]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Skipping because this scheduled run is outside the post-midnight Pacific window."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout main
-        if: steps.schedule.outputs.should_run == 'true'
         uses: actions/checkout@v4
         with:
           ref: main
@@ -50,7 +28,6 @@ jobs:
           submodules: true
 
       - name: Check for commits since last Nightly
-        if: steps.schedule.outputs.should_run == 'true'
         id: changes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,7 +96,8 @@ jobs:
             cmake \
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi \
-            ninja-build
+            ninja-build \
+            python3-pil
 
       - name: Build firmware with CMake
         if: steps.changes.outputs.has_changes == 'true'

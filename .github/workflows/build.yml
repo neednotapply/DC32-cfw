@@ -31,7 +31,8 @@ jobs:
             cmake \
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi \
-            ninja-build
+            ninja-build \
+            python3-pil
 
       - name: Build firmware with CMake
         run: |

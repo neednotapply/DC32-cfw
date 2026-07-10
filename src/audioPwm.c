@@ -5,7 +5,10 @@
 
 #define AUDIO_PWM_IDX			((PIN_SPQR >> 1) & 7)
 #define AUDIO_PWM_IS_B			(PIN_SPQR & 1)
-#define AUDIO_TONE_CLK_DIV		32
+#define AUDIO_TONE_DIV_FRAC_BITS	4u
+#define AUDIO_TONE_DIV_MIN		(1u << AUDIO_TONE_DIV_FRAC_BITS)
+#define AUDIO_TONE_DIV_MAX		((PWM_CH0_DIV_INT_BITS | PWM_CH0_DIV_FRAC_BITS) >> PWM_CH0_DIV_FRAC_LSB)
+#define AUDIO_TONE_TOP_MAX		(PWM_CH0_TOP_BITS >> PWM_CH0_TOP_LSB)
 #define AUDIO_PCM_CLK_DIV		1u
 #define AUDIO_PCM_MIN_SAMPLE_RATE	8000u
 #define AUDIO_PCM_MAX_SAMPLE_RATE	22050u
@@ -154,11 +157,12 @@ uint_fast8_t audioPwmGetMasterVolume(void)
 	return mMasterVolume;
 }
 
-bool audioPwmTone(uint32_t freq)
+bool audioPwmTone(uint32_t frequency)
 {
-	uint32_t duty, baseFreq = TICKS_PER_SECOND / AUDIO_TONE_CLK_DIV;
+	uint64_t numerator, denominator;
+	uint32_t divider, period;
 
-	if (!freq) {
+	if (!frequency) {
 		audioPwmStop();
 		return true;
 	}
@@ -171,18 +175,29 @@ bool audioPwmTone(uint32_t freq)
 	audioPwmPrvDisable();
 	audioPwmPrvPinToPwm();
 
-	duty = (baseFreq + freq / 2) / freq;
-	if (duty < 2)
-		duty = 2;
-	if (duty > PWM_CH0_TOP_BITS)
-		duty = PWM_CH0_TOP_BITS;
+	/* The RP2350 PWM divider is 8.4 fixed point. Pick the smallest divider
+	 * that keeps the period in 16 bits, maximizing pitch resolution. */
+	numerator = (uint64_t)TICKS_PER_SECOND * (1u << AUDIO_TONE_DIV_FRAC_BITS);
+	denominator = (uint64_t)frequency * AUDIO_TONE_TOP_MAX;
+	divider = (uint32_t)((numerator + denominator - 1u) / denominator);
+	if (divider < AUDIO_TONE_DIV_MIN)
+		divider = AUDIO_TONE_DIV_MIN;
+	if (divider > AUDIO_TONE_DIV_MAX)
+		divider = AUDIO_TONE_DIV_MAX;
+	denominator = (uint64_t)divider * frequency;
+	period = (uint32_t)((numerator + denominator / 2u) / denominator);
+	if (period < 2u)
+		period = 2u;
+	if (period > AUDIO_TONE_TOP_MAX)
+		period = AUDIO_TONE_TOP_MAX;
 
-	pwm_hw->slice[AUDIO_PWM_IDX].top = (pwm_hw->slice[AUDIO_PWM_IDX].top &~ PWM_CH0_TOP_BITS) | ((duty - 1) << PWM_CH0_TOP_LSB);
+	pwm_hw->slice[AUDIO_PWM_IDX].top = (pwm_hw->slice[AUDIO_PWM_IDX].top &~ PWM_CH0_TOP_BITS) |
+		((period - 1u) << PWM_CH0_TOP_LSB);
 	pwm_hw->slice[AUDIO_PWM_IDX].ctr = 0;
-	mToneDuty = duty;
+	mToneDuty = period;
 	audioPwmPrvWriteToneDuty();
 	pwm_hw->slice[AUDIO_PWM_IDX].div = (pwm_hw->slice[AUDIO_PWM_IDX].div &~ (PWM_CH0_DIV_INT_BITS | PWM_CH0_DIV_FRAC_BITS)) |
-		(AUDIO_TONE_CLK_DIV << PWM_CH0_DIV_INT_LSB);
+		(divider << PWM_CH0_DIV_FRAC_LSB);
 	pwm_hw->slice[AUDIO_PWM_IDX].csr = (pwm_hw->slice[AUDIO_PWM_IDX].csr &~ (PWM_CH0_CSR_PH_ADV_BITS | PWM_CH0_CSR_PH_RET_BITS |
 		PWM_CH0_CSR_DIVMODE_BITS | PWM_CH0_CSR_B_INV_BITS | PWM_CH0_CSR_A_INV_BITS | PWM_CH0_CSR_PH_CORRECT_BITS)) |
 		(PWM_CH0_CSR_DIVMODE_VALUE_DIV << PWM_CH0_CSR_DIVMODE_LSB) | audioPwmPrvInvertBit() | PWM_CH0_CSR_EN_BITS;

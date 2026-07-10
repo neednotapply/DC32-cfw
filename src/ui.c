@@ -23,8 +23,9 @@
 #include "usbMsc.h"
 #include "usbXinput.h"
 #include "musicPlayer.h"
+#include "abcPlayer.h"
 #include "rtttlPlayer.h"
-#include "wavPlayer.h"
+#include "midiPlayer.h"
 #include "audioPwm.h"
 #include "imageViewer.h"
 #include "timebase.h"
@@ -82,6 +83,7 @@ enum MusicPlaybackControlUi {
 	MusicPlaybackControlPlay,
 	MusicPlaybackControlNext,
 	MusicPlaybackControlLoop,
+	MusicPlaybackControlTrack,
 	MusicPlaybackControlVol,
 	MusicPlaybackControlNum,
 };
@@ -6748,7 +6750,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 	static bool uiPrvMusicPlayableName(const char *fname)
 	{
 		return uiPrvStrEndsWithNoCase(fname, ".rtttl") || uiPrvStrEndsWithNoCase(fname, ".txt") ||
-			uiPrvStrEndsWithNoCase(fname, ".wav");
+			uiPrvStrEndsWithNoCase(fname, ".abc") || uiPrvStrEndsWithNoCase(fname, ".mid") ||
+			uiPrvStrEndsWithNoCase(fname, ".midi");
 	}
 
 	static bool uiPrvMusicBatteryOkToLaunch(struct Canvas *cnv)
@@ -6967,13 +6970,13 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 	static void uiPrvMusicDrawControls(struct Canvas *cnv, struct MusicUiData *data, const struct MusicPlayerStatus *status)
 	{
-		static const char *labels[MusicPlaybackControlNum] = {"Prev", "Play", "Next", "Loop", "Vol"};
+		static const char *labels[MusicPlaybackControlNum] = {"Prev", "Play", "Next", "Loop", "Track", "Vol"};
 		uint32_t cellW = cnv->w / MusicPlaybackControlNum, row = cnv->h - uiPrvGlyphHeight(cnv) - 2;
 		uint_fast8_t i;
 		int8_t fore = cnv->foreColor;
 
 		for (i = 0; i < MusicPlaybackControlNum; i++) {
-			char buf[12];
+			char buf[20];
 			const char *label = labels[i];
 			uint32_t left = i * cellW, right = (i == MusicPlaybackControlNum - 1) ? cnv->w - 1 : (i + 1) * cellW - 1;
 			uint32_t width;
@@ -6986,6 +6989,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			}
 			else if (i == MusicPlaybackControlVol) {
 				(void)sprintf(buf, "Vol%u", data->settings->audioVolume);
+				label = buf;
+			}
+			else if (i == MusicPlaybackControlTrack) {
+				(void)sprintf(buf, "Track %u/%u", (unsigned)status->track + 1u, (unsigned)(status->trackCount ? status->trackCount : 1u));
 				label = buf;
 			}
 
@@ -7007,7 +7014,8 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		cnv->foreColor = 0;
 		uiPrvFillRect(cnv, 10, row, cnv->w - 1, row + uiPrvGlyphHeight(cnv));
 		cnv->foreColor = 15;
-		uiPrintf(cnv, row, 10, "%s %u%% %uHz", status->paused ? "Paused" : "Playing", pct, status->sampleRate);
+		uiPrintf(cnv, row, 10, "%s %u%% %uBPM", status->paused ? "Paused" : "Playing", pct,
+			status->bpm);
 		cnv->foreColor = fore;
 	}
 
@@ -7037,10 +7045,16 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 				data->focus = 0;
 			data->forceDraw = true;
 		}
-		if (pressed & KEY_BIT_UP)
+		if (pressed & KEY_BIT_UP) {
+			if (data->focus == MusicPlaybackControlTrack)
+				return MusicPlayerControlTrackNext;
 			uiPrvMusicAdjustVolume(data, 1);
-		if (pressed & KEY_BIT_DOWN)
+		}
+		if (pressed & KEY_BIT_DOWN) {
+			if (data->focus == MusicPlaybackControlTrack)
+				return MusicPlayerControlTrackPrev;
 			uiPrvMusicAdjustVolume(data, -1);
+		}
 
 		{
 			struct Canvas *cnv = data->cnv;
@@ -7103,8 +7117,11 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		data.prevKeys = uiGetUiKeysRaw();
 		data.lastDraw = getTime() - TICKS_PER_SECOND;
-		if (uiPrvStrEndsWithNoCase(name, ".wav"))
-			ret = wavPlayerPlayFile(fil, uiPrvMusicControl, &data);
+		bool midi = uiPrvStrEndsWithNoCase(name, ".mid") || uiPrvStrEndsWithNoCase(name, ".midi");
+		if (midi)
+			ret = midiPlayerPlayFile(fil, NULL, 0, uiPrvMusicControl, &data);
+		else if (uiPrvStrEndsWithNoCase(name, ".abc"))
+			ret = abcPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		else
 			ret = rtttlPlayerPlayFile(fil, uiPrvMusicControl, &data);
 		if (focusP)
@@ -7117,8 +7134,10 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uiPrvWaitKeysReleased();
 		if (ret == MusicPlayerResultFileError)
 			uiAlert(cnv, "Music read failed", DialogTypeOk);
+		else if (ret == MusicPlayerResultUnsupported)
+			uiAlert(cnv, midi ? "Unsupported MIDI file" : "Unsupported ABC file", DialogTypeOk);
 		else if (ret == MusicPlayerResultDecodeError)
-			uiAlert(cnv, uiPrvStrEndsWithNoCase(name, ".wav") ? "Bad WAV file" : "Bad RTTTL file", DialogTypeOk);
+			uiAlert(cnv, midi ? "Bad MIDI file" : (uiPrvStrEndsWithNoCase(name, ".abc") ? "Bad ABC file" : "Bad RTTTL file"), DialogTypeOk);
 
 		return ret;
 	}
@@ -9627,7 +9646,9 @@ static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const s
 		ids[numOptions] = UiBrowserOpenBadUsb;
 		labels[numOptions++] = "BadUSB";
 	}
-	if (uiPrvStrEndsWithNoCase(ref->name, ".txt") || uiPrvStrEndsWithNoCase(ref->name, ".rtttl")) {
+	if (uiPrvStrEndsWithNoCase(ref->name, ".txt") || uiPrvStrEndsWithNoCase(ref->name, ".rtttl") ||
+		uiPrvStrEndsWithNoCase(ref->name, ".abc") || uiPrvStrEndsWithNoCase(ref->name, ".mid") ||
+		uiPrvStrEndsWithNoCase(ref->name, ".midi")) {
 		ids[numOptions] = UiBrowserOpenMusic;
 		labels[numOptions++] = "Music";
 	}

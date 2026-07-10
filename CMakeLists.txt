@@ -265,7 +265,6 @@ set_source_files_properties(
     ${SRC_DIR}/settings.c
     ${SRC_DIR}/badgeLeds.c
     ${SRC_DIR}/imageViewer.c
-    ${SRC_DIR}/wavPlayer.c
     ${SRC_DIR}/raster.c
     ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/apps/picoware_ports.c
@@ -527,8 +526,9 @@ add_dcapp(dcapp_image image 101
 add_dcapp(dcapp_music music 102
     ${SRC_DIR}/apps/music_app.c
     ${SRC_DIR}/ui.c
+    ${SRC_DIR}/abcPlayer.c
+    ${SRC_DIR}/midiPlayer.c
     ${SRC_DIR}/rtttlPlayer.c
-    ${SRC_DIR}/wavPlayer.c
 )
 
 add_dcapp(dcapp_badusb badusb 103

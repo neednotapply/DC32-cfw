@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,10 @@ MUSIC_ARCHIVE = "Unsorted 10k Song Archive.zip"
 MUSIC_ARCHIVE_DIR = "Unsorted 10k Song Archive"
 MUSIC_BUCKET_FILE_LIMIT = 64
 MUSIC_BUCKET_ORDER = ("#", "0-9", *tuple(chr(ch) for ch in range(ord("A"), ord("Z") + 1)))
+ABC_REPO = "https://github.com/Gubbledenut/ABC_TuneBooks.git"
+ABC_BRANCH = "main"
+ABC_MIN_TUNES = 2000
+ABC_LICENSE = "LICENSE.txt"
 
 ARDUBOY_REPO = "https://github.com/eried/ArduboyCollection.git"
 ARDUBOY_BRANCH = "master"
@@ -157,7 +162,8 @@ def builder_hash() -> str:
     return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
-def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> dict[str, object]:
+def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, abc_sha: str,
+                    arduboy_sha: str) -> dict[str, object]:
     return {
         "schema": 1,
         "builder_sha256": builder_hash(),
@@ -180,6 +186,15 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: s
                 "branch": MUSIC_BRANCH,
                 "commit": music_sha,
                 "paths": [*MUSIC_DIRS, MUSIC_ARCHIVE],
+            },
+            "abc_music": {
+                "repository": ABC_REPO,
+                "branch": ABC_BRANCH,
+                "commit": abc_sha,
+                "license": "CC0-1.0",
+                "patterns": ["*.abc", "*.txt"],
+                "sd_path": "MUSIC/ABC/",
+                "notes": "Tunebooks are split at X: records; chord/overlay tunes are omitted and voice tracks remain selectable.",
             },
             "arduboy": {
                 "repository": ARDUBOY_REPO,
@@ -279,10 +294,11 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
     }
 
 
-def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
+def write_source_manifest(path: Path, ir_sha: str, badusb_sha: str, music_sha: str,
+                          abc_sha: str, arduboy_sha: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(source_manifest(ir_sha, badusb_sha, music_sha, arduboy_sha), indent=2, sort_keys=True) + "\n",
+        json.dumps(source_manifest(ir_sha, badusb_sha, music_sha, abc_sha, arduboy_sha), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -297,11 +313,12 @@ def write_app_source_manifest(path: Path, app_hashes: dict[str, str]) -> None:
     )
 
 
-def resolve_source_commits() -> tuple[str, str, str, str]:
+def resolve_source_commits() -> tuple[str, str, str, str, str]:
     return (
         resolve_remote_branch(IR_REPO, IR_BRANCH),
         resolve_remote_branch(BADUSB_REPO, BADUSB_BRANCH),
         resolve_remote_branch(MUSIC_REPO, MUSIC_BRANCH),
+        resolve_remote_branch(ABC_REPO, ABC_BRANCH),
         resolve_remote_branch(ARDUBOY_REPO, ARDUBOY_BRANCH),
     )
 
@@ -409,6 +426,180 @@ def copy_music_assets(repo: Path, stage: Path) -> None:
         nested_archive.unlink()
 
     bucket_large_music_dirs(dst)
+
+
+def abc_safe_name(value: str, fallback: str) -> str:
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).strip(" .")
+    value = re.sub(r"\s+", " ", value)
+    return (value or fallback)[:96].rstrip(" .")
+
+
+def abc_body_lexically_supported(body: str) -> bool:
+    pos = 0
+    ignored = set(")\\$].~HLMOPSTuvy@;}12")
+    while pos < len(body):
+        char = body[pos]
+        if char.isspace():
+            pos += 1
+            continue
+        if char == "%":
+            end = body.find("\n", pos)
+            pos = len(body) if end < 0 else end
+            continue
+        if char in "Ww" and pos + 1 < len(body) and body[pos + 1] == ":":
+            end = body.find("\n", pos)
+            pos = len(body) if end < 0 else end
+            continue
+        if char in '"!+{':
+            close = {'"': '"', '!': '!', '+': '+', '{': '}'}[char]
+            end = body.find(close, pos + 1)
+            if end < 0:
+                return False
+            pos = end + 1
+            continue
+        if char == "&":
+            return False
+        if char == "[":
+            if body.startswith("[|", pos) or (pos + 1 < len(body) and body[pos + 1] in "12"):
+                pos += 2
+                continue
+            if pos + 2 < len(body) and body[pos + 1] in "KQV" and body[pos + 2] == ":":
+                end = body.find("]", pos + 3)
+                if end < 0:
+                    return False
+                pos = end + 1
+                continue
+            return False
+        if char in "|:":
+            pos += 2 if body[pos:pos + 2] in ("|:", ":|") else 1
+            continue
+        if char == "(":
+            pos += 1
+            if pos < len(body) and body[pos].isdigit():
+                pos += 1
+                while pos < len(body) and (body[pos].isdigit() or body[pos] == ":"):
+                    pos += 1
+            continue
+        if char in ignored:
+            pos += 1
+            continue
+        if char in "^_=":
+            mark = char
+            pos += 1
+            if pos < len(body) and body[pos] == mark:
+                pos += 1
+            if pos >= len(body) or body[pos].lower() not in "abcdefg":
+                return False
+            char = body[pos]
+        if char.lower() in "abcdefgzx":
+            pos += 1
+            while pos < len(body) and body[pos] in "',":
+                pos += 1
+            while pos < len(body) and (body[pos].isdigit() or body[pos] == "/"):
+                pos += 1
+            if pos < len(body) and body[pos] == ".":
+                pos += 1
+            look = pos
+            while look < len(body) and (body[look].isspace() or body[look] == "\\"):
+                look += 1
+            if look < len(body) and body[look] == "-":
+                pos = look + 1
+            elif look < len(body) and body[look] in "<>":
+                mark = body[look]
+                pos = look
+                while pos < len(body) and body[pos] == mark:
+                    pos += 1
+            continue
+        return False
+    return True
+
+
+def abc_tune_supported(text: str) -> tuple[bool, str]:
+    if len(text.encode("utf-8")) >= 4096:
+        return False, "oversized"
+    if len(re.findall(r"(?m)^X\s*:", text)) != 1:
+        return False, "multiple or missing X field"
+    if not re.search(r"(?m)^K\s*:", text):
+        return False, "missing K field"
+
+    key = re.search(r"(?m)^K\s*:.*(?:\r?\n|$)", text)
+    body = text[key.end():] if key else ""
+    body = re.sub(r"(?m)%.*$", "", body)
+    body = re.sub(r'"(?:[^"\\]|\\.)*"', "", body)
+    body = re.sub(r"![^!]*!|\+[^+]*\+|\{[^}]*\}", "", body)
+    body = re.sub(r"(?m)^[A-Za-z]:.*$", "", body)
+    body = body.replace("[|", "|")
+    if "&" in body:
+        return False, "voice overlay"
+    for match in re.finditer(r"\[([^\]]*)\]", body):
+        value = match.group(1).lstrip()
+        if re.match(r"(?:[KQV]:|[1-9])", value):
+            continue
+        return False, "chord"
+    if not abc_body_lexically_supported(body):
+        return False, "unsupported syntax"
+    return True, ""
+
+
+def copy_abc_assets(repo: Path, stage: Path, commit: str) -> tuple[int, int]:
+    dst = stage / "MUSIC" / "ABC"
+    accepted = rejected = 0
+    reasons: dict[str, int] = {}
+
+    dst.mkdir(parents=True, exist_ok=True)
+    license_src = repo / ABC_LICENSE
+    if not license_src.is_file():
+        raise FileNotFoundError(f"Missing ABC collection license: {license_src}")
+    shutil.copyfile(license_src, dst / "LICENSE-CC0.txt")
+
+    sources = sorted(
+        (path for path in repo.iterdir()
+         if path.is_file() and path.name != ABC_LICENSE and path.suffix.lower() in (".abc", ".txt")),
+        key=lambda path: (path.name.casefold(), path.name),
+    )
+    for source in sources:
+        book = dst / abc_safe_name(source.stem, "Tunebook")
+        used: set[str] = set()
+        text = source.read_text(encoding="utf-8", errors="replace")
+        chunks = re.split(r"(?m)(?=^X\s*:)", text)
+        tune_index = 0
+        for chunk in chunks:
+            if not re.match(r"^X\s*:", chunk):
+                continue
+            tune_index += 1
+            chunk = chunk.strip() + "\n"
+            supported, reason = abc_tune_supported(chunk)
+            if not supported:
+                rejected += 1
+                reasons[reason] = reasons.get(reason, 0) + 1
+                continue
+            title_match = re.search(r"(?m)^T\s*:\s*(.*)$", chunk)
+            title = title_match.group(1).strip() if title_match else f"Tune {tune_index}"
+            stem = abc_safe_name(title, f"Tune {tune_index}")
+            candidate = f"{stem}.abc"
+            suffix = 2
+            while candidate.casefold() in used:
+                candidate = f"{stem[:88]} ({suffix}).abc"
+                suffix += 1
+            used.add(candidate.casefold())
+            book.mkdir(parents=True, exist_ok=True)
+            (book / candidate).write_text(chunk, encoding="utf-8", newline="\n")
+            accepted += 1
+
+    if accepted < ABC_MIN_TUNES:
+        raise RuntimeError(f"ABC compatibility regression: only {accepted} tunes accepted; expected at least {ABC_MIN_TUNES}")
+    reason_text = ", ".join(f"{key}: {value}" for key, value in sorted(reasons.items()))
+    (dst / "README.txt").write_text(
+        "Selectable-voice ABC 2.1 tunes for the DC32 Music app.\n"
+        f"Source: {ABC_REPO} commit {commit}\n"
+        "License: CC0-1.0; see LICENSE-CC0.txt.\n"
+        f"Included: {accepted}; excluded: {rejected} ({reason_text}).\n"
+        "Files containing chords or overlays are intentionally excluded; voices can be selected during playback.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    bucket_large_music_dirs(dst)
+    return accepted, rejected
 
 
 def arduboy_hex_sort_key(path: Path) -> tuple[str, str]:
@@ -655,7 +846,8 @@ def extract_zip_safely(zf: zipfile.ZipFile, dest: Path) -> None:
         zf.extract(member, dest)
 
 
-def write_sources(stage: Path, ir_sha: str, badusb_sha: str, music_sha: str, arduboy_sha: str) -> None:
+def write_sources(stage: Path, ir_sha: str, badusb_sha: str, music_sha: str, abc_sha: str,
+                  arduboy_sha: str) -> None:
     text = f"""# SD-assets.zip Sources
 
 This release asset was assembled from upstream repositories at build time.
@@ -688,6 +880,15 @@ their upstream projects.
 - Source paths: {', '.join(MUSIC_DIRS)}, {MUSIC_ARCHIVE}
 - SD path: MUSIC/
 - Notes: {MUSIC_ARCHIVE} was extracted into MUSIC/{MUSIC_ARCHIVE_DIR}/ and the nested zip was omitted. Music folders with more than {MUSIC_BUCKET_FILE_LIMIT} direct files were split into alphabetic subfolders.
+
+## ABC MUSIC
+
+- Repository: {ABC_REPO}
+- Branch: {ABC_BRANCH}
+- Commit: {abc_sha}
+- License: CC0-1.0, retained at MUSIC/ABC/LICENSE-CC0.txt
+- SD path: MUSIC/ABC/
+- Notes: Source tunebooks were split into individual tunes. Chords and overlays were excluded; voice tracks remain selectable during playback.
 
 ## ARDUBOY
 
@@ -844,8 +1045,8 @@ def main() -> int:
     if args.sources_only:
         if not args.sources_output:
             raise ValueError("--sources-only requires --sources-output")
-        ir_sha, badusb_sha, music_sha, arduboy_sha = resolve_source_commits()
-        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
+        ir_sha, badusb_sha, music_sha, abc_sha, arduboy_sha = resolve_source_commits()
+        write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, abc_sha, arduboy_sha)
         if args.apps_sources_output:
             write_app_source_manifest(args.apps_sources_output.resolve(), collect_app_hashes(apps_dir))
         print(f"Wrote {args.sources_output.resolve()}")
@@ -868,22 +1069,25 @@ def main() -> int:
         ir_repo = repos / "Momentum-Firmware"
         badusb_repo = repos / "UberGuidoZ-Flipper"
         music_repo = repos / "FlipperMusicRTTTL"
+        abc_repo = repos / "ABC_TuneBooks"
         arduboy_repo = repos / "ArduboyCollection"
 
         ir_sha = clone_repo(IR_REPO, IR_BRANCH, ir_repo, [IR_ASSET_PATH.as_posix()])
         badusb_sha = clone_repo(BADUSB_REPO, BADUSB_BRANCH, badusb_repo, [BADUSB_PATH.as_posix()])
         music_sha = clone_repo(MUSIC_REPO, MUSIC_BRANCH, music_repo)
+        abc_sha = clone_repo(ABC_REPO, ABC_BRANCH, abc_repo)
         arduboy_sha = clone_repo(ARDUBOY_REPO, ARDUBOY_BRANCH, arduboy_repo, list(ARDUBOY_GENRE_DIRS))
 
         copy_ir_assets(ir_repo, stage)
         copy_badusb_assets(badusb_repo, stage)
         copy_music_assets(music_repo, stage)
+        copy_abc_assets(abc_repo, stage, abc_sha)
         copy_arduboy_assets(arduboy_repo, stage)
         create_rom_dirs(stage)
         create_image_dir(stage)
-        write_sources(stage, ir_sha, badusb_sha, music_sha, arduboy_sha)
+        write_sources(stage, ir_sha, badusb_sha, music_sha, abc_sha, arduboy_sha)
         if args.sources_output:
-            write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, arduboy_sha)
+            write_source_manifest(args.sources_output.resolve(), ir_sha, badusb_sha, music_sha, abc_sha, arduboy_sha)
         build_zip(stage, assets_output)
         print(f"Wrote {assets_output}")
 

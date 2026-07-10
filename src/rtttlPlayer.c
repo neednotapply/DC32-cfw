@@ -145,6 +145,7 @@ enum MusicPlayerResult rtttlPlayerPlayFile(struct FatfsFil *fil, MusicPlayerCont
 
 	memset(&status, 0, sizeof(status));
 	status.fileSize = fatfsFileGetSize(fil);
+	status.trackCount = 1;
 	if (status.fileSize >= RTTTL_BUF_SZ)
 		return MusicPlayerResultDecodeError;
 	if (!fatfsFileRead(fil, buf, status.fileSize, &nRead) || nRead != status.fileSize)
@@ -182,7 +183,7 @@ enum MusicPlayerResult rtttlPlayerPlayFile(struct FatfsFil *fil, MusicPlayerCont
 	p++;
 
 	wholeNoteMsec = 240000 / bpm;
-	status.sampleRate = bpm;
+	status.bpm = bpm;
 
 	while (*p) {
 		enum MusicPlayerResult ctlRet;

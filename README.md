@@ -9,7 +9,7 @@
 - Native ports: Pong, Tetris, Arkanoid, Flappy Bird, T-Rex Runner, DOOM, Chip's Challenge, Scorched Earth, Pipe Dream, Sokoban, Jazz Jackrabbit, and Sensible Soccer (YSoccer)
 - USB Storage, BadUSB, Autoclicker, and USB Gamepad tools
 - Infrared submenu with Universal IR, Flipper-style `.ir` support, and OpenLASIR Laser Tag
-- RTTTL/WAV music and JPEG/BMP/DCI/DCA image viewing
+- ABC/RTTTL/MIDI music and JPEG/BMP/DCI/DCA image viewing
 - Persistent saves and settings
 - Universal Audio, Screen, and LED settings from emulator and port FN menus
 - Battery percentage, idle dimming, paused static scanout, and bounded clock gating for longer runtime
@@ -54,7 +54,7 @@ OpenLASIR identifies a sender with two 8-bit values. The Block ID identifies a p
 | `/SAVE/PORTS/SOCCER` | Sensible Soccer competitions, teams, tactics, replays, highlights, and import/export files |
 | `/IR` | Universal remote and Flipper-style IR files |
 | `/BADUSB` | `.txt` and `.badusb` scripts |
-| `/MUSIC` | `.rtttl`, RTTTL `.txt`, and PCM `.wav` files |
+| `/MUSIC` | ABC `.abc`, native MIDI `.mid`/`.midi`, RTTTL `.rtttl`, and RTTTL `.txt` files; Track focus selects ABC voices or MIDI format-1 tracks |
 | `/IMAGES` | `.jpg`, `.jpeg`, uncompressed `.bmp`, `.dci`, and `.dca` files |
 
 ROMs and proprietary game data are not included. Add only files you are legally permitted to use.

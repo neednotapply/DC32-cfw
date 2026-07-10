@@ -11,12 +11,16 @@ enum MusicPlayerControl {
 	MusicPlayerControlStop,
 	MusicPlayerControlPrev,
 	MusicPlayerControlNext,
+	MusicPlayerControlTrackPrev,
+	MusicPlayerControlTrackNext,
 };
 
 struct MusicPlayerStatus {
 	uint32_t bytesPlayed;
 	uint32_t fileSize;
-	uint32_t sampleRate;
+	uint32_t bpm;
+	uint16_t track;
+	uint16_t trackCount;
 	bool paused;
 };
 
@@ -29,6 +33,7 @@ enum MusicPlayerResult {
 	MusicPlayerResultNext,
 	MusicPlayerResultFileError,
 	MusicPlayerResultDecodeError,
+	MusicPlayerResultUnsupported,
 };
 
 #endif

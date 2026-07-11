@@ -102,6 +102,7 @@ APP_BINARIES = (
     "autoclicker.DC32",
     "gamepad.DC32",
     "lasertag.DC32",
+    "raspyjack.DC32",
     "pong.DC32",
     "tetris.DC32",
     "arkanoid.DC32",
@@ -974,6 +975,11 @@ shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
 - QR license: MIT (`APPS/LICENSES/qrcodegen-LICENSE.txt`)
 - SD path: APPS/lasertag.DC32
 - Notes: Implements bidirectional OpenLASIR mode-0 play with DC32-native PIO receive capture, manual-fire rate limits, hit lockout, hardware-bound locked identity, persistent statistics, and a versioned unsigned QR/file sync export. The export is not Dani's private leaderboard submission format.
+
+## RaspyJack Remote
+
+- SD path: APPS/raspyjack.DC32
+- Notes: USB CDC remote display and button control for a local RaspyJack installation. Install the separate `tools/raspyjack-badge-bridge` bundle on the Pi; it uses RaspyJack's existing shared-memory frame and virtual-input socket without modifying RaspyJack itself.
 
 ## Tetris
 

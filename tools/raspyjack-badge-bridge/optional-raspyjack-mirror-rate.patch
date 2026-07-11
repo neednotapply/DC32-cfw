@@ -1,0 +1,15 @@
+--- a/raspyjack.py
++++ b/raspyjack.py
+@@ -1,5 +1,9 @@
+ try:
+     _frame_fps = float(os.environ.get("RJ_FRAME_FPS", "10"))
+     FRAME_MIRROR_INTERVAL = 1.0 / max(1.0, _frame_fps)
+ except Exception:
+     FRAME_MIRROR_INTERVAL = 0.1
++try:
++    DISPLAY_LOOP_INTERVAL = max(0.01, float(os.environ.get("RJ_DISPLAY_LOOP_INTERVAL", "0.1")))
++except Exception:
++    DISPLAY_LOOP_INTERVAL = 0.1
+@@ -1 +1 @@
+-        time.sleep(0.1)
++        time.sleep(DISPLAY_LOOP_INTERVAL)

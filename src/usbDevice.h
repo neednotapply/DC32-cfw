@@ -8,6 +8,7 @@ enum UsbDeviceMode {
 	UsbDeviceModeNone,
 	UsbDeviceModeHid,
 	UsbDeviceModeMsc,
+	UsbDeviceModeCdc,
 	UsbDeviceModeXinput,
 };
 

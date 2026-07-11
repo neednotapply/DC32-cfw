@@ -144,12 +144,15 @@ add_executable(${APP}
     ${SRC_DIR}/toolWorkspace.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/usbDevice.c
+
+    ${SRC_DIR}/usbCdc.c
     ${SRC_DIR}/usbHid.c
     ${SRC_DIR}/usbMsc.c
     ${SRC_DIR}/usbXinput.c
     ${SRC_DIR}/utf.c
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
+    ${TINYUSB_DIR}/src/class/cdc/cdc_device.c
     ${TINYUSB_DIR}/src/class/msc/msc_device.c
     ${TINYUSB_DIR}/src/class/vendor/vendor_device.c
     ${TINYUSB_DIR}/src/common/tusb_fifo.c
@@ -342,6 +345,17 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=usbHidGamepadReportTouch
     -Wl,--undefined=usbHidGamepadFeedback
     -Wl,--undefined=usbHidMouseReport
+    -Wl,--undefined=usbCdcAvailable
+    -Wl,--undefined=usbCdcBegin
+    -Wl,--undefined=usbCdcConnected
+    -Wl,--undefined=usbCdcDefaultInfo
+    -Wl,--undefined=usbCdcEnd
+    -Wl,--undefined=usbCdcFlush
+    -Wl,--undefined=usbCdcLastError
+    -Wl,--undefined=usbCdcRead
+    -Wl,--undefined=usbCdcTask
+    -Wl,--undefined=usbCdcWrite
+    -Wl,--undefined=usbCdcWriteAvailable
     -Wl,--undefined=usbXinputBegin
     -Wl,--undefined=usbXinputEnd
     -Wl,--undefined=usbXinputFeedback
@@ -553,6 +567,13 @@ add_dcapp(dcapp_lasertag lasertag 106
     ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/irRemote.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen/qrcodegen.c
+)
+
+add_dcapp(dcapp_raspyjack raspyjack 107
+    ${SRC_DIR}/apps/raspyjack_app.c
+    ${SRC_DIR}/apps/raspyjack_remote.c
+    ${SRC_DIR}/raster.c
+    ${PICOJPEG_SRC}
 )
 set(DC32_LASERTAG_BLOCK_ID "0" CACHE STRING "Provisioned OpenLASIR Block ID (0-255)")
 set(DC32_LASERTAG_DEVICE_ID "256" CACHE STRING "Provisioned OpenLASIR Device ID (0-255, or 256 for flash-UID-derived)")

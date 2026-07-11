@@ -30,15 +30,25 @@ enum {
 	UsbDeviceItfMscTotal,
 };
 
+enum {
+	UsbDeviceItfCdcControl,
+	UsbDeviceItfCdcData,
+	UsbDeviceItfCdcTotal,
+};
+
 #define USB_DEVICE_HID_CONFIG_TOTAL_LEN	(TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
 #define USB_DEVICE_HID_INOUT_CONFIG_TOTAL_LEN	(TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
 #define USB_DEVICE_MSC_CONFIG_TOTAL_LEN	(TUD_CONFIG_DESC_LEN + TUD_MSC_DESC_LEN)
+#define USB_DEVICE_CDC_CONFIG_TOTAL_LEN	(TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
 #define USB_DEVICE_XINPUT_CONFIG_TOTAL_LEN	153
 #define USB_DEVICE_EP_HID_KEYBOARD	0x81
 #define USB_DEVICE_EP_HID_GAMEPAD_OUT	0x03
 #define USB_DEVICE_EP_HID_GAMEPAD_IN	0x84
 #define USB_DEVICE_EP_MSC_OUT		0x02
 #define USB_DEVICE_EP_MSC_IN		0x82
+#define USB_DEVICE_EP_CDC_NOTIF	0x81
+#define USB_DEVICE_EP_CDC_OUT		0x02
+#define USB_DEVICE_EP_CDC_IN		0x82
 
 static bool mHwReady, mInited;
 static enum UsbDeviceMode mMode = UsbDeviceModeNone;
@@ -175,6 +185,13 @@ static const uint8_t mMscConfigDesc[] = {
 	TUD_MSC_DESCRIPTOR(UsbDeviceItfMsc, 0, USB_DEVICE_EP_MSC_OUT, USB_DEVICE_EP_MSC_IN, 64),
 };
 
+static const uint8_t mCdcConfigDesc[] = {
+	TUD_CONFIG_DESCRIPTOR(1, UsbDeviceItfCdcTotal, 0, USB_DEVICE_CDC_CONFIG_TOTAL_LEN,
+		TUSB_DESC_CONFIG_ATT_SELF_POWERED, 100),
+	TUD_CDC_DESCRIPTOR(UsbDeviceItfCdcControl, 0, USB_DEVICE_EP_CDC_NOTIF, 8,
+		USB_DEVICE_EP_CDC_OUT, USB_DEVICE_EP_CDC_IN, 64),
+};
+
 _Static_assert(sizeof(mHidKeyboardReportDesc) >= 63, "unexpected keyboard report descriptor size");
 _Static_assert(sizeof(mHidKeyboardConfigDesc) == USB_DEVICE_HID_CONFIG_TOTAL_LEN, "unexpected keyboard HID configuration descriptor size");
 _Static_assert(sizeof(mHidKeyboardMouseConsumerConfigDesc) == USB_DEVICE_HID_CONFIG_TOTAL_LEN, "unexpected composite HID configuration descriptor size");
@@ -183,6 +200,7 @@ _Static_assert(sizeof(mHidGamepadReportDesc) == 467, "unexpected DualShock 4 rep
 _Static_assert(sizeof(mHidGamepadConfigDesc) == USB_DEVICE_HID_INOUT_CONFIG_TOTAL_LEN, "unexpected gamepad HID configuration descriptor size");
 _Static_assert(sizeof(mXinputConfigDesc) == USB_DEVICE_XINPUT_CONFIG_TOTAL_LEN, "unexpected XInput configuration descriptor size");
 _Static_assert(sizeof(mMscConfigDesc) == USB_DEVICE_MSC_CONFIG_TOTAL_LEN, "unexpected MSC configuration descriptor size");
+_Static_assert(sizeof(mCdcConfigDesc) == USB_DEVICE_CDC_CONFIG_TOTAL_LEN, "unexpected CDC configuration descriptor size");
 
 static bool usbDevicePrvWaitBits(const volatile uint32_t *reg, uint32_t bits, bool set)
 {
@@ -240,7 +258,12 @@ static void usbDevicePrvApplyDeviceDesc(enum UsbDeviceMode mode)
 	mDeviceDesc.iSerialNumber = 0;
 	mDeviceDesc.bNumConfigurations = 1;
 
-	if (mode == UsbDeviceModeXinput) {
+	if (mode == UsbDeviceModeCdc) {
+		mDeviceDesc.bDeviceClass = TUSB_CLASS_MISC;
+		mDeviceDesc.bDeviceSubClass = MISC_SUBCLASS_COMMON;
+		mDeviceDesc.bDeviceProtocol = MISC_PROTOCOL_IAD;
+	}
+	else if (mode == UsbDeviceModeXinput) {
 		mDeviceDesc.bDeviceClass = TUSB_CLASS_VENDOR_SPECIFIC;
 		mDeviceDesc.bDeviceSubClass = 0xff;
 		mDeviceDesc.bDeviceProtocol = 0xff;
@@ -392,6 +415,8 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 		return mXinputConfigDesc;
 	if (mMode == UsbDeviceModeMsc)
 		return mMscConfigDesc;
+	if (mMode == UsbDeviceModeCdc)
+		return mCdcConfigDesc;
 	switch (mInfo.hidReportSet) {
 	case UsbDeviceHidReportSetKeyboardMouseConsumer:
 		return mHidKeyboardMouseConsumerConfigDesc;

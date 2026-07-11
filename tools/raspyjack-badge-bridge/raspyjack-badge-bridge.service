@@ -1,0 +1,19 @@
+[Unit]
+Description=DC32 RaspyJack USB badge bridge
+After=local-fs.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/raspyjack-badge-bridge
+ExecStart=/opt/raspyjack-badge-bridge/raspyjack_badge_bridge.py
+Restart=always
+RestartSec=2
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/dev/shm /run
+
+[Install]
+WantedBy=multi-user.target

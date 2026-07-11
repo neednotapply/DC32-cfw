@@ -9726,6 +9726,8 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 		return UiToolAutoclicker;
 	case DcAppIdToolGamepad:
 		return UiToolGamepad;
+	case DcAppIdToolRaspyJack:
+		return UiToolUsb;
 	case DcAppIdStarfield:
 	case DcAppIdSpiro:
 	case DcAppIdCube:
@@ -10724,6 +10726,7 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 		{"BadUSB", UiCategoryEntryTool, UiToolBadUsb, 0},
 		{"Autoclicker", UiCategoryEntryTool, UiToolAutoclicker, 0},
 		{"USB Gamepad", UiCategoryEntryTool, UiToolGamepad, 0},
+		{"RaspyJack Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolRaspyJack},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

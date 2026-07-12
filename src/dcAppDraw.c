@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include "dispDefcon.h"
+#include "fonts.h"
 #include "ui.h"
 
 static uint16_t mDcAppDrawRgb332To565[256];
@@ -51,6 +52,126 @@ static uint32_t dcAppDrawPrvDisplayIndex(const struct Canvas *cnv, uint32_t x, u
 	if (cnv->rotated)
 		return x * rowItems + (cnv->h - 1u - y);
 	return y * rowItems + x;
+}
+
+static uint32_t dcAppDrawPrvTextWidth(const char *text, enum Font font)
+{
+	uint32_t width = 0;
+
+	while (text && *text) {
+		struct FontGlyphInfo glyph;
+
+		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text))
+			width += glyph.width + 1u;
+		text++;
+	}
+	return width ? width - 1u : 0u;
+}
+
+static void dcAppDrawPrvCanvasPixel(const struct Canvas *cnv, int32_t x, int32_t y,
+	uint16_t color)
+{
+	uint16_t *fb;
+
+	if (!cnv || !cnv->framebuffer || cnv->bpp != 16u || x < 0 || y < 0 ||
+		x >= (int32_t)cnv->w || y >= (int32_t)cnv->h)
+		return;
+	fb = (uint16_t*)cnv->framebuffer;
+	fb[dcAppDrawPrvDisplayIndex(cnv, (uint32_t)x, (uint32_t)y)] = color;
+}
+
+static void dcAppDrawPrvCanvasFill(const struct Canvas *cnv, int32_t x, int32_t y,
+	int32_t w, int32_t h, uint16_t color)
+{
+	if (cnv && cnv->framebuffer && cnv->bpp == 16u && x == 0 && y == 0 &&
+		w == (int32_t)cnv->w && h == (int32_t)cnv->h) {
+		uint16_t *fb = (uint16_t*)cnv->framebuffer;
+
+		for (uint32_t i = 0; i < cnv->w * cnv->h; i++)
+			fb[i] = color;
+		return;
+	}
+	for (int32_t yy = y; yy < y + h; yy++)
+		for (int32_t xx = x; xx < x + w; xx++)
+			dcAppDrawPrvCanvasPixel(cnv, xx, yy, color);
+}
+
+static void dcAppDrawPrvCanvasText(const struct Canvas *cnv, int32_t x, int32_t y,
+	const char *text, enum Font font, uint16_t color)
+{
+	while (text && *text) {
+		struct FontGlyphInfo glyph;
+
+		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text)) {
+			for (uint_fast8_t row = 0; row < glyph.height; row++)
+				for (uint_fast8_t col = 0; col < glyph.width; col++)
+					if (fontGetGlyphPixel(&glyph, row, col))
+						dcAppDrawPrvCanvasPixel(cnv, x + col, y + row, color);
+			x += glyph.width + 1;
+		}
+		text++;
+	}
+}
+
+static void dcAppDrawPrvCanvasCentered(const struct Canvas *cnv, int32_t y,
+	const char *text, enum Font font, uint16_t color)
+{
+	uint32_t width = dcAppDrawPrvTextWidth(text, font);
+	uint32_t screenWidth = cnv ? cnv->w : 0;
+
+	if (width > screenWidth)
+		width = screenWidth;
+	dcAppDrawPrvCanvasText(cnv, (int32_t)(screenWidth - width) / 2, y, text, font, color);
+}
+
+static void dcAppDrawPrvCtxText(struct DcAppDrawCtx *ctx, int32_t x, int32_t y,
+	const char *text, enum Font font, uint16_t color)
+{
+	while (text && *text) {
+		struct FontGlyphInfo glyph;
+
+		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text)) {
+			for (uint_fast8_t row = 0; row < glyph.height; row++)
+				for (uint_fast8_t col = 0; col < glyph.width; col++)
+					if (fontGetGlyphPixel(&glyph, row, col))
+						dcAppDrawPixel(ctx, x + col, y + row, color);
+			x += glyph.width + 1;
+		}
+		text++;
+	}
+}
+
+static void dcAppDrawPrvCtxCentered(struct DcAppDrawCtx *ctx, int32_t y,
+	const char *text, enum Font font, uint16_t color)
+{
+	uint32_t width = dcAppDrawPrvTextWidth(text, font);
+
+	if (width > ctx->w)
+		width = ctx->w;
+	dcAppDrawPrvCtxText(ctx, (int32_t)(ctx->w - width) / 2, y, text, font, color);
+}
+
+static uint32_t dcAppDrawPrvLoadingFill(uint32_t width,
+	const struct DcAppLoadingState *state)
+{
+	uint32_t fill;
+
+	if (state && state->total) {
+		fill = (uint32_t)(((uint64_t)width * state->done) / state->total);
+		return fill > width ? width : fill;
+	}
+	return width / 4u;
+}
+
+static uint32_t dcAppDrawPrvLoadingOffset(uint32_t width,
+	const struct DcAppLoadingState *state, uint32_t fill)
+{
+	uint32_t travel;
+
+	if (state && state->total)
+		return 0;
+	travel = width > fill ? width - fill : 0;
+	return travel ? ((state ? state->animationStep : 0u) * 7u) % (travel + 1u) : 0u;
 }
 
 uint16_t dcAppDrawRgb565(uint32_t r, uint32_t g, uint32_t b)
@@ -180,6 +301,74 @@ void dcAppDrawPresent(struct DcAppDrawCtx *ctx)
 		for (uint32_t x = 0; x < ctx->w; x++)
 			dst[dcAppDrawPrvDisplayIndex(cnv, x, y)] =
 				mDcAppDrawRgb332To565[ctx->fb[y * ctx->w + x]];
+}
+
+void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *state)
+{
+	uint16_t bg = dcAppDrawRgb565(8, 12, 18);
+	uint16_t primary = dcAppDrawRgb565(242, 245, 240);
+	uint16_t secondary = dcAppDrawRgb565(173, 194, 207);
+	uint16_t track = dcAppDrawRgb565(38, 50, 62);
+	uint16_t accent = dcAppDrawRgb565(83, 202, 178);
+	uint32_t barW, fill, offset;
+	int32_t centerY, barX, barY;
+
+	if (!ctx || !ctx->fb || !ctx->w || !ctx->h)
+		return;
+	barW = ctx->w > 64u ? ctx->w - 64u : ctx->w;
+	if (barW > 280u)
+		barW = 280u;
+	fill = dcAppDrawPrvLoadingFill(barW, state);
+	offset = dcAppDrawPrvLoadingOffset(barW, state, fill);
+	centerY = (int32_t)ctx->h / 2;
+	barX = ((int32_t)ctx->w - (int32_t)barW) / 2;
+	barY = centerY + 24;
+
+	dcAppDrawClear(ctx, bg);
+	dcAppDrawPrvCtxCentered(ctx, centerY - 78,
+		state && state->appName ? state->appName : "Loading", FontLarge, primary);
+	dcAppDrawPrvCtxCentered(ctx, centerY - 38,
+		state && state->title ? state->title : "Please wait", FontMedium, primary);
+	if (state && state->detail && state->detail[0])
+		dcAppDrawPrvCtxCentered(ctx, centerY - 12, state->detail, FontSmall, secondary);
+	dcAppDrawFill(ctx, barX, barY, (int32_t)barW, 12, track);
+	dcAppDrawFill(ctx, barX + (int32_t)offset, barY + 2, (int32_t)fill, 8, accent);
+	if (state && state->hint && state->hint[0])
+		dcAppDrawPrvCtxCentered(ctx, centerY + 54, state->hint, FontSmall, secondary);
+}
+
+void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingState *state)
+{
+	uint16_t bg = dcAppDrawRgb565(8, 12, 18);
+	uint16_t primary = dcAppDrawRgb565(242, 245, 240);
+	uint16_t secondary = dcAppDrawRgb565(173, 194, 207);
+	uint16_t track = dcAppDrawRgb565(38, 50, 62);
+	uint16_t accent = dcAppDrawRgb565(83, 202, 178);
+	uint32_t barW, fill, offset;
+	int32_t centerY, barX, barY;
+
+	if (!cnv || !cnv->framebuffer || cnv->bpp != 16u || !cnv->w || !cnv->h)
+		return;
+	barW = cnv->w > 64u ? cnv->w - 64u : cnv->w;
+	if (barW > 280u)
+		barW = 280u;
+	fill = dcAppDrawPrvLoadingFill(barW, state);
+	offset = dcAppDrawPrvLoadingOffset(barW, state, fill);
+	centerY = (int32_t)cnv->h / 2;
+	barX = ((int32_t)cnv->w - (int32_t)barW) / 2;
+	barY = centerY + 24;
+
+	dcAppDrawPrvCanvasFill(cnv, 0, 0, cnv->w, cnv->h, bg);
+	dcAppDrawPrvCanvasCentered(cnv, centerY - 78,
+		state && state->appName ? state->appName : "Loading", FontLarge, primary);
+	dcAppDrawPrvCanvasCentered(cnv, centerY - 38,
+		state && state->title ? state->title : "Please wait", FontMedium, primary);
+	if (state && state->detail && state->detail[0])
+		dcAppDrawPrvCanvasCentered(cnv, centerY - 12, state->detail, FontSmall, secondary);
+	dcAppDrawPrvCanvasFill(cnv, barX, barY, (int32_t)barW, 12, track);
+	dcAppDrawPrvCanvasFill(cnv, barX + (int32_t)offset, barY + 2, (int32_t)fill, 8, accent);
+	if (state && state->hint && state->hint[0])
+		dcAppDrawPrvCanvasCentered(cnv, centerY + 54, state->hint, FontSmall, secondary);
 }
 
 bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)

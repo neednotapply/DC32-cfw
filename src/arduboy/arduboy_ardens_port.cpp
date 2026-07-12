@@ -1560,7 +1560,7 @@ static void arduboyPrvShowFailureScreen(const char *reason)
 		(unsigned)mArdens.cpu.embedded_timer0_fract_addr,
 		(unsigned)mArdens.cpu.embedded_timer0_overflow_addr);
 	arduboyPrvDebugDrawText(fb, 14, 188, line, 0xffffu);
-	arduboyPrvDebugDrawText(fb, 14, 208, "CENTER: MENU  B: EXIT FROM MENU", 0x07e0u);
+	arduboyPrvDebugDrawText(fb, 14, 208, "FN: MENU  B: EXIT FROM MENU", 0x07e0u);
 	dispPrvWaitForScanoutStart();
 }
 

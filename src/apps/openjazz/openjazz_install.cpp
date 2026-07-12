@@ -181,8 +181,7 @@ static void ojDrawLoading(bool force)
 {
 	struct Canvas cnv;
 	char detail[80];
-	uint32_t barX;
-	uint32_t barW = 64u;
+	struct DcAppLoadingState loading = {};
 	uint64_t now = gOjLoadingHost && gOjLoadingHost->getTime ?
 		gOjLoadingHost->getTime() : 0;
 
@@ -193,13 +192,6 @@ static void ojDrawLoading(bool force)
 		return;
 	gOjLoadingLastDraw = now;
 	cnv = ojCanvas(gOjLoadingHost, gOjLoadingArgs);
-	barX = 22u + (gOjLoadingStep * 19u) % 212u;
-	if (gOjLoadingByteTotal) {
-		barX = 22u;
-		barW = 276u * gOjLoadingBytes / gOjLoadingByteTotal;
-		if (barW > 276u)
-			barW = 276u;
-	}
 	if (gOjLoadingEntryTotal)
 		snprintf(detail, sizeof(detail), "%s %u/%u",
 			gOjLoadingAsset[0] ? gOjLoadingAsset : "Caching",
@@ -208,17 +200,14 @@ static void ojDrawLoading(bool force)
 	else
 		ojCopyLoadingText(detail, sizeof(detail),
 			gOjLoadingAsset[0] ? gOjLoadingAsset : "Please wait");
+	loading.appName = "OpenJazz";
+	loading.title = gOjLoadingStage[0] ? gOjLoadingStage : "Starting";
+	loading.detail = detail;
+	loading.done = gOjLoadingByteTotal ? gOjLoadingBytes : 0u;
+	loading.total = gOjLoadingByteTotal;
+	loading.animationStep = gOjLoadingStep;
 	ojBeginDraw(gOjLoadingHost);
-	ojFill(&cnv, 0, 0, 320, 240, dcAppDrawRgb565(7, 10, 18));
-	ojCentered(&cnv, 48, "OpenJazz", FontLarge, dcAppDrawRgb565(246, 247, 241));
-	ojCentered(&cnv, 92, gOjLoadingStage[0] ? gOjLoadingStage : "Starting", FontMedium,
-		dcAppDrawRgb565(248, 190, 66));
-	ojCentered(&cnv, 122, detail, FontSmall,
-		dcAppDrawRgb565(172, 205, 226));
-	ojFill(&cnv, 20, 154, 280, 14, dcAppDrawRgb565(38, 47, 60));
-	ojFill(&cnv, (int32_t)barX, 156, (int32_t)barW, 10,
-		dcAppDrawRgb565(92, 205, 176));
-	ojCentered(&cnv, 190, "Loading game data", FontSmall, dcAppDrawRgb565(157, 178, 196));
+	dcAppDrawLoadingCanvas(&cnv, &loading);
 	gOjLoadingStep++;
 }
 
@@ -329,7 +318,7 @@ void dc32OjShowMessage(const struct DcAppHostApi *host, const struct DcAppRunArg
 	ojCentered(&cnv, 106, line1 ? line1 : "", FontMedium, accent);
 	ojCentered(&cnv, 132, line2 ? line2 : "", FontSmall, dim);
 	if (waitForCenter)
-		ojCentered(&cnv, 184, "Center exits", FontMedium, dim);
+		ojCentered(&cnv, 184, "FN exits", FontMedium, dim);
 	if (!waitForCenter)
 		return;
 	if (host && host->uiKeysRaw && host->delayMsec) {
@@ -346,15 +335,18 @@ static bool ojProgress(const struct DcAppHostApi *host, const struct DcAppRunArg
 	const char *name, uint32_t done, uint32_t total)
 {
 	struct Canvas cnv = ojCanvas(host, args);
-	uint32_t filled = total ? (276u * done) / total : 0u;
+	const struct DcAppLoadingState loading = {
+		.appName = "OpenJazz",
+		.title = "Installing game data",
+		.detail = name ? name : "Reading JAZZ.ZIP",
+		.hint = "FN cancels",
+		.done = done,
+		.total = total,
+		.animationStep = done,
+	};
 
 	ojBeginDraw(host);
-	ojFill(&cnv, 0, 0, 320, 240, dcAppDrawRgb565(7, 10, 18));
-	ojCentered(&cnv, 48, "Installing Jazz", FontLarge, dcAppDrawRgb565(246, 247, 241));
-	ojCentered(&cnv, 94, name ? name : "Reading JAZZ.ZIP", FontSmall, dcAppDrawRgb565(172, 205, 226));
-	ojFill(&cnv, 20, 126, 280, 18, dcAppDrawRgb565(38, 47, 60));
-	ojFill(&cnv, 22, 128, (int32_t)filled, 14, dcAppDrawRgb565(248, 190, 66));
-	ojCentered(&cnv, 174, "Center cancels", FontMedium, dcAppDrawRgb565(157, 178, 196));
+	dcAppDrawLoadingCanvas(&cnv, &loading);
 	if (host && host->delayMsec)
 		host->delayMsec(8);
 	return !(host && host->uiKeysRaw && (host->uiKeysRaw() & UI_KEY_BIT_CENTER));

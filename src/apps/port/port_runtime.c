@@ -517,7 +517,7 @@ void dc32PortShowMissingData(const struct DcAppHostApi *host, const struct DcApp
 		dc32PortDrawCenteredText(&draw, 68, title ? title : "Missing data", FontLarge, dcAppDrawRgb565(255, 255, 255));
 		dc32PortDrawCenteredText(&draw, 104, "Install required file:", FontMedium, dcAppDrawRgb565(180, 210, 255));
 		dc32PortDrawCenteredText(&draw, 126, path ? path : "/APPS/app.pak", FontMedium, dcAppDrawRgb565(255, 210, 120));
-		dc32PortDrawCenteredText(&draw, 162, "Center exits", FontMedium, dcAppDrawRgb565(180, 180, 180));
+		dc32PortDrawCenteredText(&draw, 162, "FN exits", FontMedium, dcAppDrawRgb565(180, 180, 180));
 	}
 	dcAppDrawWaitRelease(&draw, UI_KEY_BIT_CENTER);
 }

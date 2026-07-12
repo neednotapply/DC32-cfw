@@ -41,9 +41,26 @@ const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_he
 #define SCORCH_PI 3.14159265f
 
 enum ScorchMode {
+	ScorchModeSetup,
+	ScorchModeLoadout,
 	ScorchModeAim,
+	ScorchModeWeapon,
 	ScorchModeProjectile,
 	ScorchModeRoundOver,
+};
+
+enum ScorchSetupItem {
+	ScorchSetupPlayers,
+	ScorchSetupRules,
+	ScorchSetupBudget,
+	ScorchSetupWind,
+	ScorchSetupStart,
+	ScorchSetupItemCount,
+};
+
+enum ScorchMatchRules {
+	ScorchMatchRulesCash,
+	ScorchMatchRulesPreset,
 };
 
 struct ScorchTank {
@@ -91,10 +108,18 @@ struct ScorchGame {
 	uint32_t highRound;
 	int32_t bestCash;
 	int16_t wind;
+	int16_t windLimit;
+	int32_t startingCash;
+	uint8_t presetInventory[SCORCH_MAX_WEAPONS];
+	enum ScorchMatchRules matchRules;
 	uint8_t current;
 	uint8_t aiDelay;
 	uint8_t roundDelay;
 	uint8_t bannerFrames;
+	uint8_t tankCount;
+	uint8_t setupSelection;
+	uint8_t weaponSelection;
+	uint8_t loadoutSelection;
 	bool running;
 	char banner[42];
 };
@@ -210,6 +235,11 @@ static uint8_t scorchPrevWeapon(uint8_t current)
 	return current;
 }
 
+static uint8_t scorchMoveWeapon(uint8_t current, int direction)
+{
+	return direction < 0 ? scorchPrevWeapon(current) : scorchNextWeapon(current);
+}
+
 static bool scorchCanUseWeapon(const struct ScorchTank *tank, uint8_t weapon)
 {
 	if (!tank || !scorchWeaponUsable(weapon))
@@ -219,20 +249,32 @@ static bool scorchCanUseWeapon(const struct ScorchTank *tank, uint8_t weapon)
 	return tank->inventory[weapon] > 0;
 }
 
-static void scorchGrantStartingInventory(struct ScorchTank *tank)
+static void scorchSetDefaultInventory(uint8_t inventory[SCORCH_MAX_WEAPONS])
 {
 	int missile = scorchFindWeapon("Missile");
 	int babyNuke = scorchFindWeapon("BabyNuke");
 	int mirv = scorchFindWeapon("MIRV");
 
-	memset(tank->inventory, 0, sizeof(tank->inventory));
+	memset(inventory, 0, SCORCH_MAX_WEAPONS);
 	if (missile > 0 && missile < (int)SCORCH_MAX_WEAPONS)
-		tank->inventory[missile] = 2;
+		inventory[missile] = 2;
 	if (babyNuke > 0 && babyNuke < (int)SCORCH_MAX_WEAPONS)
-		tank->inventory[babyNuke] = 1;
+		inventory[babyNuke] = 1;
 	if (mirv > 0 && mirv < (int)SCORCH_MAX_WEAPONS)
-		tank->inventory[mirv] = 1;
-	tank->weapon = 1;
+		inventory[mirv] = 1;
+}
+
+static void scorchGrantStartingInventory(const struct ScorchGame *game, struct ScorchTank *tank)
+{
+	int missile = scorchFindWeapon("Missile");
+
+	if (game->matchRules == ScorchMatchRulesPreset)
+		memcpy(tank->inventory, game->presetInventory, sizeof(tank->inventory));
+	else
+		scorchSetDefaultInventory(tank->inventory);
+	tank->weapon = missile > 0 && missile < (int)SCORCH_MAX_WEAPONS ? (uint8_t)missile : scorchNextWeapon(0);
+	if (!scorchCanUseWeapon(tank, tank->weapon))
+		tank->weapon = scorchNextWeapon(0);
 }
 
 static void scorchSaveGame(struct ScorchGame *game)
@@ -306,15 +348,17 @@ static void scorchPlaceTanks(struct ScorchGame *game)
 		int x = baseX[i] + scorchRandRange(game, -10, 10);
 
 		memset(tank, 0, sizeof(*tank));
+		if (i >= game->tankCount)
+			continue;
 		tank->x = (int16_t)x;
 		tank->y = (int16_t)(scorchGroundAt(game, x) - 5);
 		tank->angle = i < 2 ? 45 : 135;
 		tank->power = 62;
 		tank->health = 100;
-		tank->cash = i == 0 ? 25000 : 18000;
+		tank->cash = game->matchRules == ScorchMatchRulesCash ? game->startingCash : 0;
 		tank->alive = true;
 		tank->human = i == 0;
-		scorchGrantStartingInventory(tank);
+		scorchGrantStartingInventory(game, tank);
 	}
 }
 
@@ -326,7 +370,7 @@ static void scorchStartRound(struct ScorchGame *game)
 	game->projectile.active = false;
 	game->aiDelay = 45;
 	game->roundDelay = 0;
-	game->wind = (int16_t)scorchRandRange(game, -20, 20);
+	game->wind = (int16_t)scorchRandRange(game, -game->windLimit, game->windLimit);
 	scorchGenerateTerrain(game);
 	scorchPlaceTanks(game);
 	scorchBanner(game, "ROUND START");
@@ -602,6 +646,140 @@ static void scorchAiTurn(struct ScorchGame *game)
 	scorchFire(game);
 }
 
+static void scorchStartMatch(struct ScorchGame *game)
+{
+	game->round = 0;
+	game->projectile.active = false;
+	scorchStartRound(game);
+}
+
+static void scorchSetupChange(struct ScorchGame *game, int direction)
+{
+	static const int32_t cashOptions[] = {10000, 25000, 50000};
+	static const int16_t windOptions[] = {8, 20, 35};
+
+	switch (game->setupSelection) {
+	case ScorchSetupPlayers:
+		game->tankCount = (uint8_t)(game->tankCount + direction);
+		if (game->tankCount < 2u)
+			game->tankCount = SCORCH_MAX_TANKS;
+		if (game->tankCount > SCORCH_MAX_TANKS)
+			game->tankCount = 2u;
+		break;
+	case ScorchSetupRules:
+		game->matchRules = game->matchRules == ScorchMatchRulesCash ?
+			ScorchMatchRulesPreset : ScorchMatchRulesCash;
+		break;
+	case ScorchSetupBudget:
+		if (game->matchRules != ScorchMatchRulesCash)
+			break;
+		for (uint32_t i = 0; i < sizeof(cashOptions) / sizeof(cashOptions[0]); i++) {
+			if (game->startingCash == cashOptions[i]) {
+				int index = (int)i + direction;
+
+				if (index < 0)
+					index = (int)(sizeof(cashOptions) / sizeof(cashOptions[0])) - 1;
+				if (index >= (int)(sizeof(cashOptions) / sizeof(cashOptions[0])))
+					index = 0;
+				game->startingCash = cashOptions[index];
+				break;
+			}
+		}
+		break;
+	case ScorchSetupWind:
+		for (uint32_t i = 0; i < sizeof(windOptions) / sizeof(windOptions[0]); i++) {
+			if (game->windLimit == windOptions[i]) {
+				int index = (int)i + direction;
+
+				if (index < 0)
+					index = (int)(sizeof(windOptions) / sizeof(windOptions[0])) - 1;
+				if (index >= (int)(sizeof(windOptions) / sizeof(windOptions[0])))
+					index = 0;
+				game->windLimit = windOptions[index];
+				break;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void scorchOpenWeaponMenu(struct ScorchGame *game, const struct ScorchTank *tank)
+{
+	if (!scorchWeaponUsable(tank->weapon))
+		game->weaponSelection = scorchNextWeapon(0);
+	else
+		game->weaponSelection = tank->weapon;
+	game->mode = ScorchModeWeapon;
+}
+
+static void scorchEquipSelectedWeapon(struct ScorchGame *game, struct ScorchTank *tank)
+{
+	tank->weapon = game->weaponSelection;
+	if (!scorchCanUseWeapon(tank, tank->weapon))
+		scorchBuySelected(game, tank);
+	if (!scorchCanUseWeapon(tank, tank->weapon)) {
+		scorchBanner(game, "NEED CASH");
+		return;
+	}
+	game->mode = ScorchModeAim;
+	scorchBanner(game, xscorchWeapons[tank->weapon].name);
+}
+
+static void scorchHandleSetupInput(struct ScorchGame *game, uint_fast16_t pressed)
+{
+	if (pressed & KEY_BIT_UP)
+		game->setupSelection = game->setupSelection ? game->setupSelection - 1u : ScorchSetupItemCount - 1u;
+	if (pressed & KEY_BIT_DOWN)
+		game->setupSelection = (uint8_t)((game->setupSelection + 1u) % ScorchSetupItemCount);
+	if (pressed & KEY_BIT_LEFT)
+		scorchSetupChange(game, -1);
+	if (pressed & KEY_BIT_RIGHT)
+		scorchSetupChange(game, 1);
+	if ((pressed & KEY_BIT_A) && game->setupSelection == ScorchSetupBudget &&
+			game->matchRules == ScorchMatchRulesPreset) {
+		game->loadoutSelection = scorchNextWeapon(0);
+		game->mode = ScorchModeLoadout;
+		return;
+	}
+	if (pressed & KEY_BIT_START || ((pressed & KEY_BIT_A) && game->setupSelection == ScorchSetupStart))
+		scorchStartMatch(game);
+	if (pressed & KEY_BIT_B)
+		game->running = false;
+}
+
+static void scorchHandleLoadoutInput(struct ScorchGame *game, uint_fast16_t pressed)
+{
+	uint8_t *count;
+
+	if (pressed & KEY_BIT_UP)
+		game->loadoutSelection = scorchMoveWeapon(game->loadoutSelection, -1);
+	if (pressed & KEY_BIT_DOWN)
+		game->loadoutSelection = scorchMoveWeapon(game->loadoutSelection, 1);
+	count = &game->presetInventory[game->loadoutSelection];
+	if ((pressed & KEY_BIT_LEFT) && *count > 0u)
+		(*count)--;
+	if ((pressed & KEY_BIT_RIGHT) && *count < 9u)
+		(*count)++;
+	if (pressed & (KEY_BIT_A | KEY_BIT_B | KEY_BIT_START))
+		game->mode = ScorchModeSetup;
+}
+
+static void scorchHandleWeaponInput(struct ScorchGame *game, uint_fast16_t pressed)
+{
+	struct ScorchTank *tank = &game->tanks[game->current];
+
+	if (pressed & KEY_BIT_UP)
+		game->weaponSelection = scorchMoveWeapon(game->weaponSelection, -1);
+	if (pressed & KEY_BIT_DOWN)
+		game->weaponSelection = scorchMoveWeapon(game->weaponSelection, 1);
+	if (pressed & (KEY_BIT_A | KEY_BIT_SEL))
+		scorchEquipSelectedWeapon(game, tank);
+	if (pressed & (KEY_BIT_B | KEY_BIT_START))
+		game->mode = ScorchModeAim;
+}
+
 static void scorchHandleInput(struct ScorchGame *game)
 {
 	struct ScorchTank *tank = &game->tanks[game->current];
@@ -611,9 +789,25 @@ static void scorchHandleInput(struct ScorchGame *game)
 		game->running = false;
 		return;
 	}
+	if (game->mode == ScorchModeSetup) {
+		scorchHandleSetupInput(game, pressed);
+		return;
+	}
+	if (game->mode == ScorchModeLoadout) {
+		scorchHandleLoadoutInput(game, pressed);
+		return;
+	}
+	if (game->mode == ScorchModeWeapon) {
+		scorchHandleWeaponInput(game, pressed);
+		return;
+	}
 	if (game->mode == ScorchModeRoundOver) {
 		if (pressed & (KEY_BIT_START | KEY_BIT_A))
 			scorchStartRound(game);
+		if (pressed & KEY_BIT_B)
+			scorchGenerateTerrain(game);
+		if (pressed & KEY_BIT_B)
+			game->mode = ScorchModeSetup;
 		return;
 	}
 	if (game->mode != ScorchModeAim || !tank->human)
@@ -636,14 +830,8 @@ static void scorchHandleInput(struct ScorchGame *game)
 		tank->power = 100;
 	if (pressed & KEY_BIT_A)
 		scorchFire(game);
-	if (pressed & KEY_BIT_B) {
-		tank->weapon = (game->draw.keys & KEY_BIT_UP) ? scorchPrevWeapon(tank->weapon) : scorchNextWeapon(tank->weapon);
-		scorchBanner(game, xscorchWeapons[tank->weapon].name);
-	}
-	if (pressed & KEY_BIT_SEL)
-		scorchBuySelected(game, tank);
-	if (pressed & KEY_BIT_START)
-		scorchStartRound(game);
+	if (pressed & (KEY_BIT_B | KEY_BIT_SEL))
+		scorchOpenWeaponMenu(game, tank);
 }
 
 static void scorchDrawTerrain(struct ScorchGame *game)
@@ -680,6 +868,131 @@ static void scorchDrawTank(struct ScorchGame *game, const struct ScorchTank *tan
 		dcAppDrawLine(&game->draw, tx - 5, ty - 10, tx + 5, ty, scorchRgb(20, 20, 20));
 }
 
+static void scorchDrawSetupTerrain(struct ScorchGame *game)
+{
+	uint16_t dirt = scorchRgb(102, 70, 37);
+	uint16_t dirtLight = scorchRgb(132, 93, 48);
+	uint16_t grass = scorchRgb(70, 177, 66);
+
+	for (uint32_t x = 0; x < SCORCH_SCREEN_W; x++) {
+		int y = 211 + ((int)scorchGroundAt(game, (int)x) - 150) / 4;
+
+		if (y < 195)
+			y = 195;
+		if (y > (int)SCORCH_SCREEN_H - 12)
+			y = (int)SCORCH_SCREEN_H - 12;
+		dcAppDrawLine(&game->draw, (int32_t)x, y, (int32_t)x, SCORCH_SCREEN_H - 1, dirt);
+		dcAppDrawPixel(&game->draw, (int32_t)x, y, grass);
+		if (((int)x + y) % 13 == 0)
+			dcAppDrawLine(&game->draw, (int32_t)x, y + 4, (int32_t)x, y + 7, dirtLight);
+	}
+}
+
+static void scorchMenuPanel(struct ScorchGame *game, const char *title, int32_t bottom)
+{
+	uint16_t border = scorchRgb(72, 175, 178);
+	uint16_t panel = scorchRgb(16, 42, 55);
+
+	dcAppDrawClear(&game->draw, scorchRgb(25, 57, 82));
+	dcAppDrawFill(&game->draw, 18, 18, 284, bottom - 17, panel);
+	dcAppDrawLine(&game->draw, 18, 18, 301, 18, border);
+	dcAppDrawLine(&game->draw, 18, 18, 18, bottom, border);
+	dcAppDrawLine(&game->draw, 301, 18, 301, bottom, border);
+	dcAppDrawLine(&game->draw, 18, bottom, 301, bottom, border);
+	dcAppDrawFill(&game->draw, 22, 22, 276, 25, scorchRgb(20, 86, 94));
+	scorchDrawCentered(&game->draw, 27, title, FontMedium, scorchRgb(232, 246, 235));
+}
+
+static void scorchMenuItem(struct ScorchGame *game, int32_t y, const char *text, bool selected)
+{
+	uint16_t color = selected ? scorchRgb(242, 255, 245) : scorchRgb(185, 220, 214);
+
+	if (selected)
+		dcAppDrawFill(&game->draw, 36, y - 3, 248, 18, scorchRgb(20, 105, 105));
+	scorchDrawText(&game->draw, 44, y, text, FontMedium, color);
+}
+
+static const char *scorchWindLabel(int16_t windLimit)
+{
+	if (windLimit <= 8)
+		return "CALM";
+	if (windLimit >= 35)
+		return "STRONG";
+	return "NORMAL";
+}
+
+static void scorchDrawSetup(struct ScorchGame *game)
+{
+	char text[38];
+
+	scorchMenuPanel(game, "SCORCHED EARTH (XSCORCH)", 190);
+	scorchDrawSetupTerrain(game);
+	snprintf(text, sizeof(text), "PLAYERS             %u", (unsigned)game->tankCount);
+	scorchMenuItem(game, 54, text, game->setupSelection == ScorchSetupPlayers);
+	snprintf(text, sizeof(text), "MATCH RULES         %s",
+		game->matchRules == ScorchMatchRulesCash ? "CASH" : "PRESET");
+	scorchMenuItem(game, 76, text, game->setupSelection == ScorchSetupRules);
+	if (game->matchRules == ScorchMatchRulesCash)
+		snprintf(text, sizeof(text), "STARTING CASH       $%ld", (long)game->startingCash);
+	else
+		snprintf(text, sizeof(text), "EDIT PRESET LOADOUT");
+	scorchMenuItem(game, 98, text, game->setupSelection == ScorchSetupBudget);
+	snprintf(text, sizeof(text), "WIND                %s", scorchWindLabel(game->windLimit));
+	scorchMenuItem(game, 120, text, game->setupSelection == ScorchSetupWind);
+	scorchMenuItem(game, 150, "START MATCH", game->setupSelection == ScorchSetupStart);
+	scorchDrawCentered(&game->draw, 171, "UP/DOWN SELECT   LEFT/RIGHT CHANGE", FontSmall,
+		scorchRgb(130, 180, 190));
+	scorchDrawCentered(&game->draw, 184, "A SELECT   B EXIT", FontSmall, scorchRgb(180, 220, 215));
+}
+
+static void scorchDrawWeaponMenu(struct ScorchGame *game)
+{
+	const struct ScorchTank *tank = &game->tanks[game->current];
+	uint8_t weapon = game->weaponSelection;
+	char text[52];
+
+	for (uint32_t i = 0; i < 2u; i++)
+		weapon = scorchPrevWeapon(weapon);
+	scorchMenuPanel(game, "WEAPON SELECT", 221);
+	for (uint32_t row = 0; row < 5u; row++) {
+		const struct XscorchWeaponInfo *info = &xscorchWeapons[weapon];
+
+		if (info->price <= 0)
+			snprintf(text, sizeof(text), "%-18.18s  FREE", info->name);
+		else if (tank->inventory[weapon] > 0)
+			snprintf(text, sizeof(text), "%-18.18s  x%u", info->name,
+				(unsigned)tank->inventory[weapon]);
+		else
+			snprintf(text, sizeof(text), "%-18.18s  $%ld", info->name, (long)info->price);
+		scorchMenuItem(game, 62 + (int32_t)row * 25, text, weapon == game->weaponSelection);
+		weapon = scorchNextWeapon(weapon);
+	}
+	snprintf(text, sizeof(text), "CASH $%ld", (long)tank->cash);
+	scorchDrawCentered(&game->draw, 190, text, FontSmall, scorchRgb(180, 220, 215));
+	scorchDrawCentered(&game->draw, 206, "UP/DOWN SELECT   A EQUIP/BUY   B BACK", FontSmall,
+		scorchRgb(130, 180, 190));
+}
+
+static void scorchDrawLoadoutMenu(struct ScorchGame *game)
+{
+	uint8_t weapon = game->loadoutSelection;
+	char text[52];
+
+	for (uint32_t i = 0; i < 2u; i++)
+		weapon = scorchPrevWeapon(weapon);
+	scorchMenuPanel(game, "PRESET LOADOUT", 221);
+	for (uint32_t row = 0; row < 5u; row++) {
+		snprintf(text, sizeof(text), "%-20.20s  x%u", xscorchWeapons[weapon].name,
+			(unsigned)game->presetInventory[weapon]);
+		scorchMenuItem(game, 62 + (int32_t)row * 25, text, weapon == game->loadoutSelection);
+		weapon = scorchNextWeapon(weapon);
+	}
+	scorchDrawCentered(&game->draw, 190, "EACH TANK STARTS WITH THIS LOADOUT", FontSmall,
+		scorchRgb(180, 220, 215));
+	scorchDrawCentered(&game->draw, 206, "UP/DOWN ITEM   LEFT/RIGHT COUNT   B BACK", FontSmall,
+		scorchRgb(130, 180, 190));
+}
+
 static void scorchDrawHud(struct ScorchGame *game)
 {
 	const struct ScorchTank *tank = &game->tanks[game->current];
@@ -698,9 +1011,9 @@ static void scorchDrawHud(struct ScorchGame *game)
 		(long)tank->cash);
 	scorchDrawText(&game->draw, 150, 220, text, FontSmall, dim);
 	if (game->mode == ScorchModeRoundOver)
-		scorchDrawCentered(&game->draw, 104, "START NEXT ROUND", FontMedium, white);
+		scorchDrawCentered(&game->draw, 104, "A NEXT ROUND   B SETUP", FontMedium, white);
 	else if (tank->human && game->mode == ScorchModeAim)
-		scorchDrawText(&game->draw, 206, 5, "A FIRE  B WEAPON  SEL BUY", FontSmall, dim);
+		scorchDrawText(&game->draw, 206, 5, "A FIRE  B WEAPONS", FontSmall, dim);
 	if (game->bannerFrames > 0) {
 		scorchDrawCentered(&game->draw, 24, game->banner, FontMedium, white);
 		game->bannerFrames--;
@@ -709,9 +1022,24 @@ static void scorchDrawHud(struct ScorchGame *game)
 
 static void scorchDraw(struct ScorchGame *game)
 {
+	if (game->mode == ScorchModeSetup) {
+		scorchDrawSetup(game);
+		dcAppDrawPresent(&game->draw);
+		return;
+	}
+	if (game->mode == ScorchModeLoadout) {
+		scorchDrawLoadoutMenu(game);
+		dcAppDrawPresent(&game->draw);
+		return;
+	}
+	if (game->mode == ScorchModeWeapon) {
+		scorchDrawWeaponMenu(game);
+		dcAppDrawPresent(&game->draw);
+		return;
+	}
 	dcAppDrawClear(&game->draw, scorchRgb(58, 77, 110));
 	scorchDrawTerrain(game);
-	for (uint32_t i = 0; i < SCORCH_MAX_TANKS; i++)
+	for (uint32_t i = 0; i < game->tankCount; i++)
 		scorchDrawTank(game, &game->tanks[i], (uint8_t)i);
 	if (game->projectile.active) {
 		int x = (int)game->projectile.x;
@@ -751,6 +1079,14 @@ int scorchAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 	game->host = host;
 	game->args = args;
 	game->rng = 0x53434f52u;
+	game->tankCount = SCORCH_MAX_TANKS;
+	game->startingCash = 25000;
+	game->windLimit = 20;
+	game->matchRules = ScorchMatchRulesCash;
+	scorchSetDefaultInventory(game->presetInventory);
+	game->loadoutSelection = scorchNextWeapon(0);
+	scorchGenerateTerrain(game);
+	game->mode = ScorchModeSetup;
 	if (!dcAppDrawInit(&game->draw, host, args, game->frame, SCORCH_SCREEN_W, SCORCH_SCREEN_H))
 		return -1;
 	if (!scorchAssetsPresent(args)) {
@@ -758,8 +1094,8 @@ int scorchAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 		return 0;
 	}
 	scorchRestoreSave(game);
-	scorchStartRound(game);
-	dcAppDrawWaitRelease(&game->draw, KEY_BIT_A | KEY_BIT_B | KEY_BIT_START | KEY_BIT_SEL | UI_KEY_BIT_CENTER);
+	dcAppDrawWaitRelease(&game->draw, KEY_BIT_A | KEY_BIT_B | KEY_BIT_UP | KEY_BIT_DOWN |
+		KEY_BIT_LEFT | KEY_BIT_RIGHT | KEY_BIT_START | KEY_BIT_SEL | UI_KEY_BIT_CENTER);
 	dispSetFramerate(60);
 	game->running = true;
 	while (game->running && !mScorchAbort) {

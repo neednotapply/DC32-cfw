@@ -27,6 +27,18 @@ enum LedColor {
 	LedColorNumColors,
 };
 
+enum ScreenSaver {
+	ScreenSaverOff,
+	ScreenSaverStarfield,
+	ScreenSaverCube,
+	ScreenSaverSpyro,
+	ScreenSaverGif,
+	ScreenSaverImageFolder,
+	ScreenSaverNumModes,
+};
+
+#define SETTINGS_SCREENSAVER_PATH_MAX 64u
+
 enum AutoclickerButton {
 	AutoclickerButtonLeft,
 	AutoclickerButtonRight,
@@ -95,6 +107,15 @@ struct Settings {
 	uint8_t nesSpeed	:	2;
 	uint8_t nesUpscale	:	1;
 	uint8_t emulatorReserved : 7;
+	uint8_t powerSaveEnabled;
+	uint8_t powerSaveBrightness;
+	uint8_t powerSaveTimeout;
+	uint8_t screenSaver;
+	uint8_t screenSaverTimeout;
+	uint8_t screenSaverRotation;
+	uint8_t screenSaverBrightness;
+	char screenSaverGifPath[SETTINGS_SCREENSAVER_PATH_MAX];
+	char screenSaverImageFolder[SETTINGS_SCREENSAVER_PATH_MAX];
 };
 
 

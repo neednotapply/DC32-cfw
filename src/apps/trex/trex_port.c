@@ -26,7 +26,6 @@
 #define TREX_ARCADE_CANVAS_Y 16
 #define TREX_FPS 60u
 #define TREX_FRAME_MS (1000.0f / 60.0f)
-#define TREX_DEFAULT_WIDTH 600.0f
 
 #define TREX_RUNNER_ACCELERATION 0.001f
 #define TREX_RUNNER_BOTTOM_PAD 10
@@ -38,7 +37,6 @@
 #define TREX_RUNNER_MAX_BLINK_COUNT 3u
 #define TREX_RUNNER_MAX_OBSTACLE_DUPLICATION 2u
 #define TREX_RUNNER_MAX_SPEED 13.0f
-#define TREX_RUNNER_MOBILE_SPEED_COEFFICIENT 1.2f
 #define TREX_RUNNER_SPEED 6.0f
 
 #define TREX_PLAYER_DROP_VELOCITY (-5.0f)
@@ -964,14 +962,6 @@ static void trexResetHorizon(struct TrexGame *game)
 	trexResetNight(game);
 }
 
-static float trexResponsiveSpeed(float speed)
-{
-	float mobile = speed * TREX_CANVAS_W / TREX_DEFAULT_WIDTH *
-		TREX_RUNNER_MOBILE_SPEED_COEFFICIENT;
-
-	return mobile > speed ? speed : mobile;
-}
-
 static void trexRestart(struct TrexGame *game)
 {
 	game->runningTime = 0.0f;
@@ -979,7 +969,8 @@ static void trexRestart(struct TrexGame *game)
 	game->paused = false;
 	game->crashed = false;
 	game->distanceRan = 0.0f;
-	game->currentSpeed = trexResponsiveSpeed(TREX_RUNNER_SPEED);
+	/* The badge uses a fixed canvas, not Chrome's responsive mobile layout. */
+	game->currentSpeed = TREX_RUNNER_SPEED;
 	game->crashElapsed = 0.0f;
 	game->scoreAchievement = false;
 	game->scoreFlashIterations = 0;
@@ -1299,7 +1290,7 @@ static bool trexInit(struct TrexGame *game, const struct DcAppHostApi *host,
 		return false;
 	now = host->getTime ? host->getTime() : 0x54524558u;
 	game->rng = (uint32_t)(now ^ (now >> 32));
-	game->currentSpeed = trexResponsiveSpeed(TREX_RUNNER_SPEED);
+	game->currentSpeed = TREX_RUNNER_SPEED;
 	game->canvasY = TREX_WAIT_CANVAS_Y;
 	game->clipWidth = TREX_PLAYER_WIDTH;
 	game->horizonX[0] = 0;

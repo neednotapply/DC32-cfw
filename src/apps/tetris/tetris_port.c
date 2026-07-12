@@ -579,32 +579,33 @@ static void tetrisDrawGame(struct TetrisApp *app)
 
 static void tetrisDrawTitle(struct TetrisApp *app)
 {
-	static const char *const labels[] = {"START", "MODE", "RULE", "RECORDS"};
+	static const char *const labels[] = {"START", "RECORDS"};
 	uint16_t white = tetrisRgb(240, 245, 255);
 	uint16_t cyan = tetrisRgb(60, 220, 255);
 	uint16_t dim = tetrisRgb(100, 120, 145);
+	char line[48];
 
 	dcAppDrawClear(&app->draw, tetrisRgb(3, 6, 14));
 	tetrisCentered(app, 0, 320, 10, "TETRIS", FontLarge, white);
 	tetrisCentered(app, 0, 320, 34, "NULLPOMINO RULES", FontSmall, cyan);
-	for (uint8_t i = 0; i < 4; i++) {
-		int32_t y = 73 + i * 34;
+	for (uint8_t i = 0; i < 2; i++) {
+		int32_t y = 86 + i * 40;
 
 		if (i == app->titleSelection) {
 			dcAppDrawFill(&app->draw, 44, y - 4, 5, 16, cyan);
 			dcAppDrawLine(&app->draw, 55, y + 14, 275, y + 14, cyan);
 		}
 		tetrisText(app, 61, y, labels[i], FontMedium, white);
-		if (i == 1)
-			tetrisText(app, 174, y, tetrisModeGet(app->save.selectedMode)->name,
-				FontSmall, cyan);
-		else if (i == 2)
-			tetrisText(app, 174, y, tetrisRuleGet(app->save.selectedRule)->name,
-				FontSmall, cyan);
 	}
-	tetrisCentered(app, 0, 320, 214,
+	strcpy(line, "MODE: ");
+	tetrisAppend(line, sizeof(line), tetrisModeGet(app->save.selectedMode)->name);
+	tetrisCentered(app, 0, 320, 174, line, FontSmall, cyan);
+	strcpy(line, "RULESET: ");
+	tetrisAppend(line, sizeof(line), tetrisRuleGet(app->save.selectedRule)->name);
+	tetrisCentered(app, 0, 320, 188, line, FontSmall, cyan);
+	tetrisCentered(app, 0, 320, 207,
 		tetrisModeGet(app->save.selectedMode)->description, FontSmall, dim);
-	tetrisCentered(app, 0, 320, 228, "A SELECT  CENTER EXIT", FontSmall, white);
+	tetrisCentered(app, 0, 320, 228, "A SELECT  FN MENU", FontSmall, white);
 }
 
 static void tetrisDrawRecords(struct TetrisApp *app)
@@ -665,9 +666,9 @@ static void tetrisStart(struct TetrisApp *app)
 	app->screen = TetrisScreenPlaying;
 }
 
-static void tetrisAdjustTitle(struct TetrisApp *app, int8_t direction)
+static void tetrisAdjustSetting(struct TetrisApp *app, uint8_t setting, int8_t direction)
 {
-	if (app->titleSelection == 1) {
+	if (setting == 0) {
 		int32_t value = app->save.selectedMode + direction;
 
 		if (value < 0) value = TetrisModeCount - 1;
@@ -676,7 +677,7 @@ static void tetrisAdjustTitle(struct TetrisApp *app, int8_t direction)
 		app->saveDirty = true;
 		(void)tetrisWriteSave(app);
 	}
-	else if (app->titleSelection == 2) {
+	else if (setting == 1) {
 		int32_t value = app->save.selectedRule + direction;
 
 		if (value < 0) value = TetrisRuleCount - 1;
@@ -687,23 +688,49 @@ static void tetrisAdjustTitle(struct TetrisApp *app, int8_t direction)
 	}
 }
 
+static void tetrisFnSettingValue(void *context, uint8_t index, char *dst, uint32_t dstSize)
+{
+	struct TetrisApp *app = context;
+	const char *value = "";
+
+	if (app) {
+		if (index == 0)
+			value = tetrisModeGet(app->save.selectedMode)->name;
+		else if (index == 1)
+			value = tetrisRuleGet(app->save.selectedRule)->name;
+	}
+	if (dstSize) {
+		strncpy(dst, value, dstSize - 1u);
+		dst[dstSize - 1u] = 0;
+	}
+}
+
+static void tetrisFnSettingAdjust(void *context, uint8_t index, int8_t direction)
+{
+	if (context)
+		tetrisAdjustSetting(context, index, direction);
+}
+
+static const char *const mTetrisFnSettingLabels[] = {"Mode", "Ruleset"};
+static const struct UiFnSettings mTetrisFnSettings = {
+	.title = "App Settings",
+	.count = sizeof(mTetrisFnSettingLabels) / sizeof(*mTetrisFnSettingLabels),
+	.labels = mTetrisFnSettingLabels,
+	.value = tetrisFnSettingValue,
+	.adjust = tetrisFnSettingAdjust,
+};
+
 static void tetrisHandleTitle(struct TetrisApp *app)
 {
 	uint_fast16_t pressed = app->draw.pressed;
 
 	if (pressed & KEY_BIT_UP)
-		app->titleSelection = app->titleSelection ? app->titleSelection - 1u : 3u;
+		app->titleSelection = app->titleSelection ? app->titleSelection - 1u : 1u;
 	if (pressed & KEY_BIT_DOWN)
-		app->titleSelection = (app->titleSelection + 1u) % 4u;
-	if (pressed & KEY_BIT_LEFT)
-		tetrisAdjustTitle(app, -1);
-	if (pressed & KEY_BIT_RIGHT)
-		tetrisAdjustTitle(app, 1);
+		app->titleSelection = (app->titleSelection + 1u) % 2u;
 	if (pressed & KEY_BIT_A) {
 		if (app->titleSelection == 0)
 			tetrisStart(app);
-		else if (app->titleSelection == 1 || app->titleSelection == 2)
-			tetrisAdjustTitle(app, 1);
 		else {
 			app->recordsRule = app->save.selectedRule;
 			app->screen = TetrisScreenRecords;
@@ -806,6 +833,8 @@ static bool tetrisInit(struct TetrisApp *app, const struct DcAppHostApi *host,
 	now = host->getTime ? host->getTime() : 0x4e554c4c504f4d49ull;
 	app->seed = (uint32_t)(now ^ (now >> 32));
 	tetrisLoadSave(app);
+	if (host->setFnSettings)
+		host->setFnSettings(&mTetrisFnSettings, app);
 	app->recordsRule = app->save.selectedRule;
 	app->screen = TetrisScreenTitle;
 	return true;

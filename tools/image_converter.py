@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import struct
 import sys
 from collections import defaultdict
@@ -41,6 +42,7 @@ DCA_CODEC_RAW = 0
 DCA_CODEC_RLE = 1
 DCA_DEFAULT_MAX_BYTES = 3 * 1024 * 1024
 DCA_TILE = 16
+DC32_GIF_TRAILER_MAGIC = b"DC32GIF1"
 
 SUPPORTED_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 ANIMATED_SUFFIXES = {".gif", ".webp", ".png"}
@@ -55,6 +57,7 @@ class ConvertPlan:
     still_sources: list[Path]
     animated_sources: list[Path]
     skipped_outputs: int
+    outputs: dict[Path, Path]
 
 
 @dataclass(frozen=True)
@@ -151,8 +154,51 @@ def write_static(src: Path, dst: Path) -> None:
     dst.write_bytes(pack_dci_header(DCI_KIND_STATIC, 1, 0, len(payload)) + payload)
 
 
+def default_output_path(src: Path) -> Path:
+    return src.parent / "converted" / f"{src.stem}.gif"
+
+
+def output_paths(sources: list[Path]) -> dict[Path, Path]:
+    """Assign deterministic, non-destructive GIF names for every source.
+
+    Most files retain their base name.  When formats share a base name, add
+    that original format only to the colliding output (for example,
+    ``photo.png`` and ``photo.webp`` become ``photo-png.gif`` and
+    ``photo-webp.gif``).
+    """
+    by_default: dict[Path, list[Path]] = defaultdict(list)
+    provisional: dict[Path, Path] = {}
+    outputs: dict[Path, Path] = {}
+    used: set[Path] = set()
+
+    for src in sources:
+        by_default[default_output_path(src)].append(src)
+    for dst, group in by_default.items():
+        for src in group:
+            if len(group) == 1:
+                provisional[src] = dst
+            else:
+                provisional[src] = dst.with_name(f"{src.stem}-{src.suffix[1:].lower()}.gif")
+
+    # Prefer untouched names first, then add a numeric suffix only for rare
+    # second-order collisions such as photo-png.png alongside photo.png.
+    for src in sorted(sources, key=lambda p: (provisional[p] != default_output_path(p), str(p).casefold())):
+        dst = provisional[src]
+        if dst in used:
+            suffix = 2
+            while True:
+                candidate = dst.with_name(f"{dst.stem}-{suffix}.gif")
+                if candidate not in used:
+                    dst = candidate
+                    break
+                suffix += 1
+        outputs[src] = dst
+        used.add(dst)
+    return outputs
+
+
 def source_paths(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES)
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES and "converted" not in path.relative_to(root).parts)
 
 
 def is_animated_source(src: Path) -> bool:
@@ -165,30 +211,11 @@ def is_animated_source(src: Path) -> bool:
         return False
 
 
-def validate_collisions(sources: list[Path], animated_sources: set[Path]) -> None:
-    by_dest: dict[Path, list[Path]] = defaultdict(list)
-    for src in sources:
-        by_dest[src.with_suffix(".dca" if src in animated_sources else ".dci")].append(src)
-    collisions = {dst: srcs for dst, srcs in by_dest.items() if len(srcs) > 1}
-    if collisions:
-        lines = ["Multiple sources would write the same converted file:"]
-        for dst, srcs in collisions.items():
-            lines.append(f"  {dst}:")
-            for src in srcs:
-                lines.append(f"    {src}")
-        raise ConversionError("\n".join(lines))
-
-
 def clean_orphans(root: Path, dry_run: bool) -> int:
     removed = 0
-    for converted in sorted([*root.rglob("*.dci"), *root.rglob("*.dca")]):
-        keep = False
-        for suffix in SUPPORTED_SUFFIXES:
-            src = converted.with_suffix(suffix)
-            if src.exists() and (converted.suffix.lower() == ".dca") == is_animated_source(src):
-                keep = True
-                break
-        if keep:
+    keep_paths = set(output_paths(source_paths(root)).values())
+    for converted in sorted(root.rglob("converted/*.gif")):
+        if converted in keep_paths:
             continue
         print(f"{'would remove' if dry_run else 'remove'} {converted}")
         removed += 1
@@ -409,23 +436,51 @@ def write_dca(src: Path, dst: Path, colors: int, target_fps: int, max_bytes: int
     raise ConversionError(f"{src} has no animation frames")
 
 
+def write_dc32_gif(src: Path, dst: Path, colors: int, target_fps: int, max_bytes: int) -> list[str]:
+    if is_animated_source(src):
+        frames, durations, loop = animation_frames(src)
+    else:
+        with Image.open(src) as image:
+            frames = [render_rgb_frame(image)]
+        durations, loop = [1000], 1
+    best: DcaBuild | None = None
+    for attempt_colors in dca_color_attempts(colors):
+        build = build_dca(src, frames, durations, loop, attempt_colors, target_fps)
+        if best is None or len(build.data) < len(best.data):
+            best = build
+        if len(build.data) <= max_bytes:
+            quantized, _ = quantize_frames(frames, attempt_colors)
+            browser = io.BytesIO()
+            # Pillow accepts a duration list only for multi-frame GIFs.
+            gif_duration = durations if len(quantized) > 1 else durations[0]
+            quantized[0].save(browser, format="GIF", save_all=len(quantized) > 1,
+                append_images=quantized[1:], duration=gif_duration, loop=loop, disposal=2, optimize=False)
+            dst.write_bytes(browser.getvalue() + DC32_GIF_TRAILER_MAGIC + build.data)
+            warnings = list(build.warnings)
+            if attempt_colors != colors:
+                warnings.append(f"{src.name}: reduced palette from {colors} to {attempt_colors} colors to fit {max_bytes} bytes")
+            return warnings
+    raise ConversionError(f"{src} would exceed {max_bytes} bytes after palette reduction")
+
+
 def plan_conversions(sources: list[Path], args: argparse.Namespace) -> ConvertPlan:
     animated_sources = [src for src in sources if is_animated_source(src)]
     animated_set = set(animated_sources)
     still_sources = [src for src in sources if src not in animated_set]
     skipped = 0
+    outputs = output_paths(sources)
 
     if not args.force:
         pending_still = []
         for src in still_sources:
-            dst = src.with_suffix(".dci")
+            dst = outputs[src]
             if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
                 skipped += 1
             else:
                 pending_still.append(src)
         pending_anim = []
         for src in animated_sources:
-            dst = src.with_suffix(".dca")
+            dst = outputs[src]
             if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
                 skipped += 1
             else:
@@ -433,24 +488,25 @@ def plan_conversions(sources: list[Path], args: argparse.Namespace) -> ConvertPl
         still_sources = pending_still
         animated_sources = pending_anim
 
-    return ConvertPlan(still_sources=still_sources, animated_sources=animated_sources, skipped_outputs=skipped)
+    return ConvertPlan(still_sources=still_sources, animated_sources=animated_sources,
+        skipped_outputs=skipped, outputs=outputs)
 
 
 def print_plan(plan: ConvertPlan) -> None:
-    print(f"{len(plan.still_sources)} still image(s) to convert to .dci")
-    print(f"{len(plan.animated_sources)} animated image(s) to convert to .dca")
+    print(f"{len(plan.still_sources)} still image(s) to convert to .gif")
+    print(f"{len(plan.animated_sources)} animated image(s) to convert to .gif")
     print(f"{plan.skipped_outputs} existing output(s) will be skipped")
 
 
-def convert_static_source(src: Path, force: bool, dry_run: bool) -> str:
-    dst = src.with_suffix(".dci")
+def convert_static_source(src: Path, dst: Path, force: bool, dry_run: bool) -> str:
     if dst.exists() and not force and dst.stat().st_mtime >= src.stat().st_mtime:
         return f"skip {dst}"
     if dry_run:
         return f"would convert {src} -> {dst}"
     tmp = dst.with_suffix(dst.suffix + ".tmp")
     try:
-        write_static(src, tmp)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        write_dc32_gif(src, tmp, 64, 30, DCA_DEFAULT_MAX_BYTES)
         tmp.replace(dst)
     finally:
         if tmp.exists():
@@ -458,15 +514,15 @@ def convert_static_source(src: Path, force: bool, dry_run: bool) -> str:
     return f"convert {src} -> {dst}"
 
 
-def convert_animated_source(src: Path, force: bool, dry_run: bool, colors: int, target_fps: int, max_bytes: int) -> str:
-    dst = src.with_suffix(".dca")
+def convert_animated_source(src: Path, dst: Path, force: bool, dry_run: bool, colors: int, target_fps: int, max_bytes: int) -> str:
     if dst.exists() and not force and dst.stat().st_mtime >= src.stat().st_mtime:
         return f"skip {dst}"
     if dry_run:
         return f"would convert {src} -> {dst}"
     tmp = dst.with_suffix(dst.suffix + ".tmp")
     try:
-        warnings = write_dca(src, tmp, colors, target_fps, max_bytes, dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        warnings = write_dc32_gif(src, tmp, colors, target_fps, max_bytes)
         tmp.replace(dst)
     finally:
         if tmp.exists():
@@ -482,7 +538,7 @@ def convert_sources(plan: ConvertPlan, args: argparse.Namespace) -> tuple[int, l
 
     for src in plan.still_sources:
         try:
-            result = convert_static_source(src, args.force, args.dry_run)
+            result = convert_static_source(src, plan.outputs[src], args.force, args.dry_run)
             print(result)
             if result.startswith("convert "):
                 converted += 1
@@ -492,7 +548,8 @@ def convert_sources(plan: ConvertPlan, args: argparse.Namespace) -> tuple[int, l
 
     for src in plan.animated_sources:
         try:
-            result = convert_animated_source(src, args.force, args.dry_run, args.colors, args.target_fps, args.max_bytes)
+            result = convert_animated_source(src, plan.outputs[src], args.force, args.dry_run,
+                args.colors, args.target_fps, args.max_bytes)
             print(result)
             if result.startswith("convert "):
                 converted += 1
@@ -516,10 +573,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("root", nargs="?", type=Path, help="Image folder to convert; defaults to this script's folder")
     parser.add_argument("--force", action="store_true", help="Regenerate existing outputs")
     parser.add_argument("--dry-run", action="store_true", help="Print work without writing files")
-    parser.add_argument("--clean", action="store_true", help="Remove .dci/.dca files whose source image no longer exists")
+    parser.add_argument("--clean", action="store_true", help="Remove stale converted .gif files")
     parser.add_argument("--colors", type=int, default=64, help="Animated palette size, 2-256 colors (default: 64)")
     parser.add_argument("--target-fps", type=int, default=30, help="Target animation FPS used for warnings (default: 30)")
-    parser.add_argument("--max-bytes", type=int, default=DCA_DEFAULT_MAX_BYTES, help="Max .dca file size in bytes")
+    parser.add_argument("--max-bytes", type=int, default=DCA_DEFAULT_MAX_BYTES, help="Max embedded DC32 payload size in bytes")
     return parser.parse_args(argv)
 
 
@@ -537,8 +594,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.clean:
         clean_orphans(root, args.dry_run)
     sources = source_paths(root)
-    animated_set = {src for src in sources if is_animated_source(src)}
-    validate_collisions(sources, animated_set)
     plan = plan_conversions(sources, args)
     print_plan(plan)
     converted, failures = convert_sources(plan, args)

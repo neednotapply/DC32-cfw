@@ -6,6 +6,8 @@
 
 
 
+struct Settings;
+
 struct Canvas {
         void *framebuffer;
         uint32_t w, h;
@@ -43,6 +45,16 @@ enum GameRuntime {
 	GameRuntimeArduboy,
 };
 
+#define UI_FN_SETTINGS_MAX 6u
+
+struct UiFnSettings {
+	const char *title;
+	uint8_t count;
+	const char *const *labels;
+	void (*value)(void *context, uint8_t index, char *dst, uint32_t dstSize);
+	void (*adjust)(void *context, uint8_t index, int8_t direction);
+};
+
 #define UI_KEY_BIT_CENTER	0x100u
 
 struct UiTouchSample {
@@ -63,6 +75,7 @@ typedef void (*UiRunGameF)(void *userData);
 void uiRunToolShell(UiRunGameF runGameF, void *userData);
 enum UiGameAction uiGameMenu(void);
 bool uiPortMenu(struct Canvas *activeCanvas);
+void uiSetFnSettings(const struct UiFnSettings *settings, void *context);
 
 
 bool uiSaveSavestate(void);
@@ -75,13 +88,19 @@ uint_fast8_t uiGetKeys(void);
 //single-sample non-debounced read — safe to call inside tight timing loops
 uint_fast8_t uiGetKeysRaw(void);
 
-//UI-only key state, including the badge center button above the Game Boy key bits.
+//UI-only key state, including the badge FN button above the Game Boy key bits.
 uint_fast16_t uiGetUiKeys(void);
 uint_fast16_t uiGetUiKeysRaw(void);
 uint_fast16_t uiGetUiKeysRawNoTask(void);
 
 bool uiReadTouchRaw(struct UiTouchSample *sampleP);
 void uiPowerSetActiveBrightness(uint_fast8_t brightness);
+void uiPowerApplySettings(const struct Settings *settings);
+bool uiRunScreensaverMedia(uint8_t saver);
+bool uiPowerScreenSaverWoke(void);
+bool uiPowerConsumeScreenSaverWake(void);
+void uiPowerSetIdleInhibited(bool inhibited);
+void uiPowerSetScreenSaverContentActive(bool active);
 
 
 void uiSelfTestInit(struct Canvas *cnv, bool inverted, bool flipped);

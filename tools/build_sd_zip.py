@@ -71,9 +71,8 @@ OPENLASIR_LICENSE = REPO_ROOT / "third_party" / "openlasir" / "LICENSE"
 QRCODEGEN_REPO = "https://github.com/nayuki/QR-Code-generator.git"
 QRCODEGEN_COMMIT = "2c9044de6b049ca25cb3cd1649ed7e27aa055138"
 QRCODEGEN_LICENSE = REPO_ROOT / "third_party" / "qrcodegen" / "LICENSE"
-OPENJAZZ_SHAREWARE_SOURCE = REPO_ROOT / "third_party" / "openjazz-shareware" / "JAZZ.ZIP"
-OPENJAZZ_SHAREWARE_SHA256 = "385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e"
-CHIPS_TWORLD_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips-tworld.pak"
+OPENJAZZ_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "openjazz.pak"
+CHIPS_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "chips.pak"
 PIPEDREAMER_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "pipe-pipedreamer.pak"
 XSCORCH_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "scorch-xscorch.pak"
 XSOKOBAN_PACK_SOURCE = REPO_ROOT / "build" / "apps" / "sokoban-xsokoban.pak"
@@ -121,8 +120,8 @@ APP_BINARIES = (
 )
 APP_DATA_FILES = {
     "APPS/doom1.whx": DOOM_WHX_SOURCE,
-    "APPS/JAZZ.ZIP": OPENJAZZ_SHAREWARE_SOURCE,
-    "APPS/chips-tworld.pak": CHIPS_TWORLD_PACK_SOURCE,
+    "APPS/openjazz.pak": OPENJAZZ_PACK_SOURCE,
+    "APPS/chips.pak": CHIPS_PACK_SOURCE,
     "APPS/pipe-pipedreamer.pak": PIPEDREAMER_PACK_SOURCE,
     "APPS/scorch-xscorch.pak": XSCORCH_PACK_SOURCE,
     "APPS/sokoban-xsokoban.pak": XSOKOBAN_PACK_SOURCE,
@@ -271,12 +270,9 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "sd_path": "APPS/lasertag.DC32",
                 "notes": "OpenLASIR mode-0 laser tag with DC32-native transmit/receive, persistent statistics, and a versioned unsigned QR/file sync export.",
             },
-            "openjazz_shareware": {
-                "publisher": "Epic MegaGames",
-                "archive": "JAZZ.ZIP",
-                "sha256": OPENJAZZ_SHAREWARE_SHA256,
-                "sd_path": "APPS/",
-                "notes": "Original unmodified Jazz Jackrabbit shareware archive; converted to openjazz.pak on first launch, then fully decoded and sealed read-only in the shared 3 MiB ROM staging window before the menu.",
+            "openjazz_pack": {
+                "sd_path": "APPS/openjazz.pak",
+                "notes": "Prebuilt OpenJazz shareware pack generated from the bundled source data during the app build.",
             },
             "ports": {
                 "reserved_ids": {},
@@ -763,8 +759,8 @@ def create_image_dir(stage: Path) -> None:
     image_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(__file__).resolve().parent / "image_converter.py", image_dir / "image_converter.py")
     (image_dir / "README.txt").write_text(
-        "Place .jpg, .jpeg, uncompressed .bmp, .dci, or .dca files in this folder.\n"
-        "The badge opens JPEG/BMP stills directly. Run image_converter.py on your PC for badge-native .dci stills and .dca animations.\n",
+        "Place .jpg, .jpeg, uncompressed .bmp, or DC32-compatible .gif files in this folder.\n"
+        "Run image_converter.py on your PC to create browser-compatible GIFs in converted/ without changing the originals.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -785,13 +781,6 @@ def collect_app_hashes(apps_dir: Path) -> dict[str, str]:
     missing_data = [name for name, src in APP_DATA_FILES.items() if not src.is_file()]
     if missing_data:
         raise FileNotFoundError(f"Missing app data files: {', '.join(missing_data)}")
-    shareware_source = APP_DATA_FILES.get("APPS/JAZZ.ZIP")
-    if (
-        shareware_source
-        and shareware_source.resolve() == OPENJAZZ_SHAREWARE_SOURCE.resolve()
-        and sha256_file(shareware_source) != OPENJAZZ_SHAREWARE_SHA256
-    ):
-        raise ValueError("Bundled JAZZ.ZIP does not match the recorded original shareware archive")
     hashes = {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
     hashes.update({name: sha256_file(src) for name, src in APP_DATA_FILES.items()})
     return hashes
@@ -817,11 +806,11 @@ def write_ports_readme(apps_dir: Path) -> None:
         "DC32 ports status.\n"
         "\n"
         "Packaged:\n"
-        "- 207 Chip's Challenge: /APPS/chips.DC32 plus /APPS/chips-tworld.pak; user builds /APPS/chips.pak from Win 3.1 CHIPS.DAT and CHIPS.EXE\n"
+        "- 207 Chip's Challenge: /APPS/chips.DC32 plus /APPS/chips.pak\n"
         "- 208 Scorched Earth: /APPS/scorch.DC32 plus /APPS/scorch-xscorch.pak\n"
         "- 209 Pipe Dream: /APPS/pipe.DC32 plus /APPS/pipe-pipedreamer.pak\n"
         "- 211 Sokoban: /APPS/sokoban.DC32 plus /APPS/sokoban-xsokoban.pak\n"
-        "- 212 Jazz Jackrabbit: /APPS/openjazz.DC32 plus the original Epic MegaGames /APPS/JAZZ.ZIP shareware archive; first launch creates /APPS/openjazz.pak and a validated XIP graphics cache\n"
+        "- 212 Jazz Jackrabbit: /APPS/openjazz.DC32 plus /APPS/openjazz.pak\n"
         "- 213 Sensible Soccer (YSoccer): /APPS/soccer.DC32 plus /APPS/soccer-ysoccer.pak; GPL-2.0 text is in /APPS/LICENSES/ysoccer-COPYING.txt; saves live below /SAVE/PORTS/SOCCER\n"
         "\n"
         "Required user data:\n"
@@ -829,7 +818,7 @@ def write_ports_readme(apps_dir: Path) -> None:
         "\n"
         "CHIPS.DAT and proprietary original Chip's graphics are not redistributed. Build the optional pack locally by running:\n"
         "- python tools/build_chips_pack.py\n"
-        "Jazz Jackrabbit shareware remains copyright Epic MegaGames. JAZZ.ZIP is distributed unchanged under the terms in its LICENSE.DOC; SHA-256: 385f685d804b239e2ac070a1c267824b4a6b7898072248646c939a03469d345e.\n"
+        "Jazz Jackrabbit shareware data is packaged as the prebuilt OpenJazz runtime pack.\n"
         "OpenJazz uses the same 3 MiB staging window as DOOM, so switching between them can trigger a one-time cache rebuild. The Chip's script prompts for paths and writes the badge-ready pak. The packer auto-extracts original tiles from CHIPS.EXE when it is beside CHIPS.DAT; advanced/automated use still accepts flags, including --tiles for CHIPS.EXE, Tile World-style, regular-grid, or DC32CHIPTIL Chip graphics.\n"
         "\n"
         "The firmware menu exposes the supported source-derived ports listed above.\n",
@@ -909,7 +898,7 @@ their upstream projects.
 
 - SD path: IMAGES/
 - Files: image_converter.py, README.txt
-- Notes: JPEG and uncompressed BMP stills can be opened directly. Run image_converter.py on a PC to convert still PNG/JPEG images into badge-native .dci files and animated GIF/APNG/WebP files into .dca animations.
+- Notes: JPEG and uncompressed BMP stills can be opened directly. Run image_converter.py on a PC to convert source images into browser-compatible GIFs under converted/.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 
@@ -1000,10 +989,9 @@ shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
 ## Jazz Jackrabbit Shareware
 
 - Publisher: Epic MegaGames
-- Archive: JAZZ.ZIP
-- SHA-256: {OPENJAZZ_SHAREWARE_SHA256}
+- File: openjazz.pak
 - SD path: APPS/
-- Notes: The original archive is copied unchanged. OpenJazz creates openjazz.pak locally on first launch, then builds and validates the complete shareware graphics cache before the menu. Gameplay performs no QSPI writes. The 3 MiB staging window is shared with DOOM and emulator ROM staging, so overwrites trigger an automatic rebuild.
+- Notes: The prebuilt OpenJazz pack is ready for immediate launch. Gameplay performs no QSPI writes. The 3 MiB staging window is shared with DOOM and emulator ROM staging, so overwrites trigger an automatic rebuild.
 
 ## Ports
 

@@ -21,6 +21,21 @@ struct DcAppDrawCtx {
 	uint32_t frame;
 };
 
+/*
+ * The common loading surface for DCAPPs and built-in tools.  App-specific
+ * stages and detail strings remain available, but the placement, fonts,
+ * colours, and progress treatment are intentionally shared.
+ */
+struct DcAppLoadingState {
+	const char *appName;
+	const char *title;
+	const char *detail;
+	const char *hint;
+	uint32_t done;
+	uint32_t total;
+	uint32_t animationStep;
+};
+
 uint16_t dcAppDrawRgb565(uint32_t r, uint32_t g, uint32_t b);
 bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, const struct DcAppRunArgs *args, void *backbuffer, uint32_t w, uint32_t h);
 void dcAppDrawClear(struct DcAppDrawCtx *ctx, uint16_t color);
@@ -30,6 +45,8 @@ void dcAppDrawLine(struct DcAppDrawCtx *ctx, int32_t x0, int32_t y0, int32_t x1,
 void dcAppDrawPresent(struct DcAppDrawCtx *ctx);
 bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask);
 void dcAppDrawWaitRelease(struct DcAppDrawCtx *ctx, uint_fast16_t mask);
+void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *state);
+void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingState *state);
 
 #ifdef __cplusplus
 }

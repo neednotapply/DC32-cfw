@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			18
+#define SETTINGS_CUR_VER			22
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
@@ -104,6 +104,19 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->autoclickerCps = 5;
 	if (settings->gbPalette >= GameBoyPaletteNumPalettes)
 		settings->gbPalette = GameBoyPaletteBw;
+	if (settings->powerSaveBrightness > 0x1fu)
+		settings->powerSaveBrightness = 1u;
+	if (settings->powerSaveTimeout < 5u || settings->powerSaveTimeout > 240u)
+		settings->powerSaveTimeout = 30u;
+	if (settings->screenSaver >= ScreenSaverNumModes)
+		settings->screenSaver = ScreenSaverStarfield;
+	if (settings->screenSaverTimeout < 10u || settings->screenSaverTimeout > 240u)
+		settings->screenSaverTimeout = 60u;
+	settings->screenSaverRotation = !!settings->screenSaverRotation;
+	if (settings->screenSaverBrightness > 0x1fu)
+		settings->screenSaverBrightness = 1u;
+	settings->screenSaverGifPath[sizeof(settings->screenSaverGifPath) - 1] = 0;
+	settings->screenSaverImageFolder[sizeof(settings->screenSaverImageFolder) - 1] = 0;
 }
 
 void settingsGet(struct Settings *settings)
@@ -224,6 +237,27 @@ void settingsGet(struct Settings *settings)
 
 		case 17:			//add universal audio mute
 			settings->audioMuted = false;
+			//fallthrough
+
+		case 18:			//add display power saving and screensaver defaults
+			settings->powerSaveEnabled = true;
+			settings->powerSaveBrightness = 1u;
+			settings->powerSaveTimeout = 30u;
+			settings->screenSaver = ScreenSaverStarfield;
+			settings->screenSaverTimeout = 60u;
+			//fallthrough
+
+		case 19:			//add selected screensaver media locations
+			settings->screenSaverGifPath[0] = 0;
+			settings->screenSaverImageFolder[0] = 0;
+			//fallthrough
+
+		case 20:			//add independent screensaver rotation
+			settings->screenSaverRotation = false;
+			//fallthrough
+
+		case 21:			//add separate low-power screensaver brightness
+			settings->screenSaverBrightness = 1u;
 			//fallthrough
 
 		//other cases here, in increasing order

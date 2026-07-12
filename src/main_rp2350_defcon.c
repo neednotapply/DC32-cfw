@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include "pinoutRp2350defcon.h"
 #include "gbCartHeader.h"
 #include "pioIrdaSIR.h"
@@ -85,6 +86,7 @@ extern uint32_t __data_start, __data_end, __bss_start, __bss_end, __stack_limit,
 #define ACCEL_CTRL4_IDLE                0xd0
 
 static bool i2cAccelSetIdle(bool idle);
+static void uiPrvDimRestore(void);
 
 
 static void bootPrvStartTicks(void)
@@ -254,13 +256,185 @@ static uint_fast16_t prvUiKeysMap(uint32_t sta)
         return ret;
 }
 
-#define UI_IDLE_DIM_TICKS	((uint64_t)TICKS_PER_SECOND * 30u)
-#define UI_IDLE_DIM_BRIGHTNESS	1u
-
 static uint64_t mUiLastActivity;
 static uint8_t mUiActiveBrightness;
+static uint8_t mUiDimBrightness;
+static uint8_t mUiDimTimeout;
+static uint8_t mUiScreenSaver;
+static uint8_t mUiScreenSaverTimeout;
+static uint8_t mUiScreenSaverBrightness;
+static bool mUiScreenSaverFlipped;
 static bool mUiDimInitialized;
 static bool mUiDimmed;
+static bool mUiScreenSaverRunning;
+static bool mUiScreenSaverWoke;
+static uint8_t mUiIdleInhibitCount;
+static uint8_t mUiScreenSaverContentCount;
+
+static uint16_t uiPrvSaverRgb(uint32_t r, uint32_t g, uint32_t b)
+{
+	return (uint16_t)((r & 0xf8u) << 8) | (uint16_t)((g & 0xfcu) << 3) | (uint16_t)(b >> 3);
+}
+
+static void uiPrvSaverPixel(uint16_t *fb, int32_t x, int32_t y, uint16_t color)
+{
+	if (mUiScreenSaverFlipped) {
+		x = DISP_WIDTH - 1 - x;
+		y = DISP_HEIGHT - 1 - y;
+	}
+	if (x >= 0 && y >= 0 && x < DISP_WIDTH && y < DISP_HEIGHT)
+		fb[(uint32_t)y * DISP_WIDTH + (uint32_t)x] = color;
+}
+
+static void uiPrvSaverLine(uint16_t *fb, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t color)
+{
+	int32_t dx = x0 < x1 ? x1 - x0 : x0 - x1;
+	int32_t sx = x0 < x1 ? 1 : -1;
+	int32_t dy = y0 < y1 ? y0 - y1 : y1 - y0;
+	int32_t sy = y0 < y1 ? 1 : -1;
+	int32_t err = dx + dy;
+
+	while (1) {
+		int32_t twice = err * 2;
+
+		uiPrvSaverPixel(fb, x0, y0, color);
+		if (x0 == x1 && y0 == y1)
+			break;
+		if (twice >= dy) {
+			err += dy;
+			x0 += sx;
+		}
+		if (twice <= dx) {
+			err += dx;
+			y0 += sy;
+		}
+	}
+}
+
+static void uiPrvRunScreenSaver(void)
+{
+	uint16_t *fb = dispGetFb();
+	uint32_t frame = 0;
+	uint32_t rng = (uint32_t)getTime();
+	int16_t sx[64], sy[64], sz[64];
+
+	if (mUiScreenSaver == ScreenSaverOff || mUiScreenSaverRunning || !fb)
+		return;
+	mUiScreenSaverRunning = true;
+	dispResumeScanout();
+	dispSetBrightness(mUiScreenSaverBrightness);
+	(void)i2cAccelSetIdle(true);
+	badgeLedsSetIdle(true);
+	for (uint32_t i = 0; i < 64u; i++) {
+		rng = rng * 1664525u + 1013904223u;
+		sx[i] = (int16_t)(rng % DISP_WIDTH) - DISP_WIDTH / 2;
+		rng = rng * 1664525u + 1013904223u;
+		sy[i] = (int16_t)(rng % DISP_HEIGHT) - DISP_HEIGHT / 2;
+		rng = rng * 1664525u + 1013904223u;
+		sz[i] = (int16_t)(32u + rng % 224u);
+	}
+	while (!prvUiKeysMap(sio_hw->gpio_in)) {
+		memset(fb, 0, DISP_WIDTH * DISP_HEIGHT * sizeof(*fb));
+		if (mUiScreenSaver == ScreenSaverGif || mUiScreenSaver == ScreenSaverImageFolder) {
+			if (uiRunScreensaverMedia(mUiScreenSaver))
+				break;
+			mUiScreenSaver = ScreenSaverStarfield;
+		}
+		if (mUiScreenSaver == ScreenSaverStarfield) {
+			for (uint32_t i = 0; i < 64u; i++) {
+				int32_t x, y;
+
+				sz[i] -= 5;
+				if (sz[i] < 8) {
+					rng = rng * 1664525u + 1013904223u;
+					sx[i] = (int16_t)(rng % DISP_WIDTH) - DISP_WIDTH / 2;
+					rng = rng * 1664525u + 1013904223u;
+					sy[i] = (int16_t)(rng % DISP_HEIGHT) - DISP_HEIGHT / 2;
+					sz[i] = 255;
+				}
+				x = DISP_WIDTH / 2 + sx[i] * 88 / sz[i];
+				y = DISP_HEIGHT / 2 + sy[i] * 88 / sz[i];
+				uiPrvSaverPixel(fb, x, y, uiPrvSaverRgb(255u - sz[i], 255u - sz[i], 255u - sz[i]));
+			}
+		}
+		else if (mUiScreenSaver == ScreenSaverCube) {
+			static const int8_t edges[12][2] = {{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+			int32_t px[8], py[8];
+			float a = (float)frame * 0.045f, b = (float)frame * 0.031f;
+
+			for (uint32_t i = 0; i < 8u; i++) {
+				float x = (i & 1u) ? 1.0f : -1.0f, y = (i & 2u) ? 1.0f : -1.0f, z = (i & 4u) ? 1.0f : -1.0f;
+				float yy = y * cosf(a) - z * sinf(a), zz = y * sinf(a) + z * cosf(a);
+				float xx = x * cosf(b) + zz * sinf(b), depth = -x * sinf(b) + zz * cosf(b) + 3.4f;
+
+				px[i] = DISP_WIDTH / 2 + (int32_t)(xx * 72.0f / depth);
+				py[i] = DISP_HEIGHT / 2 + (int32_t)(yy * 72.0f / depth);
+			}
+			for (uint32_t i = 0; i < 12u; i++)
+				uiPrvSaverLine(fb, px[edges[i][0]], py[edges[i][0]], px[edges[i][1]], py[edges[i][1]], uiPrvSaverRgb(70u, 190u, 255u));
+		}
+		else {
+			float phase = (float)frame * 0.08f;
+
+			for (uint32_t i = 0; i < 180u; i++) {
+				float a = phase + (float)i * 0.035f;
+				int32_t x = DISP_WIDTH / 2 + (int32_t)(cosf(a) * 70.0f + sinf(a * 2.73f) * 42.0f);
+				int32_t y = DISP_HEIGHT / 2 + (int32_t)(sinf(a) * 70.0f + cosf(a * 2.73f) * 42.0f);
+
+				uiPrvSaverPixel(fb, x, y, uiPrvSaverRgb((frame + i) & 255u, 255u - ((frame + i) & 255u), 220u));
+			}
+		}
+		dispPrvWaitForScanoutStart();
+		timebaseIdleWaitMsec(33);
+		frame++;
+	}
+	mUiScreenSaverRunning = false;
+	mUiDimmed = false;
+	dispSetBrightness(mUiActiveBrightness);
+	(void)i2cAccelSetIdle(false);
+	badgeLedsSetIdle(false);
+	mUiLastActivity = getTime();
+	mUiScreenSaverWoke = true;
+}
+
+bool uiPowerScreenSaverWoke(void)
+{
+	return mUiScreenSaverWoke;
+}
+
+bool uiPowerConsumeScreenSaverWake(void)
+{
+	bool woke = mUiScreenSaverWoke;
+
+	mUiScreenSaverWoke = false;
+	return woke;
+}
+
+void uiPowerSetIdleInhibited(bool inhibited)
+{
+	if (inhibited) {
+		if (mUiIdleInhibitCount < 0xffu)
+			mUiIdleInhibitCount++;
+		uiPrvDimRestore();
+	}
+	else if (mUiIdleInhibitCount) {
+		mUiIdleInhibitCount--;
+		mUiLastActivity = getTime();
+	}
+}
+
+void uiPowerSetScreenSaverContentActive(bool active)
+{
+	if (active) {
+		if (mUiScreenSaverContentCount < 0xffu)
+			mUiScreenSaverContentCount++;
+		uiPrvDimRestore();
+	}
+	else if (mUiScreenSaverContentCount) {
+		mUiScreenSaverContentCount--;
+		mUiLastActivity = getTime();
+	}
+}
 
 static void uiPrvDimRestore(void)
 {
@@ -282,6 +456,26 @@ static void uiPrvDimInit(void)
 		return;
 	settingsGet(&settings);
 	mUiActiveBrightness = settings.brightness;
+	mUiDimBrightness = settings.powerSaveBrightness;
+	mUiDimTimeout = settings.powerSaveEnabled ? settings.powerSaveTimeout : 0u;
+	mUiScreenSaver = settings.screenSaver;
+	mUiScreenSaverTimeout = settings.screenSaverTimeout;
+	mUiScreenSaverBrightness = settings.screenSaverBrightness;
+	mUiScreenSaverFlipped = settings.screenSaverRotation;
+	mUiLastActivity = getTime();
+	mUiDimInitialized = true;
+}
+
+void uiPowerApplySettings(const struct Settings *settings)
+{
+	if (!settings)
+		return;
+	mUiDimBrightness = settings->powerSaveBrightness;
+	mUiDimTimeout = settings->powerSaveEnabled ? settings->powerSaveTimeout : 0u;
+	mUiScreenSaver = settings->screenSaver;
+	mUiScreenSaverTimeout = settings->screenSaverTimeout;
+	mUiScreenSaverBrightness = settings->screenSaverBrightness;
+	mUiScreenSaverFlipped = settings->screenSaverRotation;
 	mUiLastActivity = getTime();
 	mUiDimInitialized = true;
 }
@@ -299,6 +493,10 @@ void uiPowerSetActiveBrightness(uint_fast8_t brightness)
 static uint_fast16_t uiPrvDimObserveDebounced(uint_fast16_t keys)
 {
 	uiPrvDimInit();
+	if (mUiIdleInhibitCount || mUiScreenSaverContentCount) {
+		mUiLastActivity = getTime();
+		return keys;
+	}
 	if (keys) {
 		if (mUiDimmed) {
 			uiPrvDimRestore();
@@ -308,9 +506,16 @@ static uint_fast16_t uiPrvDimObserveDebounced(uint_fast16_t keys)
 		return keys;
 	}
 
-	if (!mUiDimmed && getTime() - mUiLastActivity >= UI_IDLE_DIM_TICKS) {
-		uint_fast8_t dimBrightness = mUiActiveBrightness < UI_IDLE_DIM_BRIGHTNESS ?
-			mUiActiveBrightness : UI_IDLE_DIM_BRIGHTNESS;
+	if (mUiScreenSaver != ScreenSaverOff && mUiScreenSaverTimeout &&
+			getTime() - mUiLastActivity >= (uint64_t)TICKS_PER_SECOND * mUiScreenSaverTimeout) {
+		uiPrvRunScreenSaver();
+		return 0;
+	}
+
+	if (!mUiDimmed && mUiDimTimeout && getTime() - mUiLastActivity >=
+			(uint64_t)TICKS_PER_SECOND * mUiDimTimeout) {
+		uint_fast8_t dimBrightness = mUiActiveBrightness < mUiDimBrightness ?
+			mUiActiveBrightness : mUiDimBrightness;
 
 		dispSetBrightness(dimBrightness);
 		dispPauseScanout();
@@ -323,8 +528,13 @@ static uint_fast16_t uiPrvDimObserveDebounced(uint_fast16_t keys)
 
 static void uiPrvDimObserveRaw(uint_fast16_t keys)
 {
-	if (!keys || !mUiDimInitialized)
+	uiPrvDimInit();
+	if (mUiScreenSaverRunning)
 		return;
+	if (!keys) {
+		(void)uiPrvDimObserveDebounced(0);
+		return;
+	}
 	uiPrvDimRestore();
 }
 

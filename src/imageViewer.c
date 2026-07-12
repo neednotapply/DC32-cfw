@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "badgeLeds.h"
+#include "dcAppDraw.h"
 #include "dispDefcon.h"
 #include "fatfs.h"
 #include "fonts.h"
@@ -18,8 +19,6 @@
 
 #define IMAGE_SD_SAFE_HZ        500000u
 #define IMAGE_SD_FAST_HZ        2000000u
-#define IMAGE_LOADING_DELAY_TICKS   (TICKS_PER_SECOND * 3u)
-
 #define DCI1_MAGIC              0x31494344u
 #define DCI_HEADER_SIZE         64u
 #define DCI1_VERSION            1u
@@ -35,6 +34,8 @@
 #define DCA_BPP_INDEXED         8u
 #define DCA_CODEC_RAW           0u
 #define DCA_CODEC_RLE           1u
+#define DC32_GIF_TRAILER_MAGIC  "DC32GIF1"
+#define DC32_GIF_TRAILER_SIZE   8u
 #define IMAGE_DIRECT_MAX_W       2048u
 #define IMAGE_DIRECT_MAX_H       2048u
 
@@ -97,6 +98,7 @@ typedef char ImageDcaFrameSizeCheck[(sizeof(struct ImageDcaFrame) == 16u) ? 1 : 
 typedef char ImageDcaRectSizeCheck[(sizeof(struct ImageDcaRect) == 16u) ? 1 : -1];
 
 static bool mImageFastSdDisabled;
+static bool mImageAutoAdvance;
 
 static bool imagePrvEndsWithNoCase(const char *str, const char *suffix)
 {
@@ -120,7 +122,7 @@ static bool imagePrvEndsWithNoCase(const char *str, const char *suffix)
 
 bool imageViewerFileName(const char *name)
 {
-	return imagePrvEndsWithNoCase(name, ".dci") || imagePrvEndsWithNoCase(name, ".dca") ||
+	return imagePrvEndsWithNoCase(name, ".gif") || imagePrvEndsWithNoCase(name, ".dci") || imagePrvEndsWithNoCase(name, ".dca") ||
 		imagePrvEndsWithNoCase(name, ".jpg") || imagePrvEndsWithNoCase(name, ".jpeg") ||
 		imagePrvEndsWithNoCase(name, ".bmp");
 }
@@ -198,6 +200,9 @@ static enum ImageViewerResult imagePrvWaitForStaticInput(void)
 {
 	uint_fast16_t prevKeys = uiGetUiKeysRaw();
 
+	if (mImageAutoAdvance)
+		return ImageViewerResultNext;
+
 	while (1) {
 		bool handled;
 		enum ImageViewerResult ret = imagePrvPollKeys(&prevKeys, &handled);
@@ -205,53 +210,8 @@ static enum ImageViewerResult imagePrvWaitForStaticInput(void)
 		if (handled)
 			return ret;
 		badgeLedsTick();
+		timebaseIdleWaitMsec(10u);
 	}
-}
-
-static uint32_t imagePrvTextWidth(const char *text, enum Font font)
-{
-	uint32_t width = 0;
-
-	while (*text) {
-		struct FontGlyphInfo glyph;
-
-		if (fontGetGlyphInfo(&glyph, font, (unsigned char)*text))
-			width += glyph.width;
-		text++;
-	}
-	return width;
-}
-
-static void imagePrvDrawText(struct Canvas *cnv, int32_t x, int32_t y, const char *text, enum Font font, uint16_t color)
-{
-	while (*text) {
-		struct FontGlyphInfo glyph;
-		uint32_t row, col;
-
-		if (!fontGetGlyphInfo(&glyph, font, (unsigned char)*text)) {
-			text++;
-			continue;
-		}
-		for (row = 0; row < glyph.height; row++) {
-			for (col = 0; col < glyph.width; col++) {
-				if (fontGetGlyphPixel(&glyph, row, col))
-					rasterPutPixel(cnv, (uint32_t)(x + (int32_t)col), (uint32_t)(y + (int32_t)row), color);
-			}
-		}
-		x += glyph.width;
-		text++;
-	}
-}
-
-static void imagePrvDrawLoading(struct Canvas *cnv)
-{
-	static const char text[] = "Loading...";
-	enum Font font = FontLarge;
-	uint32_t textW = imagePrvTextWidth(text, font);
-	uint32_t textH = fontGetHeight(font);
-
-	rasterClear(cnv, 0);
-	imagePrvDrawText(cnv, (int32_t)((cnv->w - textW) / 2u), (int32_t)((cnv->h - textH) / 2u), text, font, 0xffffu);
 }
 
 static bool imagePrvFlashLoadRangeRaw(struct FatfsFil *fil, uint32_t fileOffset, uint32_t size, struct Canvas *slowLoadCnv)
@@ -259,9 +219,18 @@ static bool imagePrvFlashLoadRangeRaw(struct FatfsFil *fil, uint32_t fileOffset,
 	struct ToolWorkspaceSpan mem;
 	uint32_t bufSz, pos;
 	uint8_t *buf;
-	uint64_t start = getTime();
+	struct DcAppLoadingState loading = {
+		.appName = "Image Viewer",
+		.title = "Loading image",
+		.detail = "Preparing image data",
+		.total = size,
+	};
 	bool ret = false;
-	bool loadingDrawn = false;
+
+	if (slowLoadCnv) {
+		dispPrvWaitForScanoutStart();
+		dcAppDrawLoadingCanvas(slowLoadCnv, &loading);
+	}
 
 	if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerImage, &mem))
 		return false;
@@ -287,9 +256,11 @@ static bool imagePrvFlashLoadRangeRaw(struct FatfsFil *fil, uint32_t fileOffset,
 		if (!flashWrite(QSPI_ROM_START + pos, eraseSz, buf, writeSz))
 			goto out;
 		pos += now;
-		if (slowLoadCnv && !loadingDrawn && getTime() - start >= IMAGE_LOADING_DELAY_TICKS) {
-			imagePrvDrawLoading(slowLoadCnv);
-			loadingDrawn = true;
+		if (slowLoadCnv) {
+			loading.done = pos;
+			loading.animationStep++;
+			dispPrvWaitForScanoutStart();
+			dcAppDrawLoadingCanvas(slowLoadCnv, &loading);
 		}
 	}
 	ret = true;
@@ -322,7 +293,7 @@ static enum ImageViewerResult imagePrvShowDci1Static(struct Canvas *cnv, struct 
 	uint16_t *dst = (uint16_t*)cnv->framebuffer;
 	uint32_t i;
 
-	if (!imagePrvFlashLoadRange(fil, DCI_HEADER_SIZE, DCI_FRAME_BYTES, NULL))
+	if (!imagePrvFlashLoadRange(fil, DCI_HEADER_SIZE, DCI_FRAME_BYTES, cnv))
 		return ImageViewerResultReadError;
 	dispPrvWaitForScanoutStart();
 	if (!cnv->flipped) {
@@ -783,9 +754,8 @@ static bool imagePrvDcaHandleKeys(uint_fast16_t *prevKeysP, bool *pausedP, enum 
 	return false;
 }
 
-static enum ImageViewerResult imagePrvRunDcaLoaded(struct Canvas *cnv, uint32_t fileSize)
+static enum ImageViewerResult imagePrvRunDcaLoaded(struct Canvas *cnv, const uint8_t *base, uint32_t fileSize)
 {
-	const uint8_t *base = (const uint8_t*)QSPI_ROM_START;
 	const struct ImageDcaHeader *hdr = (const struct ImageDcaHeader*)base;
 	const struct ImageDcaFrame *frames;
 	uint_fast16_t prevKeys = uiGetUiKeysRaw();
@@ -805,6 +775,7 @@ static enum ImageViewerResult imagePrvRunDcaLoaded(struct Canvas *cnv, uint32_t 
 			if (paused)
 				nextAt = getTime();
 			badgeLedsTick();
+			timebaseIdleWaitMsec(paused ? 10u : 1u);
 		}
 		dispPrvWaitForScanoutStart();
 		ret = imagePrvDcaApplyFrame(cnv, base, fileSize, hdr, &frames[frameIdx]);
@@ -839,9 +810,43 @@ static enum ImageViewerResult imagePrvRunDca(struct Canvas *cnv, struct FatfsVol
 	else if (!imagePrvFlashLoadRange(fil, 0, fileSize, cnv))
 		ret = ImageViewerResultReadError;
 	else
-		ret = imagePrvRunDcaLoaded(cnv, fileSize);
+		ret = imagePrvRunDcaLoaded(cnv, (const uint8_t*)QSPI_ROM_START, fileSize);
 	fatfsFileClose(fil);
 	return ret;
+}
+
+static enum ImageViewerResult imagePrvRunDc32Gif(struct Canvas *cnv, struct FatfsVol *vol,
+	const struct FatFileLocator *locator)
+{
+	struct FatfsFil *fil;
+	const uint8_t *base;
+	uint32_t fileSize;
+	enum ImageViewerResult result = ImageViewerResultIncompatibleGif;
+
+	fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+	if (!fil)
+		return ImageViewerResultOpenError;
+	fileSize = fatfsFileGetSize(fil);
+	if (fileSize > QSPI_ROM_SIZE_MAX || !imagePrvFlashLoadRange(fil, 0, fileSize, cnv))
+		result = ImageViewerResultReadError;
+	else {
+		base = (const uint8_t*)QSPI_ROM_START;
+		for (uint32_t off = 0; off + DC32_GIF_TRAILER_SIZE < fileSize; off++) {
+			const uint8_t *payload;
+			uint32_t payloadSize;
+
+			if (memcmp(base + off, DC32_GIF_TRAILER_MAGIC, DC32_GIF_TRAILER_SIZE))
+				continue;
+			payload = base + off + DC32_GIF_TRAILER_SIZE;
+			payloadSize = fileSize - off - DC32_GIF_TRAILER_SIZE;
+			if (payloadSize >= sizeof(struct ImageDcaHeader) &&
+					imagePrvValidDca1Header((const struct ImageDcaHeader*)payload, payloadSize))
+				result = imagePrvRunDcaLoaded(cnv, payload, payloadSize);
+			break;
+		}
+	}
+	fatfsFileClose(fil);
+	return result;
 }
 
 enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *initialLocator, const char *initialName)
@@ -849,6 +854,8 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 	(void)rootPath;
 	if (!initialLocator || !initialName)
 		return ImageViewerResultOpenError;
+	if (imagePrvEndsWithNoCase(initialName, ".gif"))
+		return imagePrvRunDc32Gif(cnv, vol, initialLocator);
 	if (imagePrvEndsWithNoCase(initialName, ".dca"))
 		return imagePrvRunDca(cnv, vol, initialLocator);
 	if (imagePrvEndsWithNoCase(initialName, ".dci"))
@@ -858,4 +865,17 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 	if (imagePrvEndsWithNoCase(initialName, ".jpg") || imagePrvEndsWithNoCase(initialName, ".jpeg"))
 		return imagePrvRunJpeg(cnv, vol, initialLocator);
 	return ImageViewerResultUnsupported;
+}
+
+enum ImageViewerResult imageViewerRunStill(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath,
+	const struct FatFileLocator *initialLocator, const char *initialName)
+{
+	enum ImageViewerResult result;
+
+	mImageAutoAdvance = true;
+	dispPauseScanout();
+	result = imageViewerRun(cnv, vol, rootPath, initialLocator, initialName);
+	dispResumeScanout();
+	mImageAutoAdvance = false;
+	return result;
 }

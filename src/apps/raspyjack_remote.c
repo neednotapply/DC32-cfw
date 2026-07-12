@@ -205,7 +205,7 @@ static void rjPresentStatus(const struct RjApp *app)
 	rjCentered(app, 92, app->statusState, FontMedium, rasterRgb565(225, 245, 230));
 	if (app->statusDetail[0])
 		rjCentered(app, 122, app->statusDetail, FontSmall, rasterRgb565(155, 190, 165));
-	rjCentered(app, 206, "HOLD CENTER TO EXIT", FontSmall, rasterRgb565(100, 145, 115));
+	rjCentered(app, 206, "HOLD FN TO EXIT", FontSmall, rasterRgb565(100, 145, 115));
 }
 
 static unsigned char rjJpegNeedBytes(unsigned char *buf, unsigned char bufSize,
@@ -654,7 +654,9 @@ int raspyJackRemoteRun(const struct DcAppHostApi *host, const struct DcAppRunArg
 		rjForwardKeys(&app, keys);
 		if (host->ledsTick)
 			host->ledsTick();
-		if (host->delayMsec)
+		if (host->idleWaitMsec)
+			host->idleWaitMsec(1u);
+		else if (host->delayMsec)
 			host->delayMsec(1u);
 	}
 

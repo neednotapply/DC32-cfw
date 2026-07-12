@@ -51,16 +51,16 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdToolLaserTag, "Laser Tag", "/APPS/lasertag.DC32", false},
 	{DcAppIdToolRaspyJack, "RaspyJack Remote", "/APPS/raspyjack.DC32", false},
 	{DcAppIdPong, "Pong", "/APPS/pong.DC32", true},
-	{DcAppIdTetris, "Tetris", "/APPS/tetris.DC32", true},
-	{DcAppIdArkanoid, "Arkanoid", "/APPS/arkanoid.DC32", true},
-	{DcAppIdFlappy, "Flappy Bird", "/APPS/flappy.DC32", true},
-	{DcAppIdTrex, "T-Rex Runner", "/APPS/trex.DC32", true},
-	{DcAppIdDoom, "DOOM (shareware)", "/APPS/doom.DC32", true},
-	{DcAppIdChips, "Chip's Challenge", "/APPS/chips.DC32", true},
-	{DcAppIdScorch, "Scorched Earth", "/APPS/scorch.DC32", true},
-	{DcAppIdPipe, "Pipe Dream", "/APPS/pipe.DC32", true},
-	{DcAppIdSokoban, "Sokoban", "/APPS/sokoban.DC32", true},
-	{DcAppIdOpenJazz, "Jazz Jackrabbit", "/APPS/openjazz.DC32", true},
+	{DcAppIdTetris, "Tetris (NullpoMino)", "/APPS/tetris.DC32", true},
+	{DcAppIdArkanoid, "Arkanoid (wkeeling)", "/APPS/arkanoid.DC32", true},
+	{DcAppIdFlappy, "Flappy Bird (VadimBoev)", "/APPS/flappy.DC32", true},
+	{DcAppIdTrex, "T-Rex Runner (wayou)", "/APPS/trex.DC32", true},
+	{DcAppIdDoom, "DOOM (rp2040-doom)", "/APPS/doom.DC32", true},
+	{DcAppIdChips, "Chip's Challenge (Tile World)", "/APPS/chips.DC32", true},
+	{DcAppIdScorch, "Scorched Earth (xscorch)", "/APPS/scorch.DC32", true},
+	{DcAppIdPipe, "Pipe Dream (PipeDreamer)", "/APPS/pipe.DC32", true},
+	{DcAppIdSokoban, "Sokoban (XSokoban)", "/APPS/sokoban.DC32", true},
+	{DcAppIdOpenJazz, "Jazz Jackrabbit (OpenJazz)", "/APPS/openjazz.DC32", true},
 	{DcAppIdSoccer, "Sensible Soccer (YSoccer)", "/APPS/soccer.DC32", true},
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
@@ -77,6 +77,7 @@ static const struct DcAppHostApi mHostApi = {
 	.log = prRaw,
 	.getTime = getTime,
 	.delayMsec = delayMsec,
+	.idleWaitMsec = timebaseIdleWaitMsec,
 	.displayFb = dcAppPrvDisplayFb,
 	.keysRaw = uiGetKeysRaw,
 	.uiKeysRaw = uiGetUiKeysRaw,
@@ -87,6 +88,7 @@ static const struct DcAppHostApi mHostApi = {
 	.abortActive = dcAppAbortActive,
 	.ledsTick = badgeLedsTick,
 	.portMenu = uiPortMenu,
+	.setFnSettings = uiSetFnSettings,
 };
 
 static uint32_t dcAppPrvAlignUp(uint32_t val, uint32_t align)
@@ -697,6 +699,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	if (mLoadedRuntime != runtime || dcAppPrvValidateHeader(&mLoadedHeader, runtime) != DcAppResultOk)
 		return dcAppPrvFail(DcAppResultNoLoadedApp, "No compatible app is loaded");
 	dcAppPrvClearActiveAppContext();
+	uiSetFnSettings(NULL, NULL);
 	dcAppPrvSyncExecutableImage(&mLoadedHeader);
 	audioPwmStop();
 	audioPwmSetVolume(AUDIO_PWM_VOLUME_MAX);
@@ -709,6 +712,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	mActiveRefresh = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.refreshOffset);
 	ret = entry(&mHostApi, args);
 	dcAppCore1ForceStop();
+	uiSetFnSettings(NULL, NULL);
 	audioPwmStop();
 	dcAppPrvClearActiveAppContext();
 	if (ret) {

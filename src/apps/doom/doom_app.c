@@ -4,8 +4,8 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <string.h>
+#include "dcAppDraw.h"
 #include "fatfs.h"
-#include "fonts.h"
 #include "gb.h"
 #include "memMap.h"
 #include "qspi.h"
@@ -31,94 +31,6 @@ static jmp_buf mDoomExit;
 static volatile int mDoomRunning;
 static volatile int mDoomExitCode;
 static char mDoomError[160];
-
-static uint16_t doomDc32Rgb565(uint32_t r, uint32_t g, uint32_t b)
-{
-	return (uint16_t)(((r & 0xf8u) << 8) | ((g & 0xfcu) << 3) | (b >> 3));
-}
-
-static uint32_t doomDc32DisplayIndex(const struct Canvas *cnv, uint32_t x, uint32_t y)
-{
-	uint32_t rowItems = cnv->rotated ? cnv->h : cnv->w;
-
-	if (cnv->flipped) {
-		x = cnv->w - 1u - x;
-		y = cnv->h - 1u - y;
-	}
-	if (cnv->rotated)
-		return x * rowItems + (cnv->h - 1u - y);
-	return y * rowItems + x;
-}
-
-static void doomDc32Pixel(uint16_t *fb, const struct Canvas *cnv, uint32_t x, uint32_t y, uint16_t color)
-{
-	if (x < cnv->w && y < cnv->h)
-		fb[doomDc32DisplayIndex(cnv, x, y)] = color;
-}
-
-static void doomDc32Fill(uint16_t *fb, const struct Canvas *cnv, uint32_t x, uint32_t y,
-	uint32_t w, uint32_t h, uint16_t color)
-{
-	for (uint32_t yy = 0; yy < h; yy++)
-		for (uint32_t xx = 0; xx < w; xx++)
-			doomDc32Pixel(fb, cnv, x + xx, y + yy, color);
-}
-
-static uint32_t doomDc32DrawText(uint16_t *fb, const struct Canvas *cnv, uint32_t x, uint32_t y,
-	const char *text, enum Font font, uint16_t color)
-{
-	uint32_t startX = x;
-
-	while (*text) {
-		struct FontGlyphInfo glyph;
-		unsigned char ch = (unsigned char)*text++;
-
-		if (ch == '\n') {
-			x = startX;
-			y += fontGetHeight(font) + 2u;
-			continue;
-		}
-		if (!fontGetGlyphInfo(&glyph, font, ch))
-			continue;
-		if (x + glyph.width >= cnv->w) {
-			x = startX;
-			y += glyph.height + 2u;
-		}
-		for (uint_fast8_t row = 0; row < glyph.height; row++)
-			for (uint_fast8_t col = 0; col < glyph.width; col++)
-				if (fontGetGlyphPixel(&glyph, row, col))
-					doomDc32Pixel(fb, cnv, x + col, y + row, color);
-		x += glyph.width + 1u;
-	}
-	return y + fontGetHeight(font);
-}
-
-static uint32_t doomDc32DrawTextWrap(uint16_t *fb, const struct Canvas *cnv, uint32_t x, uint32_t y,
-	const char *text, enum Font font, uint16_t color)
-{
-	char line[34];
-	uint32_t idx = 0;
-
-	while (*text) {
-		char ch = *text++;
-
-		if (ch == '\r')
-			continue;
-		if (ch == '\n' || idx + 1u >= sizeof(line)) {
-			line[idx] = 0;
-			y = doomDc32DrawText(fb, cnv, x, y, line, font, color) + 2u;
-			idx = 0;
-			if (ch == '\n')
-				continue;
-		}
-		line[idx++] = ch;
-	}
-	if (idx) {
-		line[idx] = 0;
-		y = doomDc32DrawText(fb, cnv, x, y, line, font, color);
-	}
-	return y;
-}
 
 static void doomDc32AppendChar(char **dstP, size_t *remainP, char ch)
 {
@@ -230,28 +142,19 @@ void doomDc32SetError(const char *fmt, ...)
 void doomDc32Status(const char *title, const char *detail, uint32_t done, uint32_t total)
 {
 	struct Canvas *cnv = doomDc32CanvasValid ? &doomDc32Canvas : NULL;
-	uint16_t *fb = cnv ? (uint16_t*)cnv->framebuffer : NULL;
-	uint32_t pct = total ? (done * 100u) / total : done;
-	uint16_t bg = doomDc32Rgb565(8, 9, 12);
-	uint16_t fg = doomDc32Rgb565(235, 238, 224);
-	uint16_t dim = doomDc32Rgb565(120, 126, 118);
-	uint16_t fill = doomDc32Rgb565(200, 34, 28);
-	uint32_t barX = 32u, barY = 156u, barW;
+	const struct DcAppLoadingState loading = {
+		.appName = "DOOM",
+		.title = title,
+		.detail = detail,
+		.done = done,
+		.total = total,
+		.animationStep = done,
+	};
 
-	if (!fb && doomDc32Host && doomDc32Host->displayFb)
-		fb = doomDc32Host->displayFb();
-	if (!fb || !cnv || cnv->bpp != 16u)
+	if (!cnv || cnv->bpp != 16u)
 		return;
-	doomDc32Fill(fb, cnv, 0, 0, cnv->w, cnv->h, bg);
-	doomDc32DrawText(fb, cnv, 32, 46, "DOOM", FontLarge, fill);
-	doomDc32DrawTextWrap(fb, cnv, 32, 82, title ? title : "", FontMedium, fg);
-	if (detail && detail[0])
-		doomDc32DrawTextWrap(fb, cnv, 32, 112, detail, FontSmall, dim);
-	if (pct > 100u)
-		pct = 100u;
-	barW = cnv->w > 64u ? cnv->w - 64u : cnv->w;
-	doomDc32Fill(fb, cnv, barX, barY, barW, 8, doomDc32Rgb565(42, 42, 42));
-	doomDc32Fill(fb, cnv, barX, barY, (barW * pct) / 100u, 8, fill);
+	dispPrvWaitForScanoutStart();
+	dcAppDrawLoadingCanvas(cnv, &loading);
 }
 
 void doomDc32WaitForCenter(const char *title, const char *detail)
@@ -620,7 +523,7 @@ static bool doomDc32StageWhxFromVol(struct FatfsVol *vol)
 	}
 
 	eraseSize = doomDc32AlignUp(identity.fileSize, QSPI_ERASE_GRANULARITY);
-	doomDc32Status("Staging DOOM data", "Erasing flash", 0, identity.fileSize);
+	doomDc32Status("Staging DOOM data", "Erasing flash", 0, 0);
 	if (!doomDc32Host->flashWrite(DOOM_DC32_WHX_FLASH_ADDR, eraseSize, NULL, 0)) {
 		doomDc32SetError("Failed to erase DOOM data flash");
 		(void)fatfsFileClose(fil);

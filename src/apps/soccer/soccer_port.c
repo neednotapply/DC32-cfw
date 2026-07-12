@@ -398,17 +398,19 @@ static bool soccerDrawCacheProgress(struct SoccerApp *app, const char *asset,
 	uint32_t entry, uint32_t count, uint32_t done, uint32_t total)
 {
 	char line[64];
-	int32_t width = total ? (int32_t)((uint64_t)done * 250u / total) : 0;
+	struct DcAppLoadingState loading = {
+		.appName = "Sensible Soccer",
+		.title = "Preloading game",
+		.hint = "B cancels   FN menu",
+		.done = done,
+		.total = total,
+		.animationStep = app->draw.frame,
+	};
 
-	dcAppDrawClear(&app->draw, soccerRgb(2, 18, 24));
-	soccerCentered(app, 48, "PRELOADING GAME", FontLarge, 0xffff);
 	snprintf(line, sizeof(line), "%s  %lu/%lu", asset ? asset : "CACHE",
 		(unsigned long)entry, (unsigned long)count);
-	soccerCentered(app, 92, line, FontMedium, soccerRgb(190, 225, 220));
-	dcAppDrawFill(&app->draw, 35, 126, 250, 16, soccerRgb(16, 55, 62));
-	dcAppDrawFill(&app->draw, 35, 126, width, 16, soccerRgb(65, 205, 145));
-	soccerCentered(app, 170, "B CANCEL   CENTER MENU", FontSmall,
-		soccerRgb(150, 190, 195));
+	loading.detail = line;
+	dcAppDrawLoading(&app->draw, &loading);
 	if (!dcAppDrawFrame(&app->draw, 0) || mSoccerAbort)
 		return false;
 	return !(app->draw.pressed & KEY_BIT_B);
@@ -552,7 +554,7 @@ static enum SoccerCacheResult soccerPrepareUniversalCache(struct SoccerApp *app)
 	if (soccerActivateXipCache(app, entries, count, manifestCrc, dataOffset))
 		return SoccerCacheReady;
 	if (!app->host || !app->host->flashWrite ||
-		!soccerDrawCacheProgress(app, "ERASING CACHE", 0, count, 0, payloadBytes))
+		!soccerDrawCacheProgress(app, "ERASING CACHE", 0, count, 0, 0))
 		return app->host && app->host->flashWrite ? SoccerCacheCancelled : SoccerCacheFailed;
 	if (!app->host->flashWrite(app->xipCacheStart,
 		soccerAlignUp(dataOffset, QSPI_ERASE_GRANULARITY), NULL, 0))
@@ -2868,6 +2870,17 @@ int soccerAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 	if (!dcAppDrawInit(&app->draw, host, args, framebuffer,
 		SOCCER_SCREEN_W, SOCCER_SCREEN_H))
 		return -1;
+	{
+		const struct DcAppLoadingState loading = {
+			.appName = "Sensible Soccer",
+			.title = "Preparing game data",
+			.detail = "Opening asset pack",
+			.animationStep = app->draw.frame,
+		};
+
+		dcAppDrawLoading(&app->draw, &loading);
+		(void)dcAppDrawFrame(&app->draw, 0);
+	}
 	if (!soccerOpenPack(app)) {
 		dc32PortShowMissingData(host, args, "Sensible Soccer data", SOCCER_PACK_PATH,
 			framebuffer);

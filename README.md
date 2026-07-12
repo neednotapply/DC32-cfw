@@ -55,7 +55,7 @@ OpenLASIR identifies a sender with two 8-bit values. The Block ID identifies a p
 | `/IR` | Universal remote and Flipper-style IR files |
 | `/BADUSB` | `.txt` and `.badusb` scripts |
 | `/MUSIC` | ABC `.abc`, native MIDI `.mid`/`.midi`, RTTTL `.rtttl`, and RTTTL `.txt` files; Track focus selects ABC voices or MIDI format-1 tracks |
-| `/IMAGES` | `.jpg`, `.jpeg`, uncompressed `.bmp`, `.dci`, and `.dca` files |
+| `/IMAGES` | `.jpg`, `.jpeg`, uncompressed `.bmp`, and DC32-compatible `.gif` files |
 
 ROMs and proprietary game data are not included. Add only files you are legally permitted to use.
 
@@ -93,7 +93,7 @@ python tools/build_sd_zip.py \
 
 ## Optional user tools
 
-- `tools/image_converter.py` converts images and animations to badge-native `.dci` and `.dca` files.
+- `tools/image_converter.py` converts images and animations to browser-compatible `.gif` files with a DC32 playback payload.
 - `tools/build_chips_pack.py` creates `/APPS/chips.pak` from user-provided Win 3.1 Chip's Challenge data.
 - `tools/build_openjazz_pack.py` creates `/APPS/openjazz.pak` from user-provided Jazz Jackrabbit data. The bundled shareware `JAZZ.ZIP` can also be converted by the badge on first launch.
 

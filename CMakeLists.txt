@@ -126,6 +126,7 @@ add_executable(${APP}
     ${SRC_DIR}/fatfs.c
     ${SRC_DIR}/fonts.c
     ${SRC_DIR}/gb_mbc_analyze.c
+    ${SRC_DIR}/imageViewer.c
     ${SRC_DIR}/main_rp2350_defcon.c
     ${SRC_DIR}/irRemoteRx.c
     ${SRC_DIR}/nes/nes_analyze.c
@@ -134,6 +135,7 @@ add_executable(${APP}
     ${SRC_DIR}/pioWS2812.c
     ${SRC_DIR}/printf.c
     ${SRC_DIR}/qspi2350.c
+    ${SRC_DIR}/raster.c
     ${SRC_DIR}/sd.c
     ${SRC_DIR}/sdHwRP2350.c
     ${SRC_DIR}/settings.c
@@ -150,6 +152,7 @@ add_executable(${APP}
     ${SRC_DIR}/usbMsc.c
     ${SRC_DIR}/usbXinput.c
     ${SRC_DIR}/utf.c
+    ${PICOJPEG_SRC}
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/cdc/cdc_device.c
@@ -322,6 +325,8 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=dcAppDrawPresent
     -Wl,--undefined=dcAppDrawFrame
     -Wl,--undefined=dcAppDrawWaitRelease
+    -Wl,--undefined=dcAppDrawLoading
+    -Wl,--undefined=dcAppDrawLoadingCanvas
     -Wl,--undefined=dcAppCore1Start
     -Wl,--undefined=dcAppCore1Join
     -Wl,--undefined=dcAppCore1ForceStop
@@ -338,6 +343,7 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=gbExtraIoRegRead
     -Wl,--undefined=gbExtraIoRegWrite
     -Wl,--undefined=nesPortInGameMenu
+    -Wl,--undefined=uiPowerSetScreenSaverContentActive
     -Wl,--undefined=usbHidBeginReportSet
     -Wl,--undefined=usbHidConsumerReport
     -Wl,--undefined=usbHidDropNow
@@ -716,8 +722,9 @@ add_custom_command(
 add_custom_target(tworld_assets DEPENDS ${TWORLD_ASSET_C} ${TWORLD_ASSET_H})
 
 set(TWORLD_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/chips-tworld.pak")
+set(CHIPS_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/chips.pak")
 add_custom_command(
-    OUTPUT ${TWORLD_PAK}
+    OUTPUT ${CHIPS_PAK}
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_port_assets.py
         ${TWORLD_TILE_FILES}
@@ -727,9 +734,24 @@ add_custom_command(
         --source-root ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         --output-dir ${CMAKE_CURRENT_BINARY_DIR}/apps
         --only tworld
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TWORLD_PAK} ${CHIPS_PAK}
     VERBATIM
 )
-add_custom_target(dcapp_chips_assets ALL DEPENDS ${TWORLD_PAK})
+add_custom_target(dcapp_chips_assets ALL DEPENDS ${CHIPS_PAK})
+
+set(OPENJAZZ_PAK "${CMAKE_CURRENT_BINARY_DIR}/apps/openjazz.pak")
+add_custom_command(
+    OUTPUT ${OPENJAZZ_PAK}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_openjazz_pack.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/openjazz-shareware/JAZZ.ZIP
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_openjazz_pack.py
+        --input ${CMAKE_CURRENT_SOURCE_DIR}/third_party/openjazz-shareware/JAZZ.ZIP
+        --output ${OPENJAZZ_PAK}
+    VERBATIM
+)
+add_custom_target(dcapp_openjazz_assets ALL DEPENDS ${OPENJAZZ_PAK})
 
 set(TWORLD_CORE_SOURCES
     ${TWORLD_SOURCE_DIR}/encoding.c
@@ -1497,6 +1519,7 @@ target_include_directories(dcapp_sokoban BEFORE PRIVATE
 add_dcapp(dcapp_openjazz openjazz 212 CXX_EXCEPTIONS
     ${OPENJAZZ_APP_SOURCES}
 )
+add_dependencies(dcapp_openjazz_dcapp dcapp_openjazz_assets)
 
 target_include_directories(dcapp_openjazz BEFORE PRIVATE
     ${SRC_DIR}/apps/openjazz

@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define DCAPP_MAGIC             0x50414344u
-#define DCAPP_ABI_VERSION       5u
+#define DCAPP_ABI_VERSION       7u
 #define DCAPP_HEADER_SIZE       256u
 #define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
 #define DCAPP_CONTRACT_MAGIC    0x43444332u
@@ -105,6 +105,7 @@ struct DcAppHostApi {
 	void (*log)(const char *fmt, ...);
 	uint64_t (*getTime)(void);
 	void (*delayMsec)(uint32_t msec);
+	void (*idleWaitMsec)(uint32_t msec);
 	void *(*displayFb)(void);
 	uint_fast8_t (*keysRaw)(void);
 	uint_fast16_t (*uiKeysRaw)(void);
@@ -115,6 +116,7 @@ struct DcAppHostApi {
 	void (*abortActive)(void);
 	void (*ledsTick)(void);
 	bool (*portMenu)(struct Canvas *activeCanvas);
+	void (*setFnSettings)(const struct UiFnSettings *settings, void *context);
 };
 
 typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);

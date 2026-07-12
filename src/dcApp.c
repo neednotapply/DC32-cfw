@@ -1,4 +1,5 @@
 #include "dcApp.h"
+#include "dcAppDraw.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -176,6 +177,35 @@ static const char *dcAppPrvRuntimeName(uint32_t runtime)
 	const struct DcAppCatalogEntry *entry = dcAppCatalogFind(runtime);
 
 	return entry ? entry->name : "app";
+}
+
+/*
+ * An app can take a noticeable amount of time to copy from SD, verify, or
+ * initialize its own assets.  Put a visible status on the current canvas
+ * before either blocking phase so a launch never looks like a frozen menu.
+ */
+static void dcAppPrvDrawLaunchLoading(const struct DcAppRunArgs *args,
+	uint32_t runtime, const char *title, const char *detail)
+{
+	struct Canvas cnv = {0};
+	const struct DcAppLoadingState loading = {
+		.appName = dcAppPrvRuntimeName(runtime),
+		.title = title,
+		.detail = detail,
+	};
+
+	if (!args)
+		return;
+	if (args->canvas)
+		cnv = *args->canvas;
+	if (!cnv.framebuffer && mHostApi.displayFb)
+		cnv.framebuffer = mHostApi.displayFb();
+	if (!cnv.w || !cnv.h || !cnv.framebuffer)
+		return;
+	if (!cnv.bpp)
+		cnv.bpp = DISP_BPP;
+	dispPrvWaitForScanoutStart();
+	dcAppDrawLoadingCanvas(&cnv, &loading);
 }
 
 static bool dcAppPrvDiskRead(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)
@@ -710,6 +740,7 @@ static enum DcAppResult dcAppRunLoadedById(uint32_t runtime, const struct DcAppR
 	entry = (DcAppEntryF)dcAppPrvImageFunc(mLoadedHeader.entryOffset);
 	mActiveAbort = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.abortOffset);
 	mActiveRefresh = (DcAppVoidF)dcAppPrvImageFunc(mLoadedHeader.refreshOffset);
+	dcAppPrvDrawLaunchLoading(args, runtime, "Starting", "Initializing application");
 	ret = entry(&mHostApi, args);
 	dcAppCore1ForceStop();
 	uiSetFnSettings(NULL, NULL);
@@ -743,6 +774,8 @@ enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *arg
 
 	if (!workspaceWasActive)
 		toolWorkspaceBegin();
+	dcAppPrvDrawLaunchLoading(args, (uint32_t)appId, "Loading application",
+		"Preparing runtime");
 	result = dcAppLoadByIdFromVol((uint32_t)appId, args ? args->vol : NULL);
 
 	if (result != DcAppResultOk)

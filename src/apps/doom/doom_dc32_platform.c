@@ -882,16 +882,6 @@ static void doomDc32WriteLogicalLine(uint16_t *fb, const struct Canvas *cnv,
 		fb[doomDc32DisplayIndex(cnv, x, y)] = line[x];
 }
 
-static void doomDc32FillLogicalLine(uint16_t *fb, const struct Canvas *cnv,
-	uint32_t y, uint16_t color)
-{
-	uint16_t line[SCREENWIDTH];
-
-	for (uint32_t x = 0; x < SCREENWIDTH; x++)
-		line[x] = color;
-	doomDc32WriteLogicalLine(fb, cnv, y, line, SCREENWIDTH);
-}
-
 static void doomDc32PaletteLine(uint16_t *line, const uint8_t *src)
 {
 	for (int x = 0; x < SCREENWIDTH; x++)
@@ -1058,7 +1048,6 @@ void doomDc32PresentFrame(void)
 	struct Canvas *cnv = doomDc32CanvasValid ? &doomDc32Canvas : NULL;
 	uint16_t *fb = cnv ? (uint16_t*)cnv->framebuffer : NULL;
 	uint16_t line[SCREENWIDTH];
-	uint32_t top;
 
 	if (!fb && doomDc32Host && doomDc32Host->displayFb)
 		fb = doomDc32Host->displayFb();
@@ -1079,16 +1068,14 @@ void doomDc32PresentFrame(void)
 	doomDc32UpdatePalette();
 	doomDc32BuildOverlayRows();
 	doomDc32AdvanceWipe();
-	top = (cnv->h > SCREENHEIGHT) ? (cnv->h - SCREENHEIGHT) / 2u : 0u;
-	for (uint32_t y = 0; y < top; y++)
-		doomDc32FillLogicalLine(fb, cnv, y, 0);
-	for (uint32_t y = top + SCREENHEIGHT; y < cnv->h; y++)
-		doomDc32FillLogicalLine(fb, cnv, y, 0);
+	// The original 320x200 framebuffer assumes 1.2:1 pixels.  Expand it to
+	// the badge's 320x240 4:3 canvas so its intended geometry is preserved.
+	for (uint32_t y = 0; y < cnv->h; y++) {
+		int sourceY = (int)((y * SCREENHEIGHT) / cnv->h);
 
-	for (int y = 0; y < SCREENHEIGHT; y++) {
-		doomDc32BaseLine(line, y);
-		doomDc32DrawOverlayLine(line, y);
-		doomDc32WriteLogicalLine(fb, cnv, (uint32_t)y + top, line, SCREENWIDTH);
+		doomDc32BaseLine(line, sourceY);
+		doomDc32DrawOverlayLine(line, sourceY);
+		doomDc32WriteLogicalLine(fb, cnv, y, line, SCREENWIDTH);
 	}
 }
 

@@ -23,6 +23,7 @@
 #include "2350.h"
 #include "qspi.h"
 #include "dcApp.h"
+#include "dcAppDraw.h"
 #include "mbc.h"
 #include "gb.h"
 #include "nes/nes.h"
@@ -1196,7 +1197,7 @@ static void applySavedLeds(void)
 
 static void runSelectedGameTool(void *userData)
 {
-        struct GameSelection selection;
+	struct GameSelection selection;
 
         (void)userData;
         mGameToolExitRequested = false;
@@ -1213,21 +1214,37 @@ static void runSelectedGameTool(void *userData)
                         pr("No runtime for selected game\n");
                         mGameToolExitRequested = true;
                 }
-                else {
-                        struct DcAppRunArgs args = {
-                                .runtime = selection.runtime,
+		else {
+			struct Canvas launchCanvas = {
+				.framebuffer = dispGetFb(),
+				.w = DISP_HEIGHT,
+				.h = DISP_WIDTH,
+				.bpp = DISP_BPP,
+				.indexedLe = DISP_INDEXED_LE,
+				.rotated = 1u,
+			};
+			struct DcAppRunArgs args = {
+				.runtime = selection.runtime,
                                 .rom = (const void*)QSPI_ROM_START,
                                 .romSize = selection.romSize,
                                 .saveRam = CART_RAM_ADDR_IN_RAM,
                                 .saveRamSize = selection.saveRamSize,
                                 .presentAsCgb = shouldActAsCgb(),
                                 .gbPalette = desiredGbPalette(),
-                                .upscale = false,
-                                .rotate = false,
-                        };
-                        enum DcAppResult appResult;
-                        
-                        appResult = dcAppLoadGameRuntime(selection.runtime);
+				.upscale = false,
+				.rotate = false,
+				.canvas = &launchCanvas,
+			};
+			enum DcAppResult appResult;
+			const struct DcAppLoadingState loading = {
+				.appName = "Games",
+				.title = "Loading engine",
+				.detail = "Preparing runtime",
+			};
+
+			dispPrvWaitForScanoutStart();
+			dcAppDrawLoadingCanvas(&launchCanvas, &loading);
+			appResult = dcAppLoadGameRuntime(selection.runtime);
                         if (appResult != DcAppResultOk) {
                                 pr("Failed to load app: %s\n", dcAppResultName(appResult));
                                 mGameToolExitRequested = true;

@@ -43,6 +43,7 @@ DCA_CODEC_RLE = 1
 DCA_DEFAULT_MAX_BYTES = 3 * 1024 * 1024
 DCA_TILE = 16
 DC32_GIF_TRAILER_MAGIC = b"DC32GIF1"
+BLACK_BAR_MAX_CHANNEL = 12
 
 SUPPORTED_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 ANIMATED_SUFFIXES = {".gif", ".webp", ".png"}
@@ -107,8 +108,21 @@ def fit_size(src_w: int, src_h: int, max_w: int = CANVAS_W, max_h: int = CANVAS_
     return max(1, out_w), max(1, out_h)
 
 
-def render_rgb_frame(frame: Image.Image) -> Image.Image:
+def black_content_crop(frame: Image.Image) -> tuple[int, int, int, int] | None:
+    """Return the smallest rectangle containing the frame's visible content."""
+    rgba = frame.convert("RGBA")
+    flattened = Image.new("RGB", rgba.size, (0, 0, 0))
+    flattened.paste(rgba, mask=rgba.getchannel("A"))
+    crop = flattened.point(lambda value: 255 if value > BLACK_BAR_MAX_CHANNEL else 0).getbbox()
+    if not crop or crop == (0, 0, frame.width, frame.height):
+        return None
+    return crop
+
+
+def render_rgb_frame(frame: Image.Image, crop: tuple[int, int, int, int] | None = None) -> Image.Image:
     src = frame.convert("RGBA")
+    if crop:
+        src = src.crop(crop)
     out_w, out_h = fit_size(src.width, src.height)
     resized = src.resize((out_w, out_h), Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 255))
@@ -116,8 +130,8 @@ def render_rgb_frame(frame: Image.Image) -> Image.Image:
     return canvas.convert("RGB")
 
 
-def render_dci_payload(frame: Image.Image) -> bytes:
-    rgb = render_rgb_frame(frame)
+def render_dci_payload(frame: Image.Image, crop: tuple[int, int, int, int] | None = None) -> bytes:
+    rgb = render_rgb_frame(frame, crop)
     pixels = rgb.load()
     out = bytearray(DCI_FRAME_BYTES)
 
@@ -150,7 +164,8 @@ def pack_dci_header(kind: int, frame_count: int, loop_count: int, payload_bytes:
 
 def write_static(src: Path, dst: Path) -> None:
     with Image.open(src) as image:
-        payload = render_dci_payload(image)
+        frame = image.copy()
+        payload = render_dci_payload(frame, black_content_crop(frame))
     dst.write_bytes(pack_dci_header(DCI_KIND_STATIC, 1, 0, len(payload)) + payload)
 
 
@@ -225,15 +240,16 @@ def clean_orphans(root: Path, dry_run: bool) -> int:
 
 
 def animation_frames(src: Path) -> tuple[list[Image.Image], list[int], int]:
-    frames: list[Image.Image] = []
+    source_frames: list[Image.Image] = []
     durations: list[int] = []
     with Image.open(src) as image:
         loop = int(image.info.get("loop", 0) or 0)
         for frame in ImageSequence.Iterator(image):
             durations.append(max(1, int(frame.info.get("duration", image.info.get("duration", 33)) or 33)))
-            frames.append(render_rgb_frame(frame.copy()))
-    if not frames:
+            source_frames.append(frame.copy())
+    if not source_frames:
         raise ConversionError(f"{src} has no animation frames")
+    frames = [render_rgb_frame(frame, black_content_crop(frame)) for frame in source_frames]
     return frames, durations, loop
 
 
@@ -441,7 +457,8 @@ def write_dc32_gif(src: Path, dst: Path, colors: int, target_fps: int, max_bytes
         frames, durations, loop = animation_frames(src)
     else:
         with Image.open(src) as image:
-            frames = [render_rgb_frame(image)]
+            frame = image.copy()
+            frames = [render_rgb_frame(frame, black_content_crop(frame))]
         durations, loop = [1000], 1
     best: DcaBuild | None = None
     for attempt_colors in dca_color_attempts(colors):

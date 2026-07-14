@@ -11,7 +11,12 @@
 static uint16_t mTimeoutBytes;
 static uint32_t mRdTimeoutTicks, mWrTimeoutTicks;
 static volatile uint32_t mTrash;
-static uint32_t mSpeedLimit = 500000;
+
+// The bundled card is reliable at 1 MHz. Individual high-throughput users
+// temporarily raise this and retry at the safe speed if an operation fails.
+#define SD_SAFE_MAX_HZ	1000000u
+
+static uint32_t mSpeedLimit = SD_SAFE_MAX_HZ;
 
 #define SD_DMA_CH_READ		(SD_DMA_FIRST + 0)
 #define SD_DMA_CH_WRITE		(SD_DMA_FIRST + 1)
@@ -72,11 +77,8 @@ static void sdHwPrvSetBrg(uint_fast16_t brg)
 
 void sdHwSetSpeed(uint32_t maxSpeed)
 {
-	//XXX: this driver and chip can go fast. the shitty SD card chosen for this project cannot.
-	//it advertises HIGH SPEED SIGNALLING support, which implies it can handle clocks up to 52MHz
-	//in reality it chokes on clocks over 1MHz, and thus this limit here. We considered trying to
-	//identify it so as to not cripple other card, but given that this was found at the 11th hour,
-	//we did not go that route, so enjoy your meditative SD card experience...huuuuummmmmmm.....
+	// The bundled card is not reliable above 1 MHz. Callers that can safely
+	// retry may temporarily lift mSpeedLimit for their operation.
 	if (maxSpeed > mSpeedLimit)
 		maxSpeed = mSpeedLimit;
 
@@ -85,7 +87,7 @@ void sdHwSetSpeed(uint32_t maxSpeed)
 
 void sdHwSetSpeedLimit(uint32_t maxHz)
 {
-	mSpeedLimit = maxHz ? maxHz : 500000;
+	mSpeedLimit = maxHz ? maxHz : SD_SAFE_MAX_HZ;
 }
 
 uint32_t sdHwInit(void)

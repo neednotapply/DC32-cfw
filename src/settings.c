@@ -120,7 +120,7 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->screenSaverBrightness = 1u;
 	settings->screenSaverGifPath[sizeof(settings->screenSaverGifPath) - 1] = 0;
 	settings->screenSaverImageFolder[sizeof(settings->screenSaverImageFolder) - 1] = 0;
-	settings->bootMenuCustomGif = !!settings->bootMenuCustomGif;
+	settings->bootMenuCustomGif = false;
 	settings->themeEnabled = !!settings->themeEnabled;
 	settings->fileBrowserStartFavorites = !!settings->fileBrowserStartFavorites;
 	if (settings->pongColorTheme >= 3u)
@@ -285,7 +285,7 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 24:
-		case 25:			//add shared theme and boot-menu choices without growing the settings page
+		case 25:			//add shared theme choice without growing the settings page
 			settings->themeEnabled = false;
 			settings->bootMenuCustomGif = false;
 			//fallthrough

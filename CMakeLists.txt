@@ -44,6 +44,7 @@ set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(TINYUSB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyusb")
 set(MINIZ_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/miniz.c")
 set(PICOJPEG_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/picojpeg.c")
+set(GIFDEC_SRC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/gifdec/gifdec.c")
 set(ARDENS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ardens")
 set(LINKER_SCRIPT "${SRC_DIR}/linker_rp2350_defcon.lkr")
 set(DCAPP_LINKER_SCRIPT "${SRC_DIR}/linker_dcapp.lkr")
@@ -153,6 +154,7 @@ add_executable(${APP}
     ${SRC_DIR}/usbXinput.c
     ${SRC_DIR}/utf.c
     ${PICOJPEG_SRC}
+    ${GIFDEC_SRC}
     ${TINYUSB_DIR}/src/tusb.c
     ${TINYUSB_DIR}/src/class/hid/hid_device.c
     ${TINYUSB_DIR}/src/class/cdc/cdc_device.c
@@ -176,6 +178,7 @@ target_include_directories(${APP} PRIVATE
     ${SRC_DIR}/nes
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/gifdec
     ${TINYUSB_DIR}/src
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
@@ -261,6 +264,7 @@ set_source_files_properties(
 set_source_files_properties(
     ${MINIZ_SRC}
     ${PICOJPEG_SRC}
+    ${GIFDEC_SRC}
     PROPERTIES
         COMPILE_OPTIONS "-Wno-error"
 )
@@ -541,6 +545,7 @@ add_dcapp(dcapp_image image 101
     ${SRC_DIR}/imageViewer.c
     ${SRC_DIR}/raster.c
     ${PICOJPEG_SRC}
+    ${GIFDEC_SRC}
 )
 
 add_dcapp(dcapp_music music 102
@@ -580,6 +585,7 @@ add_dcapp(dcapp_raspyjack raspyjack 107
     ${SRC_DIR}/apps/raspyjack_remote.c
     ${SRC_DIR}/raster.c
     ${PICOJPEG_SRC}
+    ${GIFDEC_SRC}
 )
 
 add_dcapp(dcapp_pwnagotchi pwnagotchi 108

@@ -1,6 +1,7 @@
 #pragma GCC optimize ("Os")
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include "badgeLeds.h"
 #include "dcAppDraw.h"
 #include "dispDefcon.h"
@@ -16,9 +17,10 @@
 #include "timebase.h"
 #include "toolWorkspace.h"
 #include "ui.h"
+#include "gifdec.h"
 
-#define IMAGE_SD_SAFE_HZ        500000u
-#define IMAGE_SD_FAST_HZ        2000000u
+#define IMAGE_SD_SAFE_HZ        1000000u
+#define IMAGE_SD_FAST_HZ        12500000u
 #define DCI1_MAGIC              0x31494344u
 #define DCI_HEADER_SIZE         64u
 #define DCI1_VERSION            1u
@@ -38,6 +40,11 @@
 #define DC32_GIF_TRAILER_SIZE   8u
 #define IMAGE_DIRECT_MAX_W       2048u
 #define IMAGE_DIRECT_MAX_H       2048u
+#define IMAGE_GIF_MAX_PIXELS     (320u * 240u)
+/* The resident linker starts its live RAM at 0x2002b000.  The lower window is
+ * otherwise used as cartridge scratch, and is idle while an image is shown. */
+#define IMAGE_GIF_ARENA_END      0x2002b000u
+#define IMAGE_GIF_ARENA_SIZE     ((uint32_t)(IMAGE_GIF_ARENA_END - (uintptr_t)CART_RAM_ADDR_IN_RAM))
 
 struct ImageDciHeader {
 	uint32_t magic;
@@ -99,7 +106,102 @@ typedef char ImageDcaRectSizeCheck[(sizeof(struct ImageDcaRect) == 16u) ? 1 : -1
 
 static bool mImageFastSdDisabled;
 static bool mImageAutoAdvance;
-static uint64_t mImagePlaybackDeadline;
+static struct FatfsFil *mGifFile;
+static uint32_t mGifArenaUsed;
+
+struct ImageGifAllocHeader {
+	uint32_t size;
+};
+
+int imageViewerGifOpen(const char *path, int flags)
+{
+	(void)path;
+	(void)flags;
+	return mGifFile ? 1 : -1;
+}
+
+ssize_t imageViewerGifRead(int fd, void *buf, size_t size)
+{
+	uint32_t got = 0;
+
+	if (fd != 1 || !mGifFile || size > 0xffffffffu ||
+			!fatfsFileRead(mGifFile, buf, (uint32_t)size, &got))
+		return -1;
+	return (ssize_t)got;
+}
+
+off_t imageViewerGifSeek(int fd, off_t offset, int whence)
+{
+	int64_t target;
+
+	if (fd != 1 || !mGifFile)
+		return -1;
+	if (whence == SEEK_SET)
+		target = offset;
+	else if (whence == SEEK_CUR)
+		target = (int64_t)fatfsFileTell(mGifFile) + offset;
+	else if (whence == SEEK_END)
+		target = (int64_t)fatfsFileGetSize(mGifFile) + offset;
+	else
+		return -1;
+	if (target < 0 || (uint64_t)target > fatfsFileGetSize(mGifFile) || !fatfsFileSeek(mGifFile, (uint32_t)target))
+		return -1;
+	return (off_t)target;
+}
+
+int imageViewerGifClose(int fd)
+{
+	return fd == 1 && mGifFile ? 0 : -1;
+}
+
+void *imageViewerAlloc(size_t size)
+{
+	struct ImageGifAllocHeader *header;
+	uint32_t aligned;
+
+	if (size > 0xffffffffu - sizeof(*header))
+		return NULL;
+	aligned = ((uint32_t)size + sizeof(*header) + 3u) &~ 3u;
+	if (aligned > IMAGE_GIF_ARENA_SIZE - mGifArenaUsed)
+		return NULL;
+	header = (struct ImageGifAllocHeader*)((uint8_t*)CART_RAM_ADDR_IN_RAM + mGifArenaUsed);
+	header->size = (uint32_t)size;
+	mGifArenaUsed += aligned;
+	return header + 1;
+}
+
+void *imageViewerCalloc(size_t count, size_t size)
+{
+	void *ret;
+
+	if (count && size > 0xffffffffu / count)
+		return NULL;
+	ret = imageViewerAlloc(count * size);
+	if (ret)
+		memset(ret, 0, count * size);
+	return ret;
+}
+
+void *imageViewerRealloc(void *ptr, size_t size)
+{
+	struct ImageGifAllocHeader *header;
+	void *ret;
+
+	if (!ptr)
+		return imageViewerAlloc(size);
+	if (!size)
+		return NULL;
+	header = (struct ImageGifAllocHeader*)ptr - 1;
+	ret = imageViewerAlloc(size);
+	if (ret)
+		memcpy(ret, ptr, header->size < size ? header->size : size);
+	return ret;
+}
+
+void imageViewerFree(void *ptr)
+{
+	(void)ptr;
+}
 
 static bool imagePrvEndsWithNoCase(const char *str, const char *suffix)
 {
@@ -770,12 +872,7 @@ static enum ImageViewerResult imagePrvRunDcaLoaded(struct Canvas *cnv, const uin
 	while (1) {
 		enum ImageViewerResult ret = ImageViewerResultBack;
 
-		if (mImagePlaybackDeadline && getTime() >= mImagePlaybackDeadline)
-			return ImageViewerResultNext;
-
 		while (paused || getTime() < nextAt) {
-			if (mImagePlaybackDeadline && getTime() >= mImagePlaybackDeadline)
-				return ImageViewerResultNext;
 			if (imagePrvDcaHandleKeys(&prevKeys, &paused, &ret))
 				return ret;
 			if (paused)
@@ -821,6 +918,54 @@ static enum ImageViewerResult imagePrvRunDca(struct Canvas *cnv, struct FatfsVol
 	return ret;
 }
 
+static enum ImageViewerResult imagePrvRunStandardGif(struct Canvas *cnv, struct FatfsVol *vol,
+	const struct FatFileLocator *locator)
+{
+	struct FatfsFil *fil;
+	gd_GIF *gif = NULL;
+	struct RasterRect fit;
+	enum ImageViewerResult ret = ImageViewerResultDecodeError;
+	uint32_t pixels;
+
+	fil = fatfsFileOpenWithLocator(vol, locator, OPEN_MODE_READ);
+	if (!fil)
+		return ImageViewerResultOpenError;
+	mGifFile = fil;
+	mGifArenaUsed = 0;
+	gif = gd_open_gif("");
+	if (!gif)
+		goto out;
+	pixels = (uint32_t)gif->width * gif->height;
+	if (!gif->width || !gif->height || pixels > IMAGE_GIF_MAX_PIXELS)
+		ret = ImageViewerResultTooLarge;
+	else if (gd_get_frame(gif) != 1)
+		ret = ImageViewerResultDecodeError;
+	else {
+		fit = rasterFit(gif->width, gif->height, cnv->w, cnv->h);
+		dispPrvWaitForScanoutStart();
+		rasterClear(cnv, 0);
+		for (uint32_t y = 0; y < gif->height; y++) {
+			for (uint32_t x = 0; x < gif->width; x++) {
+				uint8_t index = gif->frame[y * gif->width + x];
+				const uint8_t *color = gif->palette->colors + index * 3u;
+
+				rasterDrawScaledPixel(cnv, &fit, gif->width, gif->height, x, y,
+					rasterRgb565(color[0], color[1], color[2]));
+			}
+			if (!(y & 7u))
+				badgeLedsTick();
+		}
+		ret = imagePrvWaitForStaticInput();
+	}
+out:
+	if (gif)
+		gd_close_gif(gif);
+	mGifFile = NULL;
+	mGifArenaUsed = 0;
+	(void)fatfsFileClose(fil);
+	return ret;
+}
+
 static enum ImageViewerResult imagePrvRunDc32Gif(struct Canvas *cnv, struct FatfsVol *vol,
 	const struct FatFileLocator *locator)
 {
@@ -860,8 +1005,12 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 	(void)rootPath;
 	if (!initialLocator || !initialName)
 		return ImageViewerResultOpenError;
-	if (imagePrvEndsWithNoCase(initialName, ".gif"))
-		return imagePrvRunDc32Gif(cnv, vol, initialLocator);
+	if (imagePrvEndsWithNoCase(initialName, ".gif")) {
+		enum ImageViewerResult ret = imagePrvRunDc32Gif(cnv, vol, initialLocator);
+
+		return ret == ImageViewerResultIncompatibleGif ?
+			imagePrvRunStandardGif(cnv, vol, initialLocator) : ret;
+	}
 	if (imagePrvEndsWithNoCase(initialName, ".dca"))
 		return imagePrvRunDca(cnv, vol, initialLocator);
 	if (imagePrvEndsWithNoCase(initialName, ".dci"))
@@ -873,18 +1022,6 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 	return ImageViewerResultUnsupported;
 }
 
-enum ImageViewerResult imageViewerRunBoot(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath,
-	const struct FatFileLocator *initialLocator, const char *initialName)
-{
-	enum ImageViewerResult result;
-
-	mImageAutoAdvance = true;
-	mImagePlaybackDeadline = getTime() + TICKS_PER_SECOND * 2u;
-	result = imageViewerRun(cnv, vol, rootPath, initialLocator, initialName);
-	mImagePlaybackDeadline = 0;
-	mImageAutoAdvance = false;
-	return result;
-}
 
 enum ImageViewerResult imageViewerRunStill(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath,
 	const struct FatFileLocator *initialLocator, const char *initialName)

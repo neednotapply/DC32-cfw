@@ -802,12 +802,14 @@ static void uiPrvDrawHeaderBattery(struct Canvas *cnv, int32_t left, uint8_t lev
 		#define UI_HEADER_BATTERY_OUTLINE_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, color)
 		#define UI_HEADER_BATTERY_SEGMENT_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, color)
 		#define UI_HEADER_BATTERY_BOLT_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, UI_HEADER_BATTERY_BOLT)
+		#define UI_HEADER_BATTERY_BOLT_BORDER_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, UI_HEADER_BATTERY_BACKGROUND)
 	#else
 		(void)color;
 		#define UI_HEADER_BATTERY_BACKGROUND_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
 		#define UI_HEADER_BATTERY_OUTLINE_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
 		#define UI_HEADER_BATTERY_SEGMENT_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
 		#define UI_HEADER_BATTERY_BOLT_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
+		#define UI_HEADER_BATTERY_BOLT_BORDER_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
 	#endif
 
 	UI_HEADER_BATTERY_BACKGROUND_RECT(left - 1, top - 1, right + 1, top + 13);
@@ -822,18 +824,37 @@ static void uiPrvDrawHeaderBattery(struct Canvas *cnv, int32_t left, uint8_t lev
 		UI_HEADER_BATTERY_SEGMENT_RECT(left + 3 + i * 6, top + 3, left + 7 + i * 6, top + 9);
 
 	if (charging) {
-		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 2, left + 24, top + 3);
-		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 4, left + 22, top + 5);
-		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 5, left + 23, top + 6);
-		UI_HEADER_BATTERY_BOLT_RECT(left + 16, top + 7, left + 21, top + 8);
-		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 8, left + 20, top + 9);
-		UI_HEADER_BATTERY_BOLT_RECT(left + 16, top + 10, left + 18, top + 11);
+		/* A single angular bolt: broad at its centre and pointed at both ends. */
+		#define UI_HEADER_BATTERY_BOLT_ROW(x1, x2, y) \
+			UI_HEADER_BATTERY_BOLT_BORDER_RECT(left + (x1) - 1, top + (y) - 1, left + (x2) + 1, top + (y) + 1)
+		UI_HEADER_BATTERY_BOLT_ROW(21, 25, 1);
+		UI_HEADER_BATTERY_BOLT_ROW(20, 23, 2);
+		UI_HEADER_BATTERY_BOLT_ROW(20, 22, 3);
+		UI_HEADER_BATTERY_BOLT_ROW(19, 21, 4);
+		UI_HEADER_BATTERY_BOLT_ROW(18, 25, 5);
+		UI_HEADER_BATTERY_BOLT_ROW(21, 24, 6);
+		UI_HEADER_BATTERY_BOLT_ROW(20, 23, 7);
+		UI_HEADER_BATTERY_BOLT_ROW(19, 22, 8);
+		UI_HEADER_BATTERY_BOLT_ROW(18, 21, 9);
+		UI_HEADER_BATTERY_BOLT_ROW(18, 20, 10);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 21, top + 1, left + 25, top + 1);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 2, left + 23, top + 2);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 3, left + 22, top + 3);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 19, top + 4, left + 21, top + 4);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 5, left + 25, top + 5);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 21, top + 6, left + 24, top + 6);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 7, left + 23, top + 7);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 19, top + 8, left + 22, top + 8);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 9, left + 21, top + 9);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 10, left + 20, top + 10);
+		#undef UI_HEADER_BATTERY_BOLT_ROW
 	}
 
 	#undef UI_HEADER_BATTERY_BACKGROUND_RECT
 	#undef UI_HEADER_BATTERY_OUTLINE_RECT
 	#undef UI_HEADER_BATTERY_SEGMENT_RECT
 	#undef UI_HEADER_BATTERY_BOLT_RECT
+	#undef UI_HEADER_BATTERY_BOLT_BORDER_RECT
 }
 
 static uint16_t uiPrvHeaderBatteryColor(enum BadgePowerMode powerMode, uint8_t level)
@@ -1446,60 +1467,8 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		return result;
 	}
 
-	static bool uiPrvRunBootGif(struct Canvas *cnv, const char *path)
-	{
-		struct FatfsVol *vol;
-		struct FatfsDir *dir;
-		struct FatFileLocator locator;
-		char parent[SETTINGS_SCREENSAVER_PATH_MAX];
-		const char *slash;
-		enum ImageViewerResult result;
-
-		if (!path || !path[0])
-			return false;
-		vol = uiPrvMountCard(cnv, true);
-		if (!vol)
-			return false;
-		slash = strrchr(path, '/');
-		if (!slash || !slash[1])
-			goto out_unmount;
-		if (slash == path)
-			strcpy(parent, "/");
-		else {
-			uint32_t len = (uint32_t)(slash - path);
-
-			if (len >= sizeof(parent))
-				goto out_unmount;
-			memcpy(parent, path, len);
-			parent[len] = 0;
-		}
-		dir = fatfsDirOpen(vol, parent);
-		if (!dir || !fatfsFindFileAt(dir, slash + 1, &locator)) {
-			if (dir)
-				fatfsDirClose(dir);
-			goto out_unmount;
-		}
-		fatfsDirClose(dir);
-		result = imageViewerRunBoot(cnv, vol, parent, &locator, slash + 1);
-		if (!uiPrvImageResultCanSkip(result)) {
-			(void)uiPrvCardPreUnmount();
-			(void)fatfsUnmount(vol);
-			return true;
-		}
-
-	out_unmount:
-		(void)uiPrvCardPreUnmount();
-		(void)fatfsUnmount(vol);
-		return false;
-	}
-
 	static void uiPrvBootSplash(struct Canvas *cnv)
 	{
-		struct Settings settings;
-
-		settingsGet(&settings);
-		if (settings.bootMenuCustomGif && uiPrvRunBootGif(cnv, settings.screenSaverGifPath))
-			return;
 		uiPrvSplash(cnv);
 	}
 	
@@ -3503,38 +3472,6 @@ out_unmount:
 	(void)fatfsUnmount(vol);
 }
 
-static bool uiPrvBootGifFileName(const char *name)
-{
-	return uiPrvStrEndsWithNoCase(name, ".gif");
-}
-
-static void uiPrvPickBootGif(struct Canvas *cnv, struct Settings *settings)
-{
-	struct FatfsVol *vol = uiPrvMountCard(cnv, false);
-	struct FatFileLocator locator;
-	char name[FATFS_NAME_BUF_LEN];
-	char parentPath[UI_PICK_FILE_PATH_BUF_SZ];
-	uint32_t parentLen, nameLen;
-
-	if (!vol)
-		return;
-	if (uiPrvPickFile(cnv, vol, "/", uiPrvBootGifFileName, "No compatible GIFs found on the SD card", false,
-			&locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL, false, NULL)) {
-		parentLen = !strcmp(parentPath, "/") ? 0u : strlen(parentPath);
-		nameLen = strlen(name);
-		if (parentLen + 1u + nameLen >= sizeof(settings->screenSaverGifPath))
-			uiAlert(cnv, "Selected boot GIF path is too long", DialogTypeOk);
-		else {
-			if (parentLen)
-				memcpy(settings->screenSaverGifPath, parentPath, parentLen);
-			settings->screenSaverGifPath[parentLen] = '/';
-			memcpy(settings->screenSaverGifPath + parentLen + 1u, name, nameLen + 1u);
-		}
-	}
-	(void)uiPrvCardPreUnmount();
-	(void)fatfsUnmount(vol);
-}
-
 static void uiPrvApplyTheme(const struct Settings *settings)
 {
 	if (!settings)
@@ -3579,7 +3516,7 @@ static void __attribute__((noinline)) uiPrvThemeSettings(struct Canvas *cnv, str
 	uiPrvApplyTheme(settings);
 	uiPrvReset(cnv, false);
 	while (1) {
-		int_fast8_t numOptions = 0, doneOption, enabledOption, redOption = -1, greenOption = -1, blueOption = -1, bootOption, bootGifOption = -1;
+		int_fast8_t numOptions = 0, doneOption, enabledOption, redOption = -1, greenOption = -1, blueOption = -1;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
 
 		uiPrvSetHeaderTitle("Theme");
@@ -3614,22 +3551,6 @@ static void __attribute__((noinline)) uiPrvThemeSettings(struct Canvas *cnv, str
 			uiPrintf(cnv, uiPrvMenuRow(cnv, blueOption), 111, "%u         ", uiPrvLedColorToMenu(settings->ledBlue));
 		}
 
-		bootOption = numOptions++;
-		cnv->foreColor = 11;
-		uiPuts(cnv, uiPrvMenuRow(cnv, bootOption), 10, "BOOT MENU:", -1);
-		cnv->foreColor = 15;
-		uiPuts(cnv, uiPrvMenuRow(cnv, bootOption), 111,
-			settings->bootMenuCustomGif ? "CUSTOM GIF" : "TEXT      ", -1);
-
-		if (settings->bootMenuCustomGif) {
-			bootGifOption = numOptions++;
-			cnv->foreColor = 11;
-			uiPuts(cnv, uiPrvMenuRow(cnv, bootGifOption), 10, "BOOT GIF:", -1);
-			cnv->foreColor = 15;
-			uiPuts(cnv, uiPrvMenuRow(cnv, bootGifOption), 111,
-				settings->screenSaverGifPath[0] ? "SELECTED" : "SELECT GIF", -1);
-		}
-
 		if (selOption >= numOptions)
 			selOption = numOptions - 1;
 		selOption = uiPrvMenu(cnv, selOption, numOptions, &button);
@@ -3649,14 +3570,6 @@ static void __attribute__((noinline)) uiPrvThemeSettings(struct Canvas *cnv, str
 			uiPrvThemeAdjustColor(settings, &settings->ledGreen, button);
 		else if (selOption == blueOption)
 			uiPrvThemeAdjustColor(settings, &settings->ledBlue, button);
-		else if (selOption == bootOption) {
-			if (button == KEY_BIT_LEFT)
-				settings->bootMenuCustomGif = !settings->bootMenuCustomGif;
-			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A)
-				settings->bootMenuCustomGif = !settings->bootMenuCustomGif;
-		}
-		else if (selOption == bootGifOption && button == KEY_BIT_A)
-			uiPrvPickBootGif(cnv, settings);
 	}
 }
 

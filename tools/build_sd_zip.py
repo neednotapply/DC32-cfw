@@ -763,7 +763,8 @@ def create_image_dir(stage: Path) -> None:
     shutil.copyfile(Path(__file__).resolve().parent / "image_converter.py", image_dir / "image_converter.py")
     (image_dir / "README.txt").write_text(
         "Place .jpg, .jpeg, uncompressed .bmp, or DC32-compatible .gif files in this folder.\n"
-        "Run image_converter.py on your PC to create browser-compatible GIFs in converted/ without changing the originals.\n",
+        "Run image_converter.py on your PC to create browser-compatible GIFs in converted/ without changing the originals.\n"
+        "The converter crops each frame to its non-black content rectangle before scaling.\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -901,7 +902,7 @@ their upstream projects.
 
 - SD path: IMAGES/
 - Files: image_converter.py, README.txt
-- Notes: JPEG and uncompressed BMP stills can be opened directly. Run image_converter.py on a PC to convert source images into browser-compatible GIFs under converted/.
+- Notes: JPEG and uncompressed BMP stills can be opened directly. Run image_converter.py on a PC to convert source images into browser-compatible GIFs under converted/; it crops each frame to its non-black content rectangle before scaling.
 """
     (stage / "SOURCES.md").write_text(text, encoding="utf-8", newline="\n")
 

@@ -82,7 +82,7 @@ struct Settings {
 	uint8_t upscale		:	1;
 	uint8_t rotation	:	1;
 	uint8_t brightness	:	5;
-	uint8_t bootMenuCustomGif	:	1;	//legacy v6 migration field; custom boot GIF after v26
+	uint8_t bootMenuCustomGif	:	1;	//reserved for settings-page compatibility
 
 	uint8_t ledRed;
 	uint8_t ledGreen;

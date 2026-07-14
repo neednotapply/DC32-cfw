@@ -93,7 +93,7 @@ python tools/build_sd_zip.py \
 
 ## Optional user tools
 
-- `tools/image_converter.py` converts images and animations to browser-compatible `.gif` files with a DC32 playback payload.
+- `tools/image_converter.py` converts images and animations to browser-compatible `.gif` files with a DC32 playback payload, cropping each frame to its non-black content rectangle before scaling.
 - `tools/build_chips_pack.py` creates `/APPS/chips.pak` from user-provided Win 3.1 Chip's Challenge data.
 - `tools/build_openjazz_pack.py` creates `/APPS/openjazz.pak` from user-provided Jazz Jackrabbit data. The bundled shareware `JAZZ.ZIP` can also be converted by the badge on first launch.
 

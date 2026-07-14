@@ -74,7 +74,7 @@ gd_open_gif(const char *fname)
     }
     /* Version */
     read(fd, sigver, 3);
-    if (memcmp(sigver, "89a", 3) != 0) {
+    if (memcmp(sigver, "89a", 3) != 0 && memcmp(sigver, "87a", 3) != 0) {
         fprintf(stderr, "invalid version\n");
         goto fail;
     }

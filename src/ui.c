@@ -43,7 +43,7 @@
 #define UI_KEY_REPEAT_INITIAL_TICKS		((uint64_t)TICKS_PER_SECOND * 300u / 1000u)
 #define UI_KEY_REPEAT_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND * 80u / 1000u)
 #define UI_HEADER_TEXT_GAP				3u
-#define UI_HEADER_EDGE_PAD				1u
+#define UI_HEADER_EDGE_PAD				5u
 #define UI_HEADER_TITLE_LEFT			10u
 #define UI_HEADER_BATTERY_BODY_WIDTH	34u
 #define UI_HEADER_BATTERY_CAP_WIDTH	3u
@@ -2720,6 +2720,8 @@ out:
 		struct UiBrowserOps *ops, char *pathOut, uint32_t pathOutSz)
 	{
 		uint_fast8_t selected = 0;
+		uint_fast8_t drawnSelected = 0xffu;
+		bool redraw = true;
 
 		while (1) {
 			uint_fast8_t cancelOption = ops->favorites.count + 1u;
@@ -2730,17 +2732,26 @@ out:
 			if (selected >= totalOptions)
 				selected = totalOptions - 1u;
 
-			uiPrvSetHeaderTitle("Favorites");
-			uiPrvReset(cnv, false);
-			uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Browse SD card", -1);
-			for (uint_fast8_t i = 0; i < ops->favorites.count; i++)
-				uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, i + 1u), 10, cnv->w - 20, ops->favorites.path[i]);
-			uiPuts(cnv, uiPrvMenuRow(cnv, cancelOption), 10, "Back", -1);
-			cnv->foreColor = 15;
-			uiPrvDrawOneChar(cnv, uiPrvMenuRow(cnv, selected), 1, MENU_SELECTION_CHAR);
+			if (redraw) {
+				uiPrvSetHeaderTitle("Favorites");
+				uiPrvReset(cnv, false);
+				uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Browse SD card", -1);
+				for (uint_fast8_t i = 0; i < ops->favorites.count; i++)
+					uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, i + 1u), 10, cnv->w - 20, ops->favorites.path[i]);
+				uiPuts(cnv, uiPrvMenuRow(cnv, cancelOption), 10, "Back", -1);
+				drawnSelected = 0xffu;
+				redraw = false;
+			}
+			if (drawnSelected != selected) {
+				if (drawnSelected < totalOptions) {
+					cnv->foreColor = 0;
+					uiPrvDrawOneChar(cnv, uiPrvMenuRow(cnv, drawnSelected), 1, MENU_SELECTION_CHAR);
+				}
+				cnv->foreColor = 15;
+				uiPrvDrawOneChar(cnv, uiPrvMenuRow(cnv, selected), 1, MENU_SELECTION_CHAR);
+				drawnSelected = selected;
+			}
 			key = uiPrvBrowserRecvKeypress(cnv);
-			if (selected >= totalOptions)
-				selected = 0;
 			selectedPath = selected && selected < cancelOption ? ops->favorites.path[selected - 1u] : "/";
 
 			switch (key) {
@@ -2765,12 +2776,14 @@ out:
 			case UI_BROWSER_FN_ACTION_KEY:
 			case UI_KEY_BIT_CENTER:
 				(void)uiPrvBrowserContextMenu(cnv, vol, selectedPath, NULL, ops);
+				redraw = true;
 				break;
 
 			case UI_BROWSER_FN_MENU_KEY:
 				if (uiPrvBrowserFnMenu(cnv, vol, selectedPath, NULL, ops) == UiBrowserFnExit)
 					return false;
 				ops->showFavorites = false;
+				redraw = true;
 				break;
 
 			default:
@@ -10938,6 +10951,7 @@ static enum UiToolId uiPrvBrowserToolForDcApp(const struct DcAppCatalogEntry *en
 	case DcAppIdToolGamepad:
 		return UiToolGamepad;
 	case DcAppIdToolRaspyJack:
+	case DcAppIdToolPwnagotchi:
 		return UiToolUsb;
 	case DcAppIdStarfield:
 	case DcAppIdSpiro:
@@ -12034,7 +12048,7 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 		{"Autoclicker", UiCategoryEntryTool, UiToolAutoclicker, 0},
 		{"USB Gamepad", UiCategoryEntryTool, UiToolGamepad, 0},
 		{"RaspyJack Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolRaspyJack},
-		{"Flipper Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolFlipper},
+		{"Pwnagotchi Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolPwnagotchi},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

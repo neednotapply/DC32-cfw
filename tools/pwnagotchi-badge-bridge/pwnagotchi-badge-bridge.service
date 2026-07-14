@@ -1,0 +1,23 @@
+[Unit]
+Description=DC32 Pwnagotchi USB badge bridge
+After=pwnagotchi.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/pwnagotchi-badge-bridge
+ExecStart=/opt/pwnagotchi-badge-bridge/pwnagotchi_badge_bridge.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8
+IPAddressAllow=::1/128
+ReadWritePaths=/run
+
+[Install]
+WantedBy=multi-user.target

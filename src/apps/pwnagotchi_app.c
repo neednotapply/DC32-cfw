@@ -1,10 +1,10 @@
-#include "apps/flipper_remote.h"
+#include "apps/pwnagotchi_remote.h"
 
 const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_header"), used, aligned(256))) = {
 	.magic = DCAPP_MAGIC,
 	.headerSize = DCAPP_HEADER_SIZE,
 	.abiVersion = DCAPP_ABI_VERSION,
-	.runtime = DcAppIdToolFlipper,
+	.runtime = DcAppIdToolPwnagotchi,
 	.loadAddr = 0x10080000u,
 	.appRamStart = 0x2005F000u,
 	.appRamSize = 0x00014000u,
@@ -12,14 +12,10 @@ const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_he
 
 int dcAppEntry(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
 {
-	return flipperRemoteRun(host, args);
+	return pwnagotchiRemoteRun(host, args);
 }
 
 void dcAppAbort(void)
 {
-	flipperRemoteAbort();
-}
-
-void dcAppRefreshDisplayOptions(void)
-{
+	pwnagotchiRemoteAbort();
 }

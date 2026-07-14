@@ -51,7 +51,7 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdToolGamepad, "USB Gamepad", "/APPS/gamepad.DC32", false},
 	{DcAppIdToolLaserTag, "Laser Tag", "/APPS/lasertag.DC32", false},
 	{DcAppIdToolRaspyJack, "RaspyJack Remote", "/APPS/raspyjack.DC32", false},
-	{DcAppIdToolFlipper, "Flipper Remote", "/APPS/flipper.DC32", false},
+	{DcAppIdToolPwnagotchi, "Pwnagotchi Remote", "/APPS/pwnagotchi.DC32", false},
 	{DcAppIdPong, "Pong", "/APPS/pong.DC32", true},
 	{DcAppIdTetris, "Tetris (NullpoMino)", "/APPS/tetris.DC32", true},
 	{DcAppIdArkanoid, "Arkanoid (wkeeling)", "/APPS/arkanoid.DC32", true},

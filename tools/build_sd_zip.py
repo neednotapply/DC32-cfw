@@ -102,7 +102,7 @@ APP_BINARIES = (
     "gamepad.DC32",
     "lasertag.DC32",
     "raspyjack.DC32",
-	"flipper.DC32",
+	"pwnagotchi.DC32",
     "pong.DC32",
     "tetris.DC32",
     "arkanoid.DC32",
@@ -971,10 +971,10 @@ shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
 - SD path: APPS/raspyjack.DC32
 - Notes: USB CDC remote display and button control for a local RaspyJack installation. Install the separate `tools/raspyjack-badge-bridge` bundle on the Pi; it uses RaspyJack's existing shared-memory frame and virtual-input socket without modifying RaspyJack itself.
 
-### Flipper Remote
+## Pwnagotchi Remote
 
-- SD path: APPS/flipper.DC32
-- Notes: Direct USB-host QFlipper RPC screen, navigation, screenshot preview, and unlock remote. The badge must provide 5 V VBUS to the Flipper; use a powered USB-C OTG adapter if the Flipper does not enumerate. `tools/flipper-badge-bridge` remains an optional Linux/Pi fallback.
+- SD path: APPS/pwnagotchi.DC32
+- Notes: USB-only remote for a Pi 4/5 running Jayofelony Pwnagotchi. Install the separate `tools/pwnagotchi-badge-bridge` bundle on the Pi, then connect a Pi USB host port to the badge. It adapts the local mobile web UI into badge pages and never opens a network listener.
 
 ## Tetris
 

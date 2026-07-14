@@ -582,19 +582,12 @@ add_dcapp(dcapp_raspyjack raspyjack 107
     ${PICOJPEG_SRC}
 )
 
-add_dcapp(dcapp_flipper flipper 108
-    ${SRC_DIR}/apps/flipper_app.c
-    ${SRC_DIR}/apps/flipper_remote.c
-    ${SRC_DIR}/apps/flipper_usb_host.c
+add_dcapp(dcapp_pwnagotchi pwnagotchi 108
+    ${SRC_DIR}/apps/pwnagotchi_app.c
+    ${SRC_DIR}/apps/pwnagotchi_remote.c
     ${SRC_DIR}/raster.c
-    ${TINYUSB_DIR}/src/tusb.c
-    ${TINYUSB_DIR}/src/host/usbh.c
-    ${TINYUSB_DIR}/src/class/cdc/cdc_host.c
-    ${TINYUSB_DIR}/src/common/tusb_fifo.c
-    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/hcd_rp2040.c
-    ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040/rp2040_usb.c
 )
-target_compile_definitions(dcapp_flipper PRIVATE FLIPPER_TINYUSB_HOST=1 CFG_TUSB_CONFIG_FILE="apps/flipper_tusb_config.h")
+
 set(DC32_LASERTAG_BLOCK_ID "0" CACHE STRING "Provisioned OpenLASIR Block ID (0-255)")
 set(DC32_LASERTAG_DEVICE_ID "256" CACHE STRING "Provisioned OpenLASIR Device ID (0-255, or 256 for flash-UID-derived)")
 if(DC32_LASERTAG_BLOCK_ID LESS 0 OR DC32_LASERTAG_BLOCK_ID GREATER 255)

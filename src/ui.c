@@ -12015,7 +12015,8 @@ static void uiPrvRunCategorySdAppEntry(struct Canvas *cnv, enum UiToolId ownerTo
 }
 
 static enum UiToolId uiPrvCategoryTool(struct Canvas *cnv, enum UiToolId categoryTool, const char *title,
-	const struct UiCategoryEntry *entries, uint_fast8_t numEntries, UiRunGameF runGameF, void *userData)
+	const struct UiCategoryEntry *entries, uint_fast8_t numEntries, uint_fast8_t entryColor,
+	UiRunGameF runGameF, void *userData)
 {
 	while (1) {
 		uint_fast8_t i, selOption;
@@ -12023,6 +12024,7 @@ static enum UiToolId uiPrvCategoryTool(struct Canvas *cnv, enum UiToolId categor
 
 		uiPrvSetHeaderTitle(title);
 		uiPrvReset(cnv, false);
+		cnv->foreColor = entryColor;
 		for (i = 0; i < numEntries; i++)
 			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, entries[i].label, -1);
 
@@ -12051,7 +12053,8 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 		{"Pwnagotchi Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolPwnagotchi},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries),
+		15, runGameF, userData);
 }
 
 static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12062,7 +12065,7 @@ static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF ru
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolInfrared, "Infrared", entries,
-		sizeof(entries) / sizeof(*entries), runGameF, userData);
+		sizeof(entries) / sizeof(*entries), 15, runGameF, userData);
 }
 
 static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12075,7 +12078,8 @@ static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Cube", UiCategoryEntrySdApp, UiToolMedia, DcAppIdCube},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+	return uiPrvCategoryTool(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries),
+		15, runGameF, userData);
 }
 
 static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12095,7 +12099,8 @@ static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Sensible Soccer (YSoccer)", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSoccer},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries),
+		11, runGameF, userData);
 }
 
 static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12105,7 +12110,8 @@ static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Ports", UiCategoryEntryTool, UiToolPorts, 0},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);
+	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries),
+		15, runGameF, userData);
 }
 
 void uiRunToolShell(UiRunGameF runGameF, void *userData)

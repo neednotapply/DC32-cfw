@@ -305,11 +305,11 @@ void dcAppDrawPresent(struct DcAppDrawCtx *ctx)
 
 void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *state)
 {
-	uint16_t bg = dcAppDrawRgb565(8, 12, 18);
-	uint16_t primary = dcAppDrawRgb565(242, 245, 240);
-	uint16_t secondary = dcAppDrawRgb565(173, 194, 207);
-	uint16_t track = dcAppDrawRgb565(38, 50, 62);
-	uint16_t accent = dcAppDrawRgb565(83, 202, 178);
+	uint16_t bg = dcAppDrawRgb565(12, 12, 12);
+	uint16_t primary = dcAppDrawRgb565(244, 244, 244);
+	uint16_t secondary = dcAppDrawRgb565(188, 188, 188);
+	uint16_t track = dcAppDrawRgb565(48, 48, 48);
+	uint16_t accent = dcAppDrawRgb565(168, 168, 168);
 	uint32_t barW, fill, offset;
 	int32_t centerY, barX, barY;
 
@@ -339,11 +339,11 @@ void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *
 
 void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingState *state)
 {
-	uint16_t bg = dcAppDrawRgb565(8, 12, 18);
-	uint16_t primary = dcAppDrawRgb565(242, 245, 240);
-	uint16_t secondary = dcAppDrawRgb565(173, 194, 207);
-	uint16_t track = dcAppDrawRgb565(38, 50, 62);
-	uint16_t accent = dcAppDrawRgb565(83, 202, 178);
+	uint16_t bg = dcAppDrawRgb565(12, 12, 12);
+	uint16_t primary = dcAppDrawRgb565(244, 244, 244);
+	uint16_t secondary = dcAppDrawRgb565(188, 188, 188);
+	uint16_t track = dcAppDrawRgb565(48, 48, 48);
+	uint16_t accent = dcAppDrawRgb565(168, 168, 168);
 	uint32_t barW, fill, offset;
 	int32_t centerY, barX, barY;
 

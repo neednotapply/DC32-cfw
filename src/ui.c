@@ -42,10 +42,17 @@
 #define UI_GAME_TITLE_BUF_SZ			64
 #define UI_KEY_REPEAT_INITIAL_TICKS		((uint64_t)TICKS_PER_SECOND * 300u / 1000u)
 #define UI_KEY_REPEAT_INTERVAL_TICKS	((uint64_t)TICKS_PER_SECOND * 80u / 1000u)
-#define UI_HEADER_USB_PRESENT_MV		4800u
 #define UI_HEADER_TEXT_GAP				3u
 #define UI_HEADER_EDGE_PAD				1u
 #define UI_HEADER_TITLE_LEFT			10u
+#define UI_HEADER_BATTERY_BODY_WIDTH	34u
+#define UI_HEADER_BATTERY_CAP_WIDTH	3u
+#define UI_HEADER_BATTERY_WIDTH		(UI_HEADER_BATTERY_BODY_WIDTH + UI_HEADER_BATTERY_CAP_WIDTH)
+#define UI_HEADER_BATTERY_GREEN		0x05a0u
+#define UI_HEADER_BATTERY_AMBER		0xbde0u
+#define UI_HEADER_BATTERY_RED			0xb104u
+#define UI_HEADER_BATTERY_BACKGROUND	0x0000u
+#define UI_HEADER_BATTERY_BOLT		0xffe0u
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -105,10 +112,9 @@ static const char mUiAppTitle[] = "DC32-cfw";
 static const char *mUiHeaderTitle = "Main Menu";
 static bool mUiHeaderInverted;
 static uint32_t mUiHeaderClockMinute = 0xffffffffu;
-static uint8_t mUiHeaderBattPercent;
+static uint8_t mUiHeaderBattLevel;
 static bool mUiHeaderBattValid;
-static bool mUiHeaderLowBatt;
-static bool mUiHeaderUsbPowered;
+static enum BadgePowerMode mUiHeaderPowerMode;
 static uint_fast16_t mUiRepeatKey;
 static uint64_t mUiRepeatNextTicks;
 static bool mUiKeyRepeated;
@@ -781,57 +787,103 @@ static void uiPrvHeaderTimeText(char text[static 9])
 	(void)sprintf(text, "%u:%02u %s", (unsigned)hour12, (unsigned)minute, hour >= 12 ? "PM" : "AM");
 }
 
+static void uiPrvDrawHeaderBattery(struct Canvas *cnv, int32_t left, uint8_t level, bool charging, uint16_t color)
+{
+	int32_t top = ((int32_t)uiPrvGlyphHeight(cnv) - 13) / 2;
+	int32_t right = left + UI_HEADER_BATTERY_BODY_WIDTH - 1u;
+
+	#if DISP_BPP > 8
+		#define UI_HEADER_BATTERY_BACKGROUND_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, UI_HEADER_BATTERY_BACKGROUND)
+		#define UI_HEADER_BATTERY_OUTLINE_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, color)
+		#define UI_HEADER_BATTERY_SEGMENT_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, color)
+		#define UI_HEADER_BATTERY_BOLT_RECT(l, t, r, b) uiPrvFillRectEx(cnv, l, t, r, b, UI_HEADER_BATTERY_BOLT)
+	#else
+		(void)color;
+		#define UI_HEADER_BATTERY_BACKGROUND_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
+		#define UI_HEADER_BATTERY_OUTLINE_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
+		#define UI_HEADER_BATTERY_SEGMENT_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
+		#define UI_HEADER_BATTERY_BOLT_RECT(l, t, r, b) uiPrvFillRect(cnv, l, t, r, b)
+	#endif
+
+	UI_HEADER_BATTERY_BACKGROUND_RECT(left - 1, top - 1, right + 1, top + 13);
+	UI_HEADER_BATTERY_BACKGROUND_RECT(right + 1, top + 3, right + 4, top + 9);
+	UI_HEADER_BATTERY_BACKGROUND_RECT(left + 1, top + 1, right - 1, top + 11);
+	UI_HEADER_BATTERY_OUTLINE_RECT(left, top, right, top);
+	UI_HEADER_BATTERY_OUTLINE_RECT(left, top + 12, right, top + 12);
+	UI_HEADER_BATTERY_OUTLINE_RECT(left, top, left, top + 12);
+	UI_HEADER_BATTERY_OUTLINE_RECT(right, top, right, top + 12);
+	UI_HEADER_BATTERY_OUTLINE_RECT(right + 1, top + 4, right + UI_HEADER_BATTERY_CAP_WIDTH, top + 8);
+	for (uint_fast8_t i = 0; i < level; i++)
+		UI_HEADER_BATTERY_SEGMENT_RECT(left + 3 + i * 6, top + 3, left + 7 + i * 6, top + 9);
+
+	if (charging) {
+		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 2, left + 24, top + 3);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 4, left + 22, top + 5);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 20, top + 5, left + 23, top + 6);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 16, top + 7, left + 21, top + 8);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 18, top + 8, left + 20, top + 9);
+		UI_HEADER_BATTERY_BOLT_RECT(left + 16, top + 10, left + 18, top + 11);
+	}
+
+	#undef UI_HEADER_BATTERY_BACKGROUND_RECT
+	#undef UI_HEADER_BATTERY_OUTLINE_RECT
+	#undef UI_HEADER_BATTERY_SEGMENT_RECT
+	#undef UI_HEADER_BATTERY_BOLT_RECT
+}
+
+static uint16_t uiPrvHeaderBatteryColor(enum BadgePowerMode powerMode, uint8_t level)
+{
+	if (powerMode == BadgePowerModeCharging || level >= 4u)
+		return UI_HEADER_BATTERY_GREEN;
+	if (powerMode == BadgePowerModeLow || level <= 1u)
+		return UI_HEADER_BATTERY_RED;
+	return UI_HEADER_BATTERY_AMBER;
+}
+
 static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 {
 	const char *windowTitle = mUiHeaderTitle;
 	struct BadgePowerStatus powerStatus;
-	char battText[16];
 	char timeText[9];
-	uint32_t titleLen, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, rightTextLeft, battTextWidth = 0, battTextLeft = 0, battTextRight = 0;
-	uint8_t battPercent = 0;
+	uint32_t titleLen, titleLeft, titleMaxRight, titleMaxWidth, timeWidth, clockMinute, timeTextLeft = 0, battIconLeft = 0;
+	uint8_t battLevel = 0;
 	bool battValid = false;
 	bool battDrawn = false;
 	bool timeDrawn = false;
-	bool lowBatt = false;
-	bool usbPowered = false;
+	enum BadgePowerMode powerMode = BadgePowerModeNormal;
 	int8_t foreColor = cnv->foreColor, backColor = cnv->backColor;
 	uint8_t font = cnv->font;
 
 	badgePowerPoll();
 	if (badgePowerGetCached(&powerStatus)) {
 		battValid = true;
-		battPercent = powerStatus.battPercent;
-		lowBatt = powerStatus.lowBatt;
-		usbPowered = powerStatus.usbMv >= UI_HEADER_USB_PRESENT_MV;
+		battLevel = powerStatus.battLevel;
+		powerMode = powerStatus.mode;
 	}
 
 	clockMinute = uiPrvHeaderCurrentClockMinute();
-	if (!force && clockMinute == mUiHeaderClockMinute && battValid == mUiHeaderBattValid && (!battValid || battPercent == mUiHeaderBattPercent) && lowBatt == mUiHeaderLowBatt && usbPowered == mUiHeaderUsbPowered)
+	if (!force && clockMinute == mUiHeaderClockMinute && battValid == mUiHeaderBattValid && (!battValid || (battLevel == mUiHeaderBattLevel && powerMode == mUiHeaderPowerMode)))
 		return;
 	mUiHeaderClockMinute = clockMinute;
 	mUiHeaderBattValid = battValid;
-	mUiHeaderBattPercent = battPercent;
-	mUiHeaderLowBatt = lowBatt;
-	mUiHeaderUsbPowered = usbPowered;
+	mUiHeaderBattLevel = battLevel;
+	mUiHeaderPowerMode = powerMode;
 
 	uiPrvHeaderTimeText(timeText);
 
 	cnv->font = FontLarge;
 	if (battValid) {
-		(void)sprintf(battText, "%u%%", (unsigned)battPercent);
-		battTextWidth = uiPrvCharsWidth(cnv, battText, strlen(battText));
-		if (battTextWidth + UI_HEADER_EDGE_PAD < cnv->w) {
-			battTextLeft = (cnv->w - battTextWidth) / 2u;
-			battTextRight = battTextLeft + battTextWidth;
+		if (UI_HEADER_BATTERY_WIDTH + UI_HEADER_EDGE_PAD < cnv->w) {
+			battIconLeft = cnv->w - UI_HEADER_BATTERY_WIDTH - UI_HEADER_EDGE_PAD;
 			battDrawn = true;
 		}
 	}
 
 	timeWidth = uiPrvCharsWidth(cnv, timeText, strlen(timeText));
 	if (timeWidth + UI_HEADER_EDGE_PAD < cnv->w) {
-		rightTextLeft = cnv->w - timeWidth - UI_HEADER_EDGE_PAD;
+		timeTextLeft = (cnv->w - timeWidth) / 2u;
 		timeDrawn = true;
-		if (battDrawn && rightTextLeft < battTextRight + UI_HEADER_TEXT_GAP)
+		if (battDrawn && timeTextLeft + timeWidth + UI_HEADER_TEXT_GAP > battIconLeft)
 			timeDrawn = false;
 	}
 
@@ -842,13 +894,13 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 	cnv->backColor = invert ? 0 : 9;
 
 	if (timeDrawn)
-		uiPuts(cnv, 0, rightTextLeft, timeText, -1);
+		uiPuts(cnv, 0, timeTextLeft, timeText, -1);
 
 	titleMaxRight = cnv->w;
 	if (timeDrawn)
-		titleMaxRight = rightTextLeft > UI_HEADER_TEXT_GAP ? rightTextLeft - UI_HEADER_TEXT_GAP : rightTextLeft;
-	if (battDrawn && battTextLeft < titleMaxRight)
-		titleMaxRight = battTextLeft > UI_HEADER_TEXT_GAP ? battTextLeft - UI_HEADER_TEXT_GAP : battTextLeft;
+		titleMaxRight = timeTextLeft > UI_HEADER_TEXT_GAP ? timeTextLeft - UI_HEADER_TEXT_GAP : timeTextLeft;
+	if (battDrawn && battIconLeft < titleMaxRight)
+		titleMaxRight = battIconLeft > UI_HEADER_TEXT_GAP ? battIconLeft - UI_HEADER_TEXT_GAP : battIconLeft;
 	titleLeft = UI_HEADER_TITLE_LEFT;
 	if (titleLeft >= titleMaxRight)
 		titleMaxWidth = 0;
@@ -859,14 +911,13 @@ static void uiPrvDrawHeader(struct Canvas *cnv, bool invert, bool force)
 
 	if (battDrawn) {
 		#if DISP_BPP > 8
-			if (usbPowered)
-				uiPrvPutsRgb565(cnv, 0, battTextLeft, battText, 0x07e0u);
-			else if (lowBatt)
-				uiPrvPutsRgb565(cnv, 0, battTextLeft, battText, 0xf800u);
-			else
-				uiPuts(cnv, 0, battTextLeft, battText, -1);
+			uint16_t battColor = uiPrvHeaderBatteryColor(powerMode, battLevel);
+
+			uiPrvDrawHeaderBattery(cnv, battIconLeft, battLevel,
+				powerMode == BadgePowerModeCharging, battColor);
 		#else
-			uiPuts(cnv, 0, battTextLeft, battText, -1);
+			uiPrvDrawHeaderBattery(cnv, battIconLeft, battLevel,
+				powerMode == BadgePowerModeCharging, 0);
 		#endif
 	}
 
@@ -894,6 +945,26 @@ static void uiPrvDrawNavigationFooter(struct Canvas *cnv, const char *backAction
 	font = cnv->font;
 	cnv->font = FontSmall;
 	uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1u, 10, text, -1);
+	cnv->font = font;
+}
+
+static void uiPrvDrawMainMenuFooter(struct Canvas *cnv)
+{
+	static const char navigate[] = "D Pad - Navigate";
+	static const char select[] = "A - Select";
+	static const char back[] = "B - Back";
+	uint8_t font;
+	int32_t bottomRow, actionsLeft;
+
+	if (!cnv)
+		return;
+	font = cnv->font;
+	cnv->font = FontSmall;
+	bottomRow = cnv->h - uiPrvGlyphHeight(cnv) - 1u;
+	actionsLeft = cnv->w - 10 - (int32_t)uiPrvCharsWidth(cnv, select, sizeof(select) - 1u);
+	uiPuts(cnv, bottomRow, 10, navigate, sizeof(navigate) - 1u);
+	uiPuts(cnv, bottomRow - uiPrvGlyphHeight(cnv) - 1u, actionsLeft, select, sizeof(select) - 1u);
+	uiPuts(cnv, bottomRow, actionsLeft, back, sizeof(back) - 1u);
 	cnv->font = font;
 }
 
@@ -1285,6 +1356,8 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		return uiPrvMountCardEx(cnv, quiet, false);
 	}
 
+	static bool uiPrvImageResultCanSkip(enum ImageViewerResult result);
+
 	bool uiRunScreensaverMedia(uint8_t saver)
 	{
 		struct Canvas cnv = CANVAS_INITIALIZER;
@@ -1297,6 +1370,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		const char *path;
 		uint32_t size;
 		uint8_t attrs;
+		bool playedImageInCycle = false;
 		bool result = false;
 
 		settingsGet(&settings);
@@ -1328,8 +1402,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 				goto out_unmount;
 			}
 			fatfsDirClose(dir);
-			(void)imageViewerRun(&cnv, vol, parent, &locator, slash + 1);
-			result = true;
+			result = !uiPrvImageResultCanSkip(imageViewerRun(&cnv, vol, parent, &locator, slash + 1));
 			goto out_unmount;
 		}
 		for (uint32_t wanted = 0; !(uiGetUiKeysRaw()); wanted++) {
@@ -1350,10 +1423,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 			if (!count)
 				goto out_unmount;
 			if (!found) {
+				if (!playedImageInCycle)
+					goto out_unmount;
+				playedImageInCycle = false;
 				wanted = 0xffffffffu;
 				continue;
 			}
-			(void)imageViewerRunStill(&cnv, vol, path, &locator, name);
+			if (uiPrvImageResultCanSkip(imageViewerRunStill(&cnv, vol, path, &locator, name)))
+				continue;
+			playedImageInCycle = true;
 			for (uint64_t until = getTime() + (uint64_t)TICKS_PER_SECOND * 5u;
 					getTime() < until && !uiGetUiKeysRaw(); ) {
 				badgeLedsTick();
@@ -1932,6 +2010,35 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 	#define UI_PICK_FILE_PATH_BUF_SZ		(sizeof("/BADUSB/") + FATFS_NAME_BUF_LEN * 8)
 	#define UI_BROWSER_MAX_DEPTH		16
 	#define UI_PICK_FILE_NAME_BUF_SZ		64
+	#define UI_BROWSER_ACTION_PATH_MAX	192
+	#define UI_BROWSER_FAVORITES_MAX	8
+	#define UI_BROWSER_FAVORITES_PATH	"/.DC32-FAVORITES.TXT"
+	#define UI_BROWSER_FAVORITES_FILE_MAX	(UI_BROWSER_FAVORITES_MAX * UI_BROWSER_ACTION_PATH_MAX)
+	#define UI_BROWSER_HOLD_TICKS		((uint64_t)TICKS_PER_SECOND * 1200u / 1000u)
+	#define UI_BROWSER_CONTEXT_KEY		0x8000u
+	#define UI_BROWSER_FN_ACTION_KEY	0x8001u
+	#define UI_BROWSER_FN_MENU_KEY		0x8002u
+
+	struct UiBrowserClipboard {
+		bool valid;
+		bool isDir;
+		char path[UI_BROWSER_ACTION_PATH_MAX];
+	};
+
+	struct UiBrowserFavorites {
+		uint8_t count;
+		char path[UI_BROWSER_FAVORITES_MAX][UI_BROWSER_ACTION_PATH_MAX];
+	};
+
+	struct UiBrowserOps {
+		struct UiBrowserClipboard clipboard;
+		struct UiBrowserFavorites favorites;
+		bool showFavorites;
+	};
+
+	static void uiPrvLedSettings(struct Canvas *cnv, struct Settings *settings);
+	static void uiPrvScreenSettings(struct Canvas *cnv, struct Settings *settings);
+	static void uiPrvAudioSettings(struct Canvas *cnv, struct Settings *settings);
 
 	static bool uiPrvFileListComesBefore(const struct MusicOption *option, const char *name, bool isDir)
 	{
@@ -2162,6 +2269,536 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 			path[pathLen - 1] = 0;
 	}
 
+	static bool uiPrvBrowserMakePath(char *dst, uint32_t dstSz, const char *parent, const char *name)
+	{
+		uint32_t parentLen = strlen(parent), nameLen = name ? strlen(name) : 0;
+
+		if (!parent || !dst || !dstSz || parentLen + (parentLen > 1 && nameLen ? 1u : 0u) + nameLen + 1u > dstSz)
+			return false;
+		memcpy(dst, parent, parentLen + 1u);
+		if (nameLen)
+			uiPrvAppendPathComponent(dst, dstSz, name);
+		return true;
+	}
+
+	static const char *uiPrvBrowserBaseName(const char *path)
+	{
+		const char *base = path;
+
+		for (; *path; path++)
+			if (*path == '/')
+				base = path + 1;
+		return base;
+	}
+
+	static void uiPrvBrowserFavoritesLoad(struct FatfsVol *vol, struct UiBrowserFavorites *favorites)
+	{
+		struct FatfsFil *fil;
+		uint32_t got, bytesRead = 0;
+		char ch, *line;
+
+		memset(favorites, 0, sizeof(*favorites));
+		fil = fatfsFileOpen(vol, UI_BROWSER_FAVORITES_PATH, OPEN_MODE_READ);
+		if (!fil)
+			return;
+		line = favorites->path[0];
+		while (bytesRead < UI_BROWSER_FAVORITES_FILE_MAX &&
+				favorites->count < UI_BROWSER_FAVORITES_MAX &&
+				fatfsFileRead(fil, &ch, 1u, &got) && got) {
+			uint32_t len = strlen(line);
+
+			bytesRead += got;
+
+			if (ch == '\r')
+				continue;
+			if (ch == '\n') {
+				if (len && line[0] == '/')
+					favorites->count++;
+				else
+					line[0] = 0;
+				if (favorites->count < UI_BROWSER_FAVORITES_MAX)
+					line = favorites->path[favorites->count];
+				continue;
+			}
+			if (len + 1u < UI_BROWSER_ACTION_PATH_MAX) {
+				line[len] = ch;
+				line[len + 1u] = 0;
+			}
+		}
+		if (favorites->count < UI_BROWSER_FAVORITES_MAX && line[0] == '/')
+			favorites->count++;
+		(void)fatfsFileClose(fil);
+	}
+
+	static bool uiPrvBrowserFavoritesSave(struct FatfsVol *vol, const struct UiBrowserFavorites *favorites)
+	{
+		struct FatfsFil *fil;
+		uint32_t wrote;
+
+		fil = fatfsFileOpen(vol, UI_BROWSER_FAVORITES_PATH,
+			OPEN_MODE_WRITE | OPEN_MODE_CREATE | OPEN_MODE_TRUNCATE);
+		if (!fil)
+			return false;
+		for (uint_fast8_t i = 0; i < favorites->count; i++) {
+			uint32_t len = strlen(favorites->path[i]);
+
+			if (!fatfsFileWrite(fil, favorites->path[i], len, &wrote) || wrote != len ||
+					!fatfsFileWrite(fil, "\n", 1u, &wrote) || wrote != 1u) {
+				(void)fatfsFileClose(fil);
+				return false;
+			}
+		}
+		return fatfsFileClose(fil);
+	}
+
+	static bool uiPrvBrowserFavoritesToggle(struct FatfsVol *vol, struct UiBrowserFavorites *favorites,
+		const char *path, bool *addedP)
+	{
+		uint_fast8_t i;
+
+		for (i = 0; i < favorites->count; i++) {
+			if (strsCaselesslyCompareUtf(favorites->path[i], path, 0xffffffff))
+				continue;
+			memmove(favorites->path[i], favorites->path[i + 1u],
+				(favorites->count - i - 1u) * sizeof(favorites->path[0]));
+			favorites->count--;
+			if (addedP)
+				*addedP = false;
+			return uiPrvBrowserFavoritesSave(vol, favorites);
+		}
+		if (favorites->count >= UI_BROWSER_FAVORITES_MAX || strlen(path) >= UI_BROWSER_ACTION_PATH_MAX)
+			return false;
+		uiPrvCopyStr(favorites->path[favorites->count++], UI_BROWSER_ACTION_PATH_MAX, path);
+		if (addedP)
+			*addedP = true;
+		return uiPrvBrowserFavoritesSave(vol, favorites);
+	}
+
+	static uint_fast16_t uiPrvBrowserRecvKeypress(struct Canvas *cnv)
+	{
+		while (1) {
+			uint_fast16_t keys = uiGetUiKeys();
+
+			if (!keys) {
+				uiPrvKeyRepeatReset();
+				uiPrvRefreshHeaderClock(cnv);
+				continue;
+			}
+
+			if (keys & KEY_BIT_A) {
+				uint64_t start = getTime();
+				while (uiGetUiKeys() & KEY_BIT_A) {
+					if (getTime() - start >= UI_BROWSER_HOLD_TICKS) {
+						uiPrvWaitKeysReleased();
+						return UI_BROWSER_CONTEXT_KEY;
+					}
+					uiPrvRefreshHeaderClock(cnv);
+				}
+				return KEY_BIT_A;
+			}
+			if (keys & UI_KEY_BIT_CENTER) {
+				uint64_t start = getTime();
+
+				// Use the physical release edge here. Repeated debounced reads can
+				// keep a brief FN tap alive long enough to look like a hold.
+				while (uiGetUiKeysRaw() & UI_KEY_BIT_CENTER) {
+					if (getTime() - start >= UI_BROWSER_HOLD_TICKS) {
+						uiPrvWaitKeysReleased();
+						return UI_BROWSER_FN_MENU_KEY;
+					}
+					uiPrvRefreshHeaderClock(cnv);
+				}
+				return UI_BROWSER_FN_ACTION_KEY;
+			}
+			return uiPrvRecvMenuKeypress(cnv);
+		}
+	}
+
+	static bool uiPrvBrowserCopyFile(struct Canvas *cnv, struct FatfsVol *vol,
+		const char *sourcePath, const char *destPath)
+	{
+		struct FatfsFil *src = NULL, *dst = NULL, *exists;
+		struct ToolWorkspaceSpan scratch;
+		uint8_t *buf;
+		uint32_t total, done = 0, now, got, wrote;
+		bool ok = false;
+
+		if (!strsCaselesslyCompareUtf(sourcePath, destPath, 0xffffffff)) {
+			uiAlert(cnv, "Choose a different destination folder", DialogTypeOk);
+			return false;
+		}
+		exists = fatfsFileOpen(vol, destPath, OPEN_MODE_READ);
+		if (exists) {
+			(void)fatfsFileClose(exists);
+			uiAlert(cnv, "A file with that name already exists", DialogTypeOk);
+			return false;
+		}
+		if (!toolWorkspaceAcquire(ToolWorkspaceWram, ToolWorkspaceOwnerFileBrowser, &scratch) || scratch.size < 512u) {
+			uiAlert(cnv, "Not enough workspace to copy this file", DialogTypeOk);
+			return false;
+		}
+		src = fatfsFileOpen(vol, sourcePath, OPEN_MODE_READ);
+		dst = fatfsFileOpen(vol, destPath, OPEN_MODE_WRITE | OPEN_MODE_CREATE | OPEN_MODE_TRUNCATE);
+		if (!src || !dst)
+			goto out;
+		buf = scratch.ptr;
+		total = fatfsFileGetSize(src);
+		while (done < total) {
+			struct DcAppLoadingState loading = {
+				.appName = "File Explorer",
+				.title = "Copying file",
+				.detail = uiPrvBrowserBaseName(sourcePath),
+				.done = done,
+				.total = total,
+				.animationStep = done / scratch.size,
+			};
+
+			now = total - done;
+			if (now > scratch.size)
+				now = scratch.size;
+			dcAppDrawLoadingCanvas(cnv, &loading);
+			if (!fatfsFileRead(src, buf, now, &got) || got != now ||
+					!fatfsFileWrite(dst, buf, now, &wrote) || wrote != now)
+				goto out;
+			done += now;
+		}
+		ok = true;
+out:
+		if (src)
+			(void)fatfsFileClose(src);
+		if (dst)
+			(void)fatfsFileClose(dst);
+		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerFileBrowser);
+		if (!ok) {
+			(void)fatfsFileDelete(vol, destPath);
+			uiAlert(cnv, "Copy failed", DialogTypeOk);
+		}
+		return ok;
+	}
+
+	static bool uiPrvBrowserEditName(struct Canvas *cnv, char *name, uint32_t nameSz)
+	{
+		uint32_t pos = 0, len = strlen(name);
+
+		if (!len || len >= nameSz)
+			return false;
+		while (1) {
+			uiPrvSetHeaderTitle("Rename");
+			uiPrvReset(cnv, false);
+			uiPrvDrawTruncText(cnv, uiPrvContentTop(cnv), 10, cnv->w - 20, name);
+			cnv->foreColor = 9;
+			uiPrvDrawOneChar(cnv, uiPrvContentTop(cnv) + uiPrvGlyphHeight(cnv) + 2, 10, name[pos]);
+			cnv->foreColor = 15;
+			uiPuts(cnv, cnv->h - 2u * uiPrvGlyphHeight(cnv) - 2u, 10, "Up/Dn char  L/R move  A add", -1);
+			uiPuts(cnv, cnv->h - uiPrvGlyphHeight(cnv) - 1u, 10, "SEL delete  START save  B cancel", -1);
+			switch (uiPrvRecvMenuKeypress(cnv)) {
+			case KEY_BIT_UP: name[pos] = name[pos] >= '~' ? ' ' : name[pos] + 1; break;
+			case KEY_BIT_DOWN: name[pos] = name[pos] <= ' ' ? '~' : name[pos] - 1; break;
+			case KEY_BIT_LEFT: if (pos) pos--; break;
+			case KEY_BIT_RIGHT: if (pos + 1u < len) pos++; break;
+			case KEY_BIT_A:
+				if (len + 1u < nameSz) {
+					memmove(name + pos + 1u, name + pos, len - pos + 1u);
+					name[pos] = ' ';
+					len++;
+				}
+				break;
+			case KEY_BIT_SEL:
+				if (len > 1u) { memmove(name + pos, name + pos + 1u, len - pos); len--; if (pos == len) pos--; }
+				break;
+			case KEY_BIT_START: return true;
+			case KEY_BIT_B: return false;
+			case UI_KEY_BIT_CENTER: uiPrvRequestToolExit(); return false;
+			}
+		}
+	}
+
+	static bool uiPrvBrowserContextMenu(struct Canvas *cnv, struct FatfsVol *vol,
+		const char *parentPath, const struct MusicOption *entry, struct UiBrowserOps *ops)
+	{
+		enum { BrowserActionCopy, BrowserActionPaste, BrowserActionRename, BrowserActionDelete,
+			BrowserActionFavorite, BrowserActionCancel };
+		uint8_t actions[8];
+		const char *labels[8];
+		char fullPath[UI_BROWSER_ACTION_PATH_MAX], destPath[UI_BROWSER_ACTION_PATH_MAX];
+		uint_fast8_t count = 0, selected, buttons = KEY_BIT_A | KEY_BIT_B;
+		bool isFavorite = false, added;
+
+		if (!uiPrvBrowserMakePath(fullPath, sizeof(fullPath), parentPath, entry ? entry->name : NULL)) {
+			uiAlert(cnv, "Path is too long for File Explorer actions", DialogTypeOk);
+			return false;
+		}
+		for (uint_fast8_t i = 0; i < ops->favorites.count; i++)
+			if (!strsCaselesslyCompareUtf(ops->favorites.path[i], fullPath, 0xffffffff))
+				isFavorite = true;
+		if (entry) {
+			actions[count] = BrowserActionCopy; labels[count++] = "Copy";
+			actions[count] = BrowserActionRename; labels[count++] = "Rename";
+			actions[count] = BrowserActionDelete; labels[count++] = "Delete";
+		}
+		if (ops->clipboard.valid) {
+			actions[count] = BrowserActionPaste; labels[count++] = "Paste here";
+		}
+		actions[count] = BrowserActionFavorite;
+		labels[count++] = isFavorite ? "Remove favorite" : "Add favorite";
+		actions[count] = BrowserActionCancel; labels[count++] = "Cancel";
+
+		uiPrvSetHeaderTitle("File actions");
+		uiPrvReset(cnv, false);
+		for (uint_fast8_t i = 0; i < count; i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+		selected = uiPrvMenu(cnv, 0, count, &buttons);
+		if (uiPrvToolExitRequested() || buttons == KEY_BIT_B)
+			return false;
+		switch (actions[selected]) {
+		case BrowserActionCopy:
+			if (entry->isDir) {
+				uiAlert(cnv, "Folder copy is not supported yet", DialogTypeOk);
+				return false;
+			}
+			ops->clipboard.valid = true;
+			ops->clipboard.isDir = false;
+			uiPrvCopyStr(ops->clipboard.path, sizeof(ops->clipboard.path), fullPath);
+			return false;
+		case BrowserActionPaste:
+			if (ops->clipboard.isDir || !uiPrvBrowserMakePath(destPath, sizeof(destPath), parentPath,
+					uiPrvBrowserBaseName(ops->clipboard.path))) {
+				uiAlert(cnv, "Cannot paste that item here", DialogTypeOk);
+				return false;
+			}
+			return uiPrvBrowserCopyFile(cnv, vol, ops->clipboard.path, destPath);
+		case BrowserActionRename:
+			if (entry->isDir) {
+				uiAlert(cnv, "Folder rename is not supported yet", DialogTypeOk);
+				return false;
+			}
+			{
+				char newName[UI_PICK_FILE_NAME_BUF_SZ];
+				struct FatfsDir *dir;
+
+				uiPrvCopyStr(newName, sizeof(newName), entry->name);
+				if (!uiPrvBrowserEditName(cnv, newName, sizeof(newName)) || !strcmp(newName, entry->name))
+					return false;
+				if (!uiPrvBrowserMakePath(destPath, sizeof(destPath), parentPath, newName) ||
+						!uiPrvBrowserCopyFile(cnv, vol, fullPath, destPath))
+					return false;
+				dir = fatfsDirOpen(vol, parentPath);
+				if (!dir || !fatfsFileDeleteAt(dir, entry->name)) {
+					if (dir) (void)fatfsDirClose(dir);
+					uiAlert(cnv, "Renamed copy created, but source could not be deleted", DialogTypeOk);
+					return true;
+				}
+				(void)fatfsDirClose(dir);
+				return true;
+			}
+		case BrowserActionDelete:
+			if (!uiAlert(cnv, entry->isDir ? "Delete this empty folder?" : "Delete this file?", DialogTypeYesNo))
+				return false;
+			{
+				struct FatfsDir *dir = fatfsDirOpen(vol, parentPath);
+				bool deleted = dir && (entry->isDir ? fatfsDirDeleteAt(dir, entry->name) : fatfsFileDeleteAt(dir, entry->name));
+
+				if (dir) (void)fatfsDirClose(dir);
+				if (!deleted)
+					uiAlert(cnv, entry->isDir ? "Folder must be empty to delete" : "Delete failed", DialogTypeOk);
+				return deleted;
+			}
+		case BrowserActionFavorite:
+			if (!uiPrvBrowserFavoritesToggle(vol, &ops->favorites, fullPath, &added))
+				uiAlert(cnv, "Could not update favorites", DialogTypeOk);
+			else
+				uiAlert(cnv, added ? "Added to favorites" : "Removed from favorites", DialogTypeOk);
+			return false;
+		default:
+			return false;
+		}
+	}
+
+	static bool uiPrvBrowserSettingsMenu(struct Canvas *cnv, struct FatfsVol *vol,
+		const char *parentPath, struct UiBrowserOps *ops)
+	{
+		enum { BrowserSettingsFavorites, BrowserSettingsFolderFavorite, BrowserSettingsStart, BrowserSettingsBack };
+		struct Settings settings;
+		uint_fast8_t selected = 0;
+
+		while (1) {
+			const char *labels[4];
+			uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+			bool isFavorite = false, added;
+
+			for (uint_fast8_t i = 0; i < ops->favorites.count; i++)
+				if (!strsCaselesslyCompareUtf(ops->favorites.path[i], parentPath, 0xffffffff))
+					isFavorite = true;
+			settingsGet(&settings);
+			labels[BrowserSettingsFavorites] = "Favorites";
+			labels[BrowserSettingsFolderFavorite] = isFavorite ? "Remove current folder" : "Favorite current folder";
+			labels[BrowserSettingsStart] = settings.fileBrowserStartFavorites ?
+				"Start in Favorites: ON" : "Start in Favorites: OFF";
+			labels[BrowserSettingsBack] = "Back";
+			uiPrvSetHeaderTitle("App Settings");
+			uiPrvReset(cnv, false);
+			for (uint_fast8_t i = 0; i < BrowserSettingsBack + 1u; i++)
+				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+			uiPrvDrawNavigationFooter(cnv, "Back");
+			selected = uiPrvMenu(cnv, selected, BrowserSettingsBack + 1u, &button);
+			if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == BrowserSettingsBack)
+				return false;
+			if (selected == BrowserSettingsFavorites) {
+				ops->showFavorites = true;
+				return true;
+			}
+			if (selected == BrowserSettingsFolderFavorite) {
+				if (!uiPrvBrowserFavoritesToggle(vol, &ops->favorites, parentPath, &added))
+					uiAlert(cnv, "Could not update favorites", DialogTypeOk);
+				else
+					uiAlert(cnv, added ? "Added to favorites" : "Removed from favorites", DialogTypeOk);
+				continue;
+			}
+			settings.fileBrowserStartFavorites = !settings.fileBrowserStartFavorites;
+			(void)settingsSet(&settings);
+		}
+	}
+
+	enum UiBrowserFnResult {
+		UiBrowserFnResume,
+		UiBrowserFnReload,
+		UiBrowserFnFavorites,
+		UiBrowserFnExit,
+	};
+
+	static enum UiBrowserFnResult uiPrvBrowserFnMenu(struct Canvas *cnv, struct FatfsVol *vol,
+		const char *parentPath, const struct MusicOption *entry, struct UiBrowserOps *ops)
+	{
+		enum { BrowserFnResume, BrowserFnActions, BrowserFnSettings, BrowserFnAudio,
+			BrowserFnScreen, BrowserFnLeds, BrowserFnExit };
+		static const char *labels[] = { "Resume", "File actions", "App Settings", "Audio", "Display", "LEDs", "Exit to Main Menu" };
+		uint_fast8_t selected = 0;
+
+		while (1) {
+			uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+			uiPrvSetHeaderTitle("FN Menu");
+			uiPrvReset(cnv, false);
+			for (uint_fast8_t i = 0; i < sizeof(labels) / sizeof(*labels); i++)
+				uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+			uiPrvDrawNavigationFooter(cnv, "Resume");
+			selected = uiPrvMenu(cnv, selected, sizeof(labels) / sizeof(*labels), &button);
+			if (uiPrvToolExitRequested())
+				return UiBrowserFnExit;
+			if (button == KEY_BIT_B || selected == BrowserFnResume)
+				return UiBrowserFnResume;
+			if (selected == BrowserFnExit)
+				return UiBrowserFnExit;
+			if (selected == BrowserFnActions) {
+				if (uiPrvBrowserContextMenu(cnv, vol, parentPath, entry, ops))
+					return ops->showFavorites ? UiBrowserFnFavorites : UiBrowserFnReload;
+				continue;
+			}
+			if (selected == BrowserFnSettings) {
+				if (uiPrvBrowserSettingsMenu(cnv, vol, parentPath, ops))
+					return UiBrowserFnFavorites;
+				continue;
+			}
+			{
+				struct Settings settings;
+
+				settingsGet(&settings);
+				if (selected == BrowserFnAudio)
+					uiPrvAudioSettings(cnv, &settings);
+				else if (selected == BrowserFnScreen)
+					uiPrvScreenSettings(cnv, &settings);
+				else
+					uiPrvLedSettings(cnv, &settings);
+				(void)settingsSet(&settings);
+				if (uiPrvToolExitRequested())
+					return UiBrowserFnExit;
+			}
+		}
+	}
+
+	static bool uiPrvBrowserChooseLocation(struct Canvas *cnv, struct FatfsVol *vol,
+		struct UiBrowserOps *ops, char *pathOut, uint32_t pathOutSz)
+	{
+		uint_fast8_t selected = 0;
+
+		while (1) {
+			uint_fast8_t cancelOption = ops->favorites.count + 1u;
+			uint_fast8_t totalOptions = cancelOption + 1u;
+			uint_fast16_t key;
+			const char *selectedPath;
+
+			if (selected >= totalOptions)
+				selected = totalOptions - 1u;
+
+			uiPrvSetHeaderTitle("Favorites");
+			uiPrvReset(cnv, false);
+			uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Browse SD card", -1);
+			for (uint_fast8_t i = 0; i < ops->favorites.count; i++)
+				uiPrvDrawTruncText(cnv, uiPrvMenuRow(cnv, i + 1u), 10, cnv->w - 20, ops->favorites.path[i]);
+			uiPuts(cnv, uiPrvMenuRow(cnv, cancelOption), 10, "Back", -1);
+			cnv->foreColor = 15;
+			uiPrvDrawOneChar(cnv, uiPrvMenuRow(cnv, selected), 1, MENU_SELECTION_CHAR);
+			key = uiPrvBrowserRecvKeypress(cnv);
+			if (selected >= totalOptions)
+				selected = 0;
+			selectedPath = selected && selected < cancelOption ? ops->favorites.path[selected - 1u] : "/";
+
+			switch (key) {
+			case KEY_BIT_A:
+				if (selected == cancelOption)
+					return false;
+				uiPrvCopyStr(pathOut, pathOutSz, selectedPath);
+				return true;
+
+			case KEY_BIT_B:
+				return false;
+
+			case KEY_BIT_DOWN:
+				selected = (selected + 1u) % totalOptions;
+				break;
+
+			case KEY_BIT_UP:
+				selected = selected ? selected - 1u : totalOptions - 1u;
+				break;
+
+			case UI_BROWSER_CONTEXT_KEY:
+			case UI_BROWSER_FN_ACTION_KEY:
+			case UI_KEY_BIT_CENTER:
+				(void)uiPrvBrowserContextMenu(cnv, vol, selectedPath, NULL, ops);
+				break;
+
+			case UI_BROWSER_FN_MENU_KEY:
+				if (uiPrvBrowserFnMenu(cnv, vol, selectedPath, NULL, ops) == UiBrowserFnExit)
+					return false;
+				ops->showFavorites = false;
+				break;
+
+			default:
+				break;
+			}
+			if (uiPrvToolExitRequested())
+				return false;
+		}
+	}
+
+	static bool uiPrvBrowserSplitPath(const char *path, char *parent, uint32_t parentSz,
+		char *name, uint32_t nameSz)
+	{
+		const char *base = uiPrvBrowserBaseName(path);
+		uint32_t parentLen = (uint32_t)(base - path);
+
+		if (!base[0] || parentLen >= parentSz || strlen(base) >= nameSz)
+			return false;
+		if (parentLen > 1u)
+			parentLen--;
+		memcpy(parent, path, parentLen);
+		parent[parentLen] = 0;
+		if (!parent[0])
+			strcpy(parent, "/");
+		uiPrvCopyStr(name, nameSz, base);
+		return true;
+	}
+
 	static void uiPrvPageSelection(uint32_t *selectedItemP, uint32_t *topItemP, uint32_t totalItems, uint32_t itemsOnscreen, bool forward)
 	{
 		uint32_t selectedItem = *selectedItemP, topItem = *topItemP, selectedOffset;
@@ -2190,7 +2827,7 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		*topItemP = topItem;
 	}
 
-	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, bool ignoreRootBack, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz, UiFileDisplayNameF displayNameF, bool selectCurrentFolder)
+	static bool uiPrvPickFile(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, UiFileNameFilterF filterF, const char *emptyMsg, bool ignoreRootBack, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz, char *parentPathOut, uint32_t parentPathOutSz, UiFileDisplayNameF displayNameF, bool selectCurrentFolder, struct UiBrowserOps *browserOps)
 	{
 		struct FatFileLocator dirStack[UI_BROWSER_MAX_DEPTH];
 		uint16_t pathLenStack[UI_BROWSER_MAX_DEPTH];
@@ -2200,11 +2837,11 @@ static enum GameRuntime uiPrvRuntimeForName(const char *fname)
 		struct MusicOption *head = NULL;
 		uint32_t numItems, topItem = 0, selectedItem = 0, depth = 0, prevTopItem, prevSelOnscreenItem;
 		uint_fast8_t itemHeight, itemsOnscreen, pathTop, listTop, itemLeft;
-		bool haveDirLoc = false;
+		bool haveDirLoc = false, folderAction;
 		struct FontGlyphInfo gi;
 
 		if (!path || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ || !listMem.ptr || listMem.size < sizeof(struct MusicOption)) {
-			uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
+			uiAlert(cnv, "Tool workspace is too small for File Manager", DialogTypeOk);
 			return false;
 		}
 		uiPrvCartRamOwnerClear("file picker workspace");
@@ -2222,7 +2859,8 @@ reload_dir:
 			if (ctx.overflow)
 				uiAlert(cnv, "Folder has too many entries; showing what fits", DialogTypeOk);
 		}
-		if (!numItems && !depth && !selectCurrentFolder) {
+		folderAction = selectCurrentFolder || (browserOps && !numItems);
+		if (!numItems && !depth && !folderAction) {
 			uiAlert(cnv, emptyMsg, DialogTypeOk);
 			return false;
 		}
@@ -2235,16 +2873,16 @@ reload_dir:
 		listTop = pathTop + itemHeight;
 		itemsOnscreen = (cnv->h - listTop) / itemHeight;
 		if (!itemsOnscreen) {
-			uiAlert(cnv, "Display area too small for file browser", DialogTypeOk);
+			uiAlert(cnv, "Display area too small for File Manager", DialogTypeOk);
 			return false;
 		}
-		if (itemsOnscreen > numItems + (depth ? 1 : 0) + (selectCurrentFolder ? 1 : 0))
-			itemsOnscreen = numItems + (depth ? 1 : 0) + (selectCurrentFolder ? 1 : 0);
+		if (itemsOnscreen > numItems + (depth ? 1 : 0) + (folderAction ? 1 : 0))
+			itemsOnscreen = numItems + (depth ? 1 : 0) + (folderAction ? 1 : 0);
 		prevTopItem = topItem + 1;
 		prevSelOnscreenItem = selectedItem - topItem + 1;
 
 		while (1) {
-			uint32_t i, totalItems = numItems + (depth ? 1 : 0) + (selectCurrentFolder ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
+			uint32_t i, totalItems = numItems + (depth ? 1 : 0) + (folderAction ? 1 : 0), selectedOnscreenItem = selectedItem - topItem;
 
 			if (prevTopItem != topItem) {
 				uint_fast8_t scrollWidth;
@@ -2258,16 +2896,17 @@ reload_dir:
 					struct MusicOption *draw;
 
 					cnv->foreColor = 12;
-					if (selectCurrentFolder && item == 0) {
-						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, "USE THIS FOLDER");
+					if (folderAction && item == 0) {
+						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft,
+							browserOps ? "FOLDER ACTIONS" : "USE THIS FOLDER");
 						continue;
 					}
-					if (depth && item == (selectCurrentFolder ? 1u : 0u)) {
+					if (depth && item == (folderAction ? 1u : 0u)) {
 						uiPrvDrawDirLabel(cnv, listTop + i * itemHeight, itemLeft, cnv->w - scrollWidth - itemLeft, "...");
 						continue;
 					}
 					draw = head;
-					for (uint32_t skip = item - (selectCurrentFolder ? 1u : 0u) - (depth ? 1u : 0u); skip && draw; skip--)
+					for (uint32_t skip = item - (folderAction ? 1u : 0u) - (depth ? 1u : 0u); skip && draw; skip--)
 						draw = draw->next;
 					if (!draw)
 						continue;
@@ -2298,8 +2937,47 @@ reload_dir:
 			}
 			prevSelOnscreenItem = selectedOnscreenItem;
 
-			switch (uiPrvRecvMenuKeypress(cnv)) {
+			switch (browserOps ? uiPrvBrowserRecvKeypress(cnv) : uiPrvRecvMenuKeypress(cnv)) {
+				case UI_BROWSER_CONTEXT_KEY:
+				case UI_BROWSER_FN_ACTION_KEY:
 				case UI_KEY_BIT_CENTER:
+					if (browserOps) {
+						struct MusicOption *entry = NULL;
+
+						if (!(folderAction && selectedItem == 0) &&
+								!(depth && selectedItem == (folderAction ? 1u : 0u)))
+							entry = uiPrvFileOptionAt(head, 0, selectedItem - (folderAction ? 1u : 0u) - (depth ? 1u : 0u));
+						if (uiPrvBrowserContextMenu(cnv, vol, path, entry, browserOps)) {
+							if (browserOps->showFavorites)
+								return false;
+							goto reload_dir;
+						}
+						uiPrvSetHeaderTitle("File Manager");
+						prevTopItem = topItem + 1u;
+					}
+					break;
+
+				case UI_BROWSER_FN_MENU_KEY:
+					if (browserOps) {
+						struct MusicOption *entry = NULL;
+						enum UiBrowserFnResult result;
+
+						if (!(folderAction && selectedItem == 0) &&
+								!(depth && selectedItem == (folderAction ? 1u : 0u)))
+							entry = uiPrvFileOptionAt(head, 0, selectedItem - (folderAction ? 1u : 0u) - (depth ? 1u : 0u));
+						result = uiPrvBrowserFnMenu(cnv, vol, path, entry, browserOps);
+						if (result == UiBrowserFnExit) {
+							uiPrvRequestToolExit();
+							return false;
+						}
+						if (result == UiBrowserFnFavorites)
+							return false;
+						if (result == UiBrowserFnReload)
+							goto reload_dir;
+						uiPrvSetHeaderTitle("File Manager");
+						prevTopItem = topItem + 1u;
+						break;
+					}
 					uiPrvRequestToolExit();
 					return false;
 
@@ -2309,7 +2987,9 @@ reload_dir:
 							uiPrvCopyStr(parentPathOut, parentPathOutSz, path);
 						return true;
 					}
-					if (depth && selectedItem == (selectCurrentFolder ? 1u : 0u)) {
+					if (folderAction && selectedItem == 0)
+						break;
+					if (depth && selectedItem == (folderAction ? 1u : 0u)) {
 						depth--;
 						haveDirLoc = depth != 0;
 						path[pathLenStack[depth]] = 0;
@@ -2317,7 +2997,7 @@ reload_dir:
 					}
 					{
 						struct MusicOption *entry = uiPrvFileOptionAt(head, 0,
-							selectedItem - (selectCurrentFolder ? 1u : 0u) - (depth ? 1u : 0u));
+							selectedItem - (folderAction ? 1u : 0u) - (depth ? 1u : 0u));
 
 					if (!entry)
 						break;
@@ -2658,7 +3338,7 @@ static void uiPrvPickScreenSaverMedia(struct Canvas *cnv, struct Settings *setti
 		return;
 	picked = uiPrvPickFile(cnv, vol, "/", folder ? uiPrvScreenSaverFolderFileName : imageViewerFileName,
 		folder ? "No folders found on the SD card" : "No compatible GIF/DCA media found", false,
-		&locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL, folder);
+		&locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL, folder, NULL);
 	if (picked && folder) {
 		if (strlen(parentPath) >= SETTINGS_SCREENSAVER_PATH_MAX)
 			uiAlert(cnv, "Selected folder path is too long", DialogTypeOk);
@@ -3481,6 +4161,71 @@ static bool __attribute__((noinline)) uiPrvEmulatorSettings(struct Canvas *cnv, 
 	}
 }
 
+static void uiPrvFileBrowserAppSettings(struct Canvas *cnv, struct Settings *settings);
+static void uiPrvMusicAppSettings(struct Canvas *cnv, struct Settings *settings);
+static void uiPrvAutoclickerAppSettings(struct Canvas *cnv, struct Settings *settings);
+static void uiPrvPongAppSettings(struct Canvas *cnv, struct Settings *settings);
+static void uiPrvTetrisAppSettings(struct Canvas *cnv, struct Settings *settings);
+
+static bool uiPrvAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	enum {
+		AppSettingsFileBrowser,
+		AppSettingsMusic,
+		AppSettingsAutoclicker,
+		AppSettingsBadUsb,
+		AppSettingsEmulators,
+		AppSettingsPong,
+		AppSettingsTetris,
+		AppSettingsBack,
+	};
+	static const char *const labels[] = {
+		"File Manager", "Music", "Autoclicker", "BadUSB", "Emulators", "Pong", "Tetris", "Back",
+	};
+	bool restartCurGame = false;
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
+
+		uiPrvSetHeaderTitle("App Settings");
+		uiPrvReset(cnv, false);
+		for (uint_fast8_t i = 0; i < sizeof(labels) / sizeof(*labels); i++)
+			uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, labels[i], -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, sizeof(labels) / sizeof(*labels), &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == AppSettingsBack)
+			return restartCurGame;
+		switch (selected) {
+		case AppSettingsFileBrowser:
+			uiPrvFileBrowserAppSettings(cnv, settings);
+			break;
+		case AppSettingsMusic:
+			uiPrvMusicAppSettings(cnv, settings);
+			break;
+		case AppSettingsAutoclicker:
+			uiPrvAutoclickerAppSettings(cnv, settings);
+			break;
+		case AppSettingsBadUsb:
+			uiPrvUsbSettings(cnv, settings);
+			break;
+		case AppSettingsEmulators:
+			restartCurGame = uiPrvEmulatorSettings(cnv, settings) || restartCurGame;
+			break;
+		case AppSettingsPong:
+			uiPrvPongAppSettings(cnv, settings);
+			break;
+		case AppSettingsTetris:
+			uiPrvTetrisAppSettings(cnv, settings);
+			break;
+		default:
+			break;
+		}
+		if (uiPrvToolExitRequested())
+			return restartCurGame;
+	}
+}
+
 static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exitOnDone)		//return true if anything for the current game may have changes
 {
 	bool restartCurGame = false;
@@ -3497,14 +4242,14 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 	uiPrvReset(cnv, false);
 
 	while (1) {
-		uint_fast8_t doneOption = 0, emulatorsOption = exitOnDone ? 1 : 0, clockOption = emulatorsOption + 1, audioOption = clockOption + 1, ledSettingsOption = audioOption + 1, screenOption = ledSettingsOption + 1, screenSaverOption = screenOption + 1, usbOption = screenSaverOption + 1, selOption;
+		uint_fast8_t doneOption = 0, appSettingsOption = exitOnDone ? 1 : 0, clockOption = appSettingsOption + 1, audioOption = clockOption + 1, ledSettingsOption = audioOption + 1, screenOption = ledSettingsOption + 1, screenSaverOption = screenOption + 1, usbOption = screenSaverOption + 1, selOption;
 		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
 		uiPrvSetHeaderTitle("Settings");
 		uiPrvReset(cnv, false);
 		if (exitOnDone)
 			uiPuts(cnv, uiPrvMenuRow(cnv, doneOption), 10, "DONE", -1);
-		uiPuts(cnv, uiPrvMenuRow(cnv, emulatorsOption), 10, "Emulators", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, appSettingsOption), 10, "App Settings", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, clockOption), 10, "Clock", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, audioOption), 10, "Audio", -1);
 		uiPuts(cnv, uiPrvMenuRow(cnv, ledSettingsOption), 10, "LEDs", -1);
@@ -3525,8 +4270,8 @@ static bool __attribute__((noinline)) uiPrvSettings(struct Canvas *cnv, bool exi
 			uiPrvScreenSettings(cnv, &settings);
 		else if (selOption == screenSaverOption)
 			uiPrvScreenSaverSettings(cnv, &settings);
-		else if (selOption == emulatorsOption)
-			restartCurGame = uiPrvEmulatorSettings(cnv, &settings) || restartCurGame;
+		else if (selOption == appSettingsOption)
+			restartCurGame = uiPrvAppSettings(cnv, &settings) || restartCurGame;
 		else if (selOption == clockOption)
 			uiPrvClockSettings(cnv);
 		else if (selOption == audioOption)
@@ -5169,7 +5914,7 @@ bool uiFlushCurrentSaveToCard(bool force)
 			return false;
 
 		(void)sprintf(emptyMsg, "No %s games found in %s", uiPrvEmulatorConsoleName(console), rootPath);
-		if (uiPrvPickFile(cnv, vol, rootPath, uiPrvRomFilterForConsole(console), emptyMsg, false, &locator, name, sizeof(name), NULL, 0, uiPrvRomDisplayName, false))
+		if (uiPrvPickFile(cnv, vol, rootPath, uiPrvRomFilterForConsole(console), emptyMsg, false, &locator, name, sizeof(name), NULL, 0, uiPrvRomDisplayName, false, NULL))
 			ret = uiPrvConfirmRomSelection(cnv, vol, &locator, name);
 	
 		(void)uiPrvCardPreUnmount();
@@ -7015,7 +7760,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 		if (!vol)
 			return false;
 
-		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", true, &locator, fileName, sizeof(fileName), NULL, 0, NULL, false))
+		if (!uiPrvPickFile(cnv, vol, "/IR", uiPrvIrRemoteFileName, "No .ir files found in /IR", true, &locator, fileName, sizeof(fileName), NULL, 0, NULL, false, NULL))
 			goto out_unmount;
 
 		ret = uiPrvIrButtonSpamLocator(cnv, vol, &locator, fileName);
@@ -7066,7 +7811,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 
 		if (!haveStatus)
 			haveStatus = badgePowerGetCached(&status);
-		if (haveStatus && status.valid && status.lowBatt && status.usbMv < UI_HEADER_USB_PRESENT_MV) {
+		if (haveStatus && status.valid && status.lowBatt && status.mode != BadgePowerModeCharging) {
 			audioPwmStop();
 			uiAlert(cnv, "Battery too low for Music.\nConnect USB or charge before playback.", DialogTypeOk);
 			return false;
@@ -8075,7 +8820,7 @@ reload_dir:
 			return false;
 
 		while (!uiPrvToolExitRequested()) {
-			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", false, &locator, name, sizeof(name), NULL, 0, NULL, false))
+			if (!uiPrvPickFile(cnv, vol, "/BADUSB", uiPrvBadUsbFileName, "No BadUSB scripts found in /BADUSB", false, &locator, name, sizeof(name), NULL, 0, NULL, false, NULL))
 				break;
 
 			ok = uiPrvRunBadUsbLocator(cnv, vol, &locator, name) || ok;
@@ -8718,6 +9463,124 @@ static void uiPrvAutoclickerAdjustButton(struct Settings *settings, bool next)
 		settings->autoclickerButton = (settings->autoclickerButton + 1) % AutoclickerButtonNumButtons;
 	else
 		settings->autoclickerButton = settings->autoclickerButton ? settings->autoclickerButton - 1 : AutoclickerButtonNumButtons - 1;
+}
+
+static void uiPrvFileBrowserAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvSetHeaderTitle("File Manager");
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Start in Favorites", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 135,
+			settings->fileBrowserStartFavorites ? "ON" : "OFF", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "Back", -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, 2, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == 1)
+			return;
+		settings->fileBrowserStartFavorites = !settings->fileBrowserStartFavorites;
+	}
+}
+
+static void uiPrvMusicAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvSetHeaderTitle("Music");
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Loop track", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 135, settings->musicLoopTrack ? "ON" : "OFF", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "Back", -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, 2, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == 1)
+			return;
+		settings->musicLoopTrack = !settings->musicLoopTrack;
+	}
+}
+
+static void uiPrvAutoclickerAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+		char value[24];
+
+		uiPrvSetHeaderTitle("Autoclicker");
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Button", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 135, uiPrvAutoclickerButtonName(settings->autoclickerButton), -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "Clicks / sec", -1);
+		(void)sprintf(value, "%u", (unsigned)settings->autoclickerCps);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 135, value, -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, "Back", -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, 3, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == 2)
+			return;
+		if (selected == 0)
+			uiPrvAutoclickerAdjustButton(settings, button != KEY_BIT_LEFT);
+		else
+			(void)uiPrvAutoclickerAdjustClicks(settings, button == KEY_BIT_LEFT ? -1 : 1);
+	}
+}
+
+static void uiPrvPongAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	static const char *const themes[] = {"Classic", "Teams", "Rainbow"};
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvSetHeaderTitle("Pong");
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Colors", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 135, themes[settings->pongColorTheme], -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "Back", -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, 2, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == 1)
+			return;
+		settings->pongColorTheme = button == KEY_BIT_LEFT ?
+			(settings->pongColorTheme + 2u) % 3u : (settings->pongColorTheme + 1u) % 3u;
+	}
+}
+
+static void uiPrvTetrisAppSettings(struct Canvas *cnv, struct Settings *settings)
+{
+	static const char *const modes[] = {"Marathon", "Line Race", "Ultra"};
+	static const char *const rules[] = {"Standard", "Standard Fast B", "Nintendo R"};
+	uint_fast8_t selected = 0;
+
+	while (1) {
+		uint_fast16_t button = KEY_BIT_A | KEY_BIT_B | KEY_BIT_LEFT | KEY_BIT_RIGHT;
+
+		uiPrvSetHeaderTitle("Tetris");
+		uiPrvReset(cnv, false);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 10, "Mode", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 0), 135, modes[settings->tetrisMode], -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 10, "Ruleset", -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 1), 135, rules[settings->tetrisRule], -1);
+		uiPuts(cnv, uiPrvMenuRow(cnv, 2), 10, "Back", -1);
+		uiPrvDrawNavigationFooter(cnv, "Back");
+		selected = uiPrvMenu(cnv, selected, 3, &button);
+		if (uiPrvToolExitRequested() || button == KEY_BIT_B || selected == 2)
+			return;
+		if (selected == 0)
+			settings->tetrisMode = button == KEY_BIT_LEFT ? (settings->tetrisMode + 2u) % 3u : (settings->tetrisMode + 1u) % 3u;
+		else
+			settings->tetrisRule = button == KEY_BIT_LEFT ? (settings->tetrisRule + 2u) % 3u : (settings->tetrisRule + 1u) % 3u;
+		settings->portSettingsInitialized = true;
+	}
 }
 
 static void uiPrvAutoclickerDraw(struct Canvas *cnv, const struct Settings *settings, bool running)
@@ -9556,7 +10419,7 @@ enum UiToolId {
 static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 {
 	switch (tool) {
-		case UiToolBrowser: return "File Browser";
+		case UiToolBrowser: return "File Manager";
 		case UiToolInfrared: return "Infrared";
 		case UiToolIr: return "Universal IR";
 		case UiToolUsbStorage: return "USB Storage";
@@ -9733,6 +10596,13 @@ static bool uiPrvImageFileName(const char *name)
 		uiPrvStrEndsWithNoCase(name, ".bmp");
 }
 
+static bool uiPrvImageResultCanSkip(enum ImageViewerResult result)
+{
+	return result == ImageViewerResultOpenError || result == ImageViewerResultReadError ||
+		result == ImageViewerResultDecodeError || result == ImageViewerResultIncompatibleGif ||
+		result == ImageViewerResultUnsupported || result == ImageViewerResultTooLarge;
+}
+
 static bool uiPrvFindAdjacentImage(struct FatfsVol *vol, const char *path, const char *curName, bool forward, struct FatFileLocator *locatorOut, char *nameOut, uint32_t nameOutSz)
 {
 	struct FatfsDir *dir;
@@ -9841,6 +10711,8 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 	struct FatFileLocator curLocator = *locator;
 	char curName[UI_PICK_FILE_NAME_BUF_SZ];
 	char curPath[UI_PICK_FILE_PATH_BUF_SZ];
+	char firstBadName[UI_PICK_FILE_NAME_BUF_SZ];
+	bool skippingBadImages = false;
 
 	uiPrvCopyStr(curName, sizeof(curName), name);
 	uiPrvCopyStr(curPath, sizeof(curPath), parentPath && parentPath[0] ? parentPath : "/");
@@ -9856,6 +10728,24 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 		uiPowerSetScreenSaverContentActive(true);
 		result = imageViewerRun(&viewerCanvas, vol, curPath, &curLocator, curName);
 		uiPowerSetScreenSaverContentActive(false);
+		if (uiPrvImageResultCanSkip(result)) {
+			struct FatFileLocator nextLocator;
+			char nextName[UI_PICK_FILE_NAME_BUF_SZ];
+
+			if (!skippingBadImages) {
+				uiPrvCopyStr(firstBadName, sizeof(firstBadName), curName);
+				skippingBadImages = true;
+			}
+			if (uiPrvFindAdjacentImage(vol, curPath, curName, true, &nextLocator, nextName, sizeof(nextName)) &&
+					strsCaselesslyCompareUtf(nextName, firstBadName, 0xffffffff)) {
+				curLocator = nextLocator;
+				uiPrvCopyStr(curName, sizeof(curName), nextName);
+				continue;
+			}
+			uiAlert(cnv, "No readable images found in this folder", DialogTypeOk);
+			return;
+		}
+		skippingBadImages = false;
 		if (result == ImageViewerResultMenu) {
 			enum UiImageMenuAction action;
 
@@ -9878,6 +10768,8 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 			uiPrvRequestToolExit();
 			return;
 		}
+		if (result == ImageViewerResultBack)
+			return;
 		if (result == ImageViewerResultPrev || result == ImageViewerResultNext) {
 			struct FatFileLocator nextLocator;
 			char nextName[UI_PICK_FILE_NAME_BUF_SZ];
@@ -9898,7 +10790,7 @@ static void uiPrvRunImageSequence(struct Canvas *cnv, struct FatfsVol *vol, cons
 static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool)
 {
 	static const char *names[UiToolNum] = {
-		[UiToolBrowser] = "File Browser",
+		[UiToolBrowser] = "File Manager",
 		[UiToolInfrared] = "Infrared",
 		[UiToolIr] = "Universal IR",
 		[UiToolUsbStorage] = "USB Storage",
@@ -9942,7 +10834,7 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 			curOption = i;
 		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, names[toolOrder[i]], -1);
 	}
-	uiPrvDrawNavigationFooter(cnv, NULL);
+	uiPrvDrawMainMenuFooter(cnv);
 
 	selOption = uiPrvMenu(cnv, curOption, numTools, &button);
 	if (uiPowerConsumeScreenSaverWake())
@@ -10172,28 +11064,71 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 	struct ToolWorkspaceSpan pathMem = toolWorkspaceGet(ToolWorkspaceCartRamUpper);
 	char *browserPath = (char*)pathMem.ptr;
 	struct UiFileRef ref;
+	struct UiBrowserOps browserOps;
+	struct Settings settings;
 
 	(void)runGameF;
 	(void)userData;
 
 	if (!browserPath || pathMem.size < UI_PICK_FILE_PATH_BUF_SZ) {
-		uiAlert(cnv, "Tool workspace is too small for file browser", DialogTypeOk);
+		uiAlert(cnv, "Tool workspace is too small for File Manager", DialogTypeOk);
 		return UiToolBrowser;
 	}
-	uiPrvCartRamOwnerClear("file browser workspace");
+	uiPrvCartRamOwnerClear("file manager workspace");
 	browserPath[0] = '/';
 	browserPath[1] = 0;
+	memset(&browserOps, 0, sizeof(browserOps));
 
-	uiPrvSetHeaderTitle("File Browser");
+	uiPrvSetHeaderTitle("File Manager");
 	uiPrvReset(cnv, false);
-	uiPrvDrawWrappedString(cnv, "Opening File Browser...", 32, 10);
+	uiPrvDrawWrappedString(cnv, "Opening File Manager...", 32, 10);
 	vol = uiPrvMountCard(cnv, false);
 	if (!vol)
 		return UiToolBrowser;
+	uiPrvBrowserFavoritesLoad(vol, &browserOps.favorites);
+	settingsGet(&settings);
+	if (settings.fileBrowserStartFavorites && !browserOps.favorites.count) {
+		settings.fileBrowserStartFavorites = false;
+		(void)settingsSet(&settings);
+	}
+	browserOps.showFavorites = settings.fileBrowserStartFavorites && browserOps.favorites.count;
 
 	while (1) {
-		uiPrvSetHeaderTitle("File Browser");
-		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", false, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ, NULL, false)) {
+		if (browserOps.showFavorites) {
+			struct FatfsDir *favoriteDir;
+
+			browserOps.showFavorites = false;
+			if (!uiPrvBrowserChooseLocation(cnv, vol, &browserOps, browserPath, UI_PICK_FILE_PATH_BUF_SZ))
+				break;
+			favoriteDir = fatfsDirOpen(vol, browserPath);
+			if (!favoriteDir) {
+				char parentPath[UI_BROWSER_ACTION_PATH_MAX];
+				struct FatfsDir *parentDir = NULL;
+
+				if (!uiPrvBrowserSplitPath(browserPath, parentPath, sizeof(parentPath), name, sizeof(name)) ||
+						!(parentDir = fatfsDirOpen(vol, parentPath)) ||
+						!fatfsFindFileAt(parentDir, name, &locator)) {
+					if (parentDir) (void)fatfsDirClose(parentDir);
+					uiAlert(cnv, "Favorite is no longer available", DialogTypeOk);
+					continue;
+				}
+				(void)fatfsDirClose(parentDir);
+				memset(&ref, 0, sizeof(ref));
+				ref.locator = locator;
+				ref.name = name;
+				ref.parentPath = parentPath;
+				nextTool = uiPrvLaunchBrowserFile(cnv, vol, &ref);
+				if (uiPrvToolExitRequested() || nextTool != UiToolBrowser)
+					break;
+				browserOps.showFavorites = true;
+				continue;
+			}
+			(void)fatfsDirClose(favoriteDir);
+		}
+		uiPrvSetHeaderTitle("File Manager");
+		if (!uiPrvPickFile(cnv, vol, browserPath, NULL, "No files found on the SD card", false, &locator, name, sizeof(name), browserPath, UI_PICK_FILE_PATH_BUF_SZ, NULL, false, &browserOps)) {
+			if (browserOps.showFavorites)
+				continue;
 			break;
 		}
 		memset(&ref, 0, sizeof(ref));
@@ -10205,8 +11140,6 @@ static enum UiToolId uiPrvBrowserTool(struct Canvas *cnv, UiRunGameF runGameF, v
 			break;
 		if (nextTool != UiToolBrowser)
 			break;
-		browserPath[0] = '/';
-		browserPath[1] = 0;
 	}
 
 	(void)uiPrvCardPreUnmount();
@@ -10230,9 +11163,10 @@ static void uiPrvImageViewerTool(struct Canvas *cnv)
 
 	while (!uiPrvToolExitRequested()) {
 		uiPrvSetHeaderTitle("Image Viewer");
-		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No image files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL, false))
+		if (!uiPrvPickFile(cnv, vol, "/IMAGES", uiPrvImageFileName, "No image files found in /IMAGES", false, &locator, name, sizeof(name), parentPath, sizeof(parentPath), NULL, false, NULL))
 			break;
 		uiPrvRunImageSequence(cnv, vol, parentPath, &locator, name);
+		uiPrvWaitKeysReleased();
 	}
 
 	(void)uiPrvCardPreUnmount();
@@ -10280,6 +11214,7 @@ int uiDcAppRunImage(const struct DcAppHostApi *host, const struct DcAppRunArgs *
 	}
 	if (args->toolAction == DcAppToolActionImageFile && args->vol && args->locator && args->name) {
 		uiPrvRunImageSequence(args->canvas, args->vol, args->parentPath, args->locator, args->name);
+		uiPrvWaitKeysReleased();
 		return 0;
 	}
 	return -1;
@@ -11188,7 +12123,7 @@ void uiRunToolShell(UiRunGameF runGameF, void *userData)
 					activeTool = UiToolGame;
 				}
 			#else
-				uiAlert(cnv, "File Browser requires SD card support", DialogTypeOk);
+				uiAlert(cnv, "File Manager requires SD card support", DialogTypeOk);
 			#endif
 				break;
 

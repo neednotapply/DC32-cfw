@@ -106,7 +106,12 @@ struct Settings {
 	uint8_t gbcUpscale	:	1;
 	uint8_t nesSpeed	:	2;
 	uint8_t nesUpscale	:	1;
-	uint8_t emulatorReserved : 7;
+	uint8_t fileBrowserStartFavorites : 1;
+	uint8_t pongColorTheme : 2;
+	uint8_t tetrisMode : 2;
+	uint8_t tetrisRule : 2;
+	uint8_t portSettingsInitialized : 1;
+	uint8_t emulatorReserved : 1;
 	uint8_t powerSaveEnabled;
 	uint8_t powerSaveBrightness;
 	uint8_t powerSaveTimeout;

@@ -7,12 +7,16 @@
 #define BADGE_POWER_ADC_REG				0x88
 #define BADGE_POWER_LOW_MV				3600u
 #define BADGE_POWER_CLEAR_MV			3700u
-#define BADGE_POWER_POLL_TICKS			((uint64_t)TICKS_PER_SECOND * 15u)
+#define BADGE_POWER_USB_PRESENT_MV		4800u
+#define BADGE_POWER_USB_CLEAR_MV		4600u
+#define BADGE_POWER_USB_POLL_TICKS		((uint64_t)TICKS_PER_SECOND)
+#define BADGE_POWER_BATT_UPDATE_TICKS	((uint64_t)TICKS_PER_SECOND * 15u)
 #define BADGE_POWER_BATT_SCALE			(65536u * 10u / 3u)
 #define BADGE_POWER_USB_SCALE			(65536u * 5u)
 
 static struct BadgePowerStatus mCachedStatus;
 static uint64_t mNextPollTime;
+static uint64_t mNextBatteryUpdateTime;
 static bool mPollInFlight;
 static uint8_t mPollAdcVals[4];
 static const uint8_t mPollAdcReg = BADGE_POWER_ADC_REG;
@@ -72,20 +76,72 @@ static bool badgePowerPrvLowBatt(uint32_t battMv)
 	return battMv <= BADGE_POWER_LOW_MV;
 }
 
-static void badgePowerPrvUpdate(const uint8_t adcVals[4])
+static bool badgePowerPrvUsbPowered(uint32_t usbMv)
 {
-	struct BadgePowerStatus status;
-	uint32_t rawBattMv = badgePowerPrvAdcVal2mv(adcVals + 0, BADGE_POWER_BATT_SCALE);
-	uint32_t battMv = rawBattMv;
+	if (mCachedStatus.valid && mCachedStatus.usbPowered)
+		return usbMv >= BADGE_POWER_USB_CLEAR_MV;
 
-	if (mCachedStatus.valid)
-		battMv = (mCachedStatus.battMv * 3u + battMv + 2u) / 4u;
+	return usbMv >= BADGE_POWER_USB_PRESENT_MV;
+}
+
+static uint8_t badgePowerPrvLevel(uint8_t percent)
+{
+	if (percent < 10u)
+		return 0;
+	if (percent < 30u)
+		return 1;
+	if (percent < 50u)
+		return 2;
+	if (percent < 70u)
+		return 3;
+	if (percent < 90u)
+		return 4;
+	return 5;
+}
+
+static uint8_t badgePowerPrvStableLevel(uint8_t percent)
+{
+	uint8_t level = badgePowerPrvLevel(percent);
+
+	if (!mCachedStatus.valid)
+		return level;
+	if (level > mCachedStatus.battLevel) {
+		uint8_t boundary = mCachedStatus.battLevel * 20u + 10u;
+
+		return percent >= boundary + 3u ? level : mCachedStatus.battLevel;
+	}
+	if (level < mCachedStatus.battLevel) {
+		uint8_t boundary = mCachedStatus.battLevel * 20u - 10u;
+
+		return percent <= boundary - 3u ? level : mCachedStatus.battLevel;
+	}
+
+	return level;
+}
+
+static void badgePowerPrvUpdate(const uint8_t adcVals[4], bool forceBatteryUpdate)
+{
+	struct BadgePowerStatus status = mCachedStatus;
+	uint32_t rawBattMv = badgePowerPrvAdcVal2mv(adcVals + 0, BADGE_POWER_BATT_SCALE);
+	bool updateBattery = forceBatteryUpdate || !mCachedStatus.valid || getTime() >= mNextBatteryUpdateTime;
+
+	if (updateBattery) {
+		uint32_t battMv = rawBattMv;
+
+		if (mCachedStatus.valid)
+			battMv = (mCachedStatus.battMv * 7u + battMv + 4u) / 8u;
+		status.battMv = battMv;
+		status.battPercent = badgePowerPrvPercent(battMv);
+		status.battLevel = badgePowerPrvStableLevel(status.battPercent);
+		mNextBatteryUpdateTime = getTime() + BADGE_POWER_BATT_UPDATE_TICKS;
+	}
 
 	status.valid = true;
-	status.battMv = battMv;
-	status.battPercent = badgePowerPrvPercent(battMv);
 	status.usbMv = badgePowerPrvAdcVal2mv(adcVals + 2, BADGE_POWER_USB_SCALE);
+	status.usbPowered = badgePowerPrvUsbPowered(status.usbMv);
 	status.lowBatt = badgePowerPrvLowBatt(rawBattMv);
+	status.mode = status.usbPowered ? BadgePowerModeCharging :
+		(status.lowBatt ? BadgePowerModeLow : BadgePowerModeNormal);
 
 	mCachedStatus = status;
 }
@@ -102,7 +158,7 @@ bool badgePowerReadNow(struct BadgePowerStatus *status)
 		return false;
 	}
 
-	badgePowerPrvUpdate(adcVals);
+	badgePowerPrvUpdate(adcVals, true);
 	*status = mCachedStatus;
 
 	return true;
@@ -114,7 +170,7 @@ static void badgePowerPrvPollCbk(void *userData, const struct I2Creq *req, bool 
 	(void)req;
 
 	if (likelySuccess)
-		badgePowerPrvUpdate(mPollAdcVals);
+		badgePowerPrvUpdate(mPollAdcVals, false);
 	mPollInFlight = false;
 }
 
@@ -137,7 +193,7 @@ void badgePowerPoll(void)
 		return;
 
 	mPollInFlight = true;
-	mNextPollTime = now + BADGE_POWER_POLL_TICKS;
+	mNextPollTime = now + BADGE_POWER_USB_POLL_TICKS;
 	if (!i2cTransact(&req, badgePowerPrvPollCbk, NULL))
 		mPollInFlight = false;
 }

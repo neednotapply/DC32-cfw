@@ -1048,6 +1048,7 @@ void doomDc32PresentFrame(void)
 	struct Canvas *cnv = doomDc32CanvasValid ? &doomDc32Canvas : NULL;
 	uint16_t *fb = cnv ? (uint16_t*)cnv->framebuffer : NULL;
 	uint16_t line[SCREENWIDTH];
+	int previousSourceY = -1;
 
 	if (!fb && doomDc32Host && doomDc32Host->displayFb)
 		fb = doomDc32Host->displayFb();
@@ -1073,8 +1074,16 @@ void doomDc32PresentFrame(void)
 	for (uint32_t y = 0; y < cnv->h; y++) {
 		int sourceY = (int)((y * SCREENHEIGHT) / cnv->h);
 
-		doomDc32BaseLine(line, sourceY);
-		doomDc32DrawOverlayLine(line, sourceY);
+		/*
+		 * A 200-to-240 scale duplicates source rows.  Overlays are decoded as
+		 * a stateful scanline stream, so redraw each source line exactly once
+		 * and copy the completed line for its duplicate display rows.
+		 */
+		if (sourceY != previousSourceY) {
+			doomDc32BaseLine(line, sourceY);
+			doomDc32DrawOverlayLine(line, sourceY);
+			previousSourceY = sourceY;
+		}
 		doomDc32WriteLogicalLine(fb, cnv, y, line, SCREENWIDTH);
 	}
 }

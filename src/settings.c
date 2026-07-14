@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			22
+#define SETTINGS_CUR_VER			24
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
@@ -117,6 +117,14 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->screenSaverBrightness = 1u;
 	settings->screenSaverGifPath[sizeof(settings->screenSaverGifPath) - 1] = 0;
 	settings->screenSaverImageFolder[sizeof(settings->screenSaverImageFolder) - 1] = 0;
+	settings->fileBrowserStartFavorites = !!settings->fileBrowserStartFavorites;
+	if (settings->pongColorTheme >= 3u)
+		settings->pongColorTheme = 0;
+	if (settings->tetrisMode >= 3u)
+		settings->tetrisMode = 0;
+	if (settings->tetrisRule >= 3u)
+		settings->tetrisRule = 0;
+	settings->portSettingsInitialized = !!settings->portSettingsInitialized;
 }
 
 void settingsGet(struct Settings *settings)
@@ -258,6 +266,17 @@ void settingsGet(struct Settings *settings)
 
 		case 21:			//add separate low-power screensaver brightness
 			settings->screenSaverBrightness = 1u;
+			//fallthrough
+
+		case 22:			//add File Browser start location
+			settings->fileBrowserStartFavorites = false;
+			//fallthrough
+
+		case 23:			//add persistent port settings
+			settings->pongColorTheme = 0;
+			settings->tetrisMode = 0;
+			settings->tetrisRule = 0;
+			settings->portSettingsInitialized = false;
 			//fallthrough
 
 		//other cases here, in increasing order

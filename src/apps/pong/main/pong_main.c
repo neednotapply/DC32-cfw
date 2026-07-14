@@ -5,6 +5,7 @@
 #include "apps/pong/core/pong_core.h"
 #include "apps/pong/modes/pong_modes.h"
 #include "apps/pong/platform/pong_platform.h"
+#include "settings.h"
 
 enum PongMainScreen {
 	PongMainModes,
@@ -90,8 +91,14 @@ static void pongMainFnSettingValue(void *context, uint8_t index, char *dst,
 
 static void pongMainFnSettingAdjust(void *context, uint8_t index, int8_t direction)
 {
-	if (context && index == 0)
+	if (context && index == 0) {
+		struct Settings systemSettings;
+
 		pongMainAdjustSettings(context, index, direction);
+		settingsGet(&systemSettings);
+		systemSettings.pongColorTheme = ((const struct PongSettings*)context)->colorTheme;
+		(void)settingsSet(&systemSettings);
+	}
 }
 
 static const char *const mPongFnSettingLabels[] = {"Colors"};
@@ -117,7 +124,12 @@ int pongMainRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *args
 
 	if (!pongDc32PlatformInit(&platform, host, args))
 		return -1;
-	settings.colorTheme = PongColorClassic;
+	{
+		struct Settings systemSettings;
+
+		settingsGet(&systemSettings);
+		settings.colorTheme = systemSettings.pongColorTheme;
+	}
 	if (host->setFnSettings)
 		host->setFnSettings(&mPongFnSettings, &settings);
 	platform.audio.enabled = false;

@@ -16,6 +16,7 @@
 #include "dispDefcon.h"
 #include "fonts.h"
 #include "gb.h"
+#include "settings.h"
 #include "ui.h"
 
 #define TETRIS_SCREEN_W 320
@@ -686,6 +687,15 @@ static void tetrisAdjustSetting(struct TetrisApp *app, uint8_t setting, int8_t d
 		app->saveDirty = true;
 		(void)tetrisWriteSave(app);
 	}
+	{
+		struct Settings settings;
+
+		settingsGet(&settings);
+		settings.tetrisMode = app->save.selectedMode;
+		settings.tetrisRule = app->save.selectedRule;
+		settings.portSettingsInitialized = true;
+		(void)settingsSet(&settings);
+	}
 }
 
 static void tetrisFnSettingValue(void *context, uint8_t index, char *dst, uint32_t dstSize)
@@ -833,6 +843,21 @@ static bool tetrisInit(struct TetrisApp *app, const struct DcAppHostApi *host,
 	now = host->getTime ? host->getTime() : 0x4e554c4c504f4d49ull;
 	app->seed = (uint32_t)(now ^ (now >> 32));
 	tetrisLoadSave(app);
+	{
+		struct Settings settings;
+
+		settingsGet(&settings);
+		if (settings.portSettingsInitialized) {
+			app->save.selectedMode = settings.tetrisMode;
+			app->save.selectedRule = settings.tetrisRule;
+		}
+		else {
+			settings.tetrisMode = app->save.selectedMode;
+			settings.tetrisRule = app->save.selectedRule;
+			settings.portSettingsInitialized = true;
+			(void)settingsSet(&settings);
+		}
+	}
 	if (host->setFnSettings)
 		host->setFnSettings(&mTetrisFnSettings, app);
 	app->recordsRule = app->save.selectedRule;

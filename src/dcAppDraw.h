@@ -37,6 +37,7 @@ struct DcAppLoadingState {
 };
 
 uint16_t dcAppDrawRgb565(uint32_t r, uint32_t g, uint32_t b);
+void dcAppDrawSetThemeColor(uint8_t red, uint8_t green, uint8_t blue);
 bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, const struct DcAppRunArgs *args, void *backbuffer, uint32_t w, uint32_t h);
 void dcAppDrawClear(struct DcAppDrawCtx *ctx, uint16_t color);
 void dcAppDrawFill(struct DcAppDrawCtx *ctx, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color);

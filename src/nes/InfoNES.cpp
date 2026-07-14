@@ -128,6 +128,12 @@ BYTE *ROMBANK[4];
 // BYTE *ROMBANK2;
 // BYTE *ROMBANK3;
 
+static inline void InfoNES_Mmc4PatternFetch(int bankOffset, int tile)
+{
+  if (MapperNo == 10)
+    Map10_PPU((WORD)((bankOffset << 10) | (tile << 4)));
+}
+
 /*-------------------------------------------------------------------*/
 /*  PPU resources                                                    */
 /*-------------------------------------------------------------------*/
@@ -1073,6 +1079,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       pPoint += 8 - PPU_Scr_H_Bit;
 
       const int ch = *pbyNameTable;
+      InfoNES_Mmc4PatternFetch(bankOfsBG, ch);
 #if PICO_RP2350
       const WORD *pal;
       const BYTE *data;
@@ -1128,6 +1135,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     auto putBG = [&](int nX) __attribute__((always_inline))
     {
       const int ch = *pbyNameTable;
+      InfoNES_Mmc4PatternFetch(bankOfsBG, ch);
 #if PICO_RP2350
       const WORD *pal;
       const BYTE *data;
@@ -1238,6 +1246,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 #else
     {
       const int ch = *pbyNameTable;
+      InfoNES_Mmc4PatternFetch(bankOfsBG, ch);
 #if PICO_RP2350
       const WORD *pal;
       const BYTE *data;
@@ -1429,6 +1438,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
         bankOfs = bankOfsSP88;
       }
 
+      InfoNES_Mmc4PatternFetch(bankOfs, ch);
       const int bank = (ch >> 6) + bankOfs;
       const int addrOfs = ((ch & 63) << 4) + ((yOfsModSP & 8) << 1) + (yOfsModSP & 7);
       const auto data = PPUBANK[bank] + addrOfs;

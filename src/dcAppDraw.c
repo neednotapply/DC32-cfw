@@ -7,6 +7,7 @@
 
 static uint16_t mDcAppDrawRgb332To565[256];
 static bool mDcAppDrawPaletteReady;
+static uint16_t mDcAppDrawThemeColor = 0xa534u;
 
 static int32_t dcAppDrawPrvAbsI32(int32_t v)
 {
@@ -179,6 +180,11 @@ uint16_t dcAppDrawRgb565(uint32_t r, uint32_t g, uint32_t b)
 	return (uint16_t)((r & 0xf8u) << 8) | (uint16_t)((g & 0xfcu) << 3) | (uint16_t)(b >> 3);
 }
 
+void dcAppDrawSetThemeColor(uint8_t red, uint8_t green, uint8_t blue)
+{
+	mDcAppDrawThemeColor = dcAppDrawRgb565(red, green, blue);
+}
+
 bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, const struct DcAppRunArgs *args, void *backbuffer, uint32_t w, uint32_t h)
 {
 	if (!ctx || !backbuffer || !w || !h)
@@ -309,7 +315,7 @@ void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *
 	uint16_t primary = dcAppDrawRgb565(244, 244, 244);
 	uint16_t secondary = dcAppDrawRgb565(188, 188, 188);
 	uint16_t track = dcAppDrawRgb565(48, 48, 48);
-	uint16_t accent = dcAppDrawRgb565(168, 168, 168);
+	uint16_t accent = mDcAppDrawThemeColor;
 	uint32_t barW, fill, offset;
 	int32_t centerY, barX, barY;
 
@@ -343,7 +349,7 @@ void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingS
 	uint16_t primary = dcAppDrawRgb565(244, 244, 244);
 	uint16_t secondary = dcAppDrawRgb565(188, 188, 188);
 	uint16_t track = dcAppDrawRgb565(48, 48, 48);
-	uint16_t accent = dcAppDrawRgb565(168, 168, 168);
+	uint16_t accent = mDcAppDrawThemeColor;
 	uint32_t barW, fill, offset;
 	int32_t centerY, barX, barY;
 

@@ -118,6 +118,8 @@ APP_BINARIES = (
     "starfield.DC32",
     "spiro.DC32",
     "cube.DC32",
+    "dvd-bounce.DC32",
+    "scroll-pattern.DC32",
 )
 APP_DATA_FILES = {
     "APPS/doom1.whx": DOOM_WHX_SOURCE,

@@ -41,6 +41,7 @@ const struct MapperTable_tag MapperTable[] =
         {3, Map3_Init},
         {4, Map4_Init},
         {7, Map7_Init},
+        {10, Map10_Init},
         {-1, NULL}};
 
 /*-------------------------------------------------------------------*/
@@ -53,10 +54,10 @@ const struct MapperTable_tag MapperTable[] =
 #include "mapper/InfoNES_Mapper_003.cpp"
 #include "mapper/InfoNES_Mapper_004.cpp"
 #include "mapper/InfoNES_Mapper_007.cpp"
+#include "mapper/InfoNES_Mapper_010.cpp"
 #if 0
 #include "mapper/InfoNES_Mapper_008.cpp"
 #include "mapper/InfoNES_Mapper_009.cpp"
-#include "mapper/InfoNES_Mapper_010.cpp"
 #include "mapper/InfoNES_Mapper_011.cpp"
 #include "mapper/InfoNES_Mapper_013.cpp"
 #include "mapper/InfoNES_Mapper_015.cpp"

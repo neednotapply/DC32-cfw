@@ -34,6 +34,8 @@ enum ScreenSaver {
 	ScreenSaverSpyro,
 	ScreenSaverGif,
 	ScreenSaverImageFolder,
+	ScreenSaverDvdBounce,
+	ScreenSaverScrollPattern,
 	ScreenSaverNumModes,
 };
 
@@ -80,7 +82,7 @@ struct Settings {
 	uint8_t upscale		:	1;
 	uint8_t rotation	:	1;
 	uint8_t brightness	:	5;
-	uint8_t ledsEnabled	:	1;	//legacy v6 migration field
+	uint8_t bootMenuCustomGif	:	1;	//legacy v6 migration field; custom boot GIF after v26
 
 	uint8_t ledRed;
 	uint8_t ledGreen;
@@ -111,7 +113,7 @@ struct Settings {
 	uint8_t tetrisMode : 2;
 	uint8_t tetrisRule : 2;
 	uint8_t portSettingsInitialized : 1;
-	uint8_t emulatorReserved : 1;
+	uint8_t themeEnabled : 1;
 	uint8_t powerSaveEnabled;
 	uint8_t powerSaveBrightness;
 	uint8_t powerSaveTimeout;

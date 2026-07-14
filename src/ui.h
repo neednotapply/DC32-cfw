@@ -97,6 +97,7 @@ bool uiReadTouchRaw(struct UiTouchSample *sampleP);
 void uiPowerSetActiveBrightness(uint_fast8_t brightness);
 void uiPowerApplySettings(const struct Settings *settings);
 bool uiRunScreensaverMedia(uint8_t saver);
+bool uiRunScreensaverImageEffect(uint8_t saver);
 bool uiPowerScreenSaverWoke(void);
 bool uiPowerConsumeScreenSaverWake(void);
 void uiPowerSetIdleInhibited(bool inhibited);

@@ -273,7 +273,7 @@ set_source_files_properties(
     ${SRC_DIR}/imageViewer.c
     ${SRC_DIR}/raster.c
     ${SRC_DIR}/dcAppDraw.c
-    ${SRC_DIR}/apps/picoware_ports.c
+    ${SRC_DIR}/apps/demos.c
     ${SRC_DIR}/apps/tetris/tetris_core.c
     ${SRC_DIR}/apps/tetris/tetris_rules.c
     ${SRC_DIR}/apps/tetris/tetris_port.c
@@ -605,9 +605,9 @@ target_compile_definitions(dcapp_lasertag PRIVATE
     LT_PROVISIONED_DEVICE_ID=${DC32_LASERTAG_DEVICE_ID}
 )
 
-set(PICOWARE_APP_SOURCES
-    ${SRC_DIR}/apps/picoware_app.c
-    ${SRC_DIR}/apps/picoware_ports.c
+set(DEMOS_APP_SOURCES
+    ${SRC_DIR}/apps/demos_app.c
+    ${SRC_DIR}/apps/demos.c
 )
 
 set(PONG_APP_SOURCES
@@ -1581,13 +1581,21 @@ target_compile_options(dcapp_soccer PRIVATE
 )
 
 add_dcapp(dcapp_starfield starfield 220
-    ${PICOWARE_APP_SOURCES}
+    ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_spiro spiro 221
-    ${PICOWARE_APP_SOURCES}
+    ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_cube cube 222
-    ${PICOWARE_APP_SOURCES}
+    ${DEMOS_APP_SOURCES}
+)
+
+add_dcapp(dcapp_dvd_bounce dvd-bounce 223
+    ${DEMOS_APP_SOURCES}
+)
+
+add_dcapp(dcapp_scroll_pattern scroll-pattern 224
+    ${DEMOS_APP_SOURCES}
 )

@@ -1,4 +1,4 @@
-#include "apps/picoware_app.h"
+#include "apps/demos_app.h"
 
 #ifndef DCAPP_RUNTIME_ID
 #error "DCAPP_RUNTIME_ID must be provided by the app target"
@@ -16,7 +16,7 @@ const struct DcAppImageHeader dcAppImageHeader __attribute__((section(".dcapp_he
 
 int dcAppEntry(const struct DcAppHostApi *host, const struct DcAppRunArgs *args)
 {
-	return picowareAppRun(host, args);
+	return demosAppRun(host, args);
 }
 
 void dcAppAbort(void)

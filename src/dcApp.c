@@ -43,7 +43,7 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdGameGb, "Game Boy", "/APPS/gb.DC32", false},
 	{DcAppIdGameNes, "NES", "/APPS/nes.DC32", false},
 	{DcAppIdGameArduboy, "Arduboy", "/APPS/arduboy.DC32", false},
-	{DcAppIdToolIr, "Universal IR", "/APPS/ir.DC32", false},
+	{DcAppIdToolIr, "Universal Remote", "/APPS/ir.DC32", false},
 	{DcAppIdToolImage, "Image Viewer", "/APPS/image.DC32", false},
 	{DcAppIdToolMusic, "Music", "/APPS/music.DC32", false},
 	{DcAppIdToolBadUsb, "BadUSB", "/APPS/badusb.DC32", false},
@@ -67,6 +67,8 @@ static const struct DcAppCatalogEntry mDcAppCatalog[] = {
 	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
 	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
 	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
+	{DcAppIdDvdBounce, "DVD Bounce", "/APPS/dvd-bounce.DC32", true},
+	{DcAppIdScrollPattern, "Scrolling Pattern", "/APPS/scroll-pattern.DC32", true},
 };
 
 static void *dcAppPrvDisplayFb(void)
@@ -91,6 +93,7 @@ static const struct DcAppHostApi mHostApi = {
 	.ledsTick = badgeLedsTick,
 	.portMenu = uiPortMenu,
 	.setFnSettings = uiSetFnSettings,
+	.runScreenSaverImageEffect = uiRunScreensaverImageEffect,
 };
 
 static uint32_t dcAppPrvAlignUp(uint32_t val, uint32_t align)

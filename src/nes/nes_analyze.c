@@ -47,7 +47,7 @@ bool nesAnalyzeRom(const void *rom, uint32_t size, struct NesRomInfo *info)
 		return false;
 
 	mapper = (uint8_t)((bytes[6] >> 4) | (bytes[7] & 0xf0));
-	if (mapper != 0 && mapper != 1 && mapper != 2 && mapper != 3 && mapper != 4 && mapper != 7)
+	if (mapper != 0 && mapper != 1 && mapper != 2 && mapper != 3 && mapper != 4 && mapper != 7 && mapper != 10)
 		return false;
 
 	if (info) {

@@ -27,6 +27,8 @@ def main() -> None:
     core = (ROOT / "src/nes/InfoNES.cpp").read_text(encoding="utf-8")
     rw = (ROOT / "src/nes/K6502_rw.h").read_text(encoding="utf-8")
     port = (ROOT / "src/nes/nes_port.cpp").read_text(encoding="utf-8")
+    mapper = (ROOT / "src/nes/InfoNES_Mapper.cpp").read_text(encoding="utf-8")
+    analyzer = (ROOT / "src/nes/nes_analyze.c").read_text(encoding="utf-8")
     app = (ROOT / "src/apps/nes_app.c").read_text(encoding="utf-8")
     pico = (ROOT / "src/pico.h").read_text(encoding="utf-8")
 
@@ -44,6 +46,10 @@ def main() -> None:
     require(port, "NES_SAVE_RAM_SIZE + NES_DISP_WIDTH * NES_SAFE_HEIGHT", "SRAM layout assertion")
     require(port, "p95=%u", "95th-percentile profiler output")
     require(port, "if (mLedsTick)", "LED animation service")
+    require(mapper, "{10, Map10_Init}", "MMC4 mapper registration")
+    require(mapper, '"mapper/InfoNES_Mapper_010.cpp"', "MMC4 mapper implementation")
+    require(analyzer, "mapper != 10", "MMC4 ROM acceptance")
+    require(core, "InfoNES_Mmc4PatternFetch", "MMC4 tile-fetch latch handling")
     require(app, "host ? host->ledsTick : 0", "host LED callback wiring")
     require(pico, 'section(".fastcode.', "SRAM code section")
 

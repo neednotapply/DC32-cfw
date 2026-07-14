@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define DCAPP_MAGIC             0x50414344u
-#define DCAPP_ABI_VERSION       7u
+#define DCAPP_ABI_VERSION       8u
 #define DCAPP_HEADER_SIZE       256u
 #define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
 #define DCAPP_CONTRACT_MAGIC    0x43444332u
@@ -48,6 +48,8 @@ enum DcAppId {
 	DcAppIdStarfield = 220,
 	DcAppIdSpiro = 221,
 	DcAppIdCube = 222,
+	DcAppIdDvdBounce = 223,
+	DcAppIdScrollPattern = 224,
 };
 
 enum DcAppToolAction {
@@ -118,6 +120,7 @@ struct DcAppHostApi {
 	void (*ledsTick)(void);
 	bool (*portMenu)(struct Canvas *activeCanvas);
 	void (*setFnSettings)(const struct UiFnSettings *settings, void *context);
+	bool (*runScreenSaverImageEffect)(uint8_t saver);
 };
 
 typedef int (*DcAppEntryF)(const struct DcAppHostApi *host, const struct DcAppRunArgs *args);

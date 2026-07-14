@@ -341,6 +341,11 @@ static void uiPrvRunScreenSaver(void)
 				break;
 			mUiScreenSaver = ScreenSaverStarfield;
 		}
+		if (mUiScreenSaver == ScreenSaverDvdBounce || mUiScreenSaver == ScreenSaverScrollPattern) {
+			if (uiRunScreensaverImageEffect(mUiScreenSaver))
+				break;
+			mUiScreenSaver = ScreenSaverStarfield;
+		}
 		if (mUiScreenSaver == ScreenSaverStarfield) {
 			for (uint32_t i = 0; i < 64u; i++) {
 				int32_t x, y;

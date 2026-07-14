@@ -22,6 +22,7 @@ enum ImageViewerResult {
 
 bool imageViewerFileName(const char *name);
 enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *initialLocator, const char *initialName);
+enum ImageViewerResult imageViewerRunBoot(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *initialLocator, const char *initialName);
 enum ImageViewerResult imageViewerRunStill(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath, const struct FatFileLocator *initialLocator, const char *initialName);
 
 #endif

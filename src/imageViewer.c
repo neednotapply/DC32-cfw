@@ -99,6 +99,7 @@ typedef char ImageDcaRectSizeCheck[(sizeof(struct ImageDcaRect) == 16u) ? 1 : -1
 
 static bool mImageFastSdDisabled;
 static bool mImageAutoAdvance;
+static uint64_t mImagePlaybackDeadline;
 
 static bool imagePrvEndsWithNoCase(const char *str, const char *suffix)
 {
@@ -769,7 +770,12 @@ static enum ImageViewerResult imagePrvRunDcaLoaded(struct Canvas *cnv, const uin
 	while (1) {
 		enum ImageViewerResult ret = ImageViewerResultBack;
 
+		if (mImagePlaybackDeadline && getTime() >= mImagePlaybackDeadline)
+			return ImageViewerResultNext;
+
 		while (paused || getTime() < nextAt) {
+			if (mImagePlaybackDeadline && getTime() >= mImagePlaybackDeadline)
+				return ImageViewerResultNext;
 			if (imagePrvDcaHandleKeys(&prevKeys, &paused, &ret))
 				return ret;
 			if (paused)
@@ -865,6 +871,19 @@ enum ImageViewerResult imageViewerRun(struct Canvas *cnv, struct FatfsVol *vol, 
 	if (imagePrvEndsWithNoCase(initialName, ".jpg") || imagePrvEndsWithNoCase(initialName, ".jpeg"))
 		return imagePrvRunJpeg(cnv, vol, initialLocator);
 	return ImageViewerResultUnsupported;
+}
+
+enum ImageViewerResult imageViewerRunBoot(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath,
+	const struct FatFileLocator *initialLocator, const char *initialName)
+{
+	enum ImageViewerResult result;
+
+	mImageAutoAdvance = true;
+	mImagePlaybackDeadline = getTime() + TICKS_PER_SECOND * 2u;
+	result = imageViewerRun(cnv, vol, rootPath, initialLocator, initialName);
+	mImagePlaybackDeadline = 0;
+	mImageAutoAdvance = false;
+	return result;
 }
 
 enum ImageViewerResult imageViewerRunStill(struct Canvas *cnv, struct FatfsVol *vol, const char *rootPath,

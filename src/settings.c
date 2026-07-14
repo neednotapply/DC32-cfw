@@ -7,7 +7,7 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			24
+#define SETTINGS_CUR_VER			26
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
@@ -29,6 +29,9 @@ union SettingsPage {
 	};
 	uint8_t space[QSPI_WRITE_GRANULARITY];
 };
+
+typedef char SettingsPageSizeCheck[
+	(sizeof(union SettingsPage) == QSPI_WRITE_GRANULARITY) ? 1 : -1];
 
 
 static const union SettingsPage* settingsPrvFirstPage(void)
@@ -117,6 +120,8 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->screenSaverBrightness = 1u;
 	settings->screenSaverGifPath[sizeof(settings->screenSaverGifPath) - 1] = 0;
 	settings->screenSaverImageFolder[sizeof(settings->screenSaverImageFolder) - 1] = 0;
+	settings->bootMenuCustomGif = !!settings->bootMenuCustomGif;
+	settings->themeEnabled = !!settings->themeEnabled;
 	settings->fileBrowserStartFavorites = !!settings->fileBrowserStartFavorites;
 	if (settings->pongColorTheme >= 3u)
 		settings->pongColorTheme = 0;
@@ -165,14 +170,14 @@ void settingsGet(struct Settings *settings)
 			//fallthrough
 
 		case 5:				//upgrade from v5
-			settings->ledsEnabled = false;
+			settings->bootMenuCustomGif = false;
 			settings->ledRed = 56;
 			settings->ledGreen = 56;
 			settings->ledBlue = 56;
 			//fallthrough
 
 		case 6:				//upgrade from v6
-			settings->ledMode = settings->ledsEnabled ? LedModeSolid : LedModeOff;
+			settings->ledMode = settings->bootMenuCustomGif ? LedModeSolid : LedModeOff;
 			settings->ledSpeed = 2;
 			//fallthrough
 
@@ -277,6 +282,12 @@ void settingsGet(struct Settings *settings)
 			settings->tetrisMode = 0;
 			settings->tetrisRule = 0;
 			settings->portSettingsInitialized = false;
+			//fallthrough
+
+		case 24:
+		case 25:			//add shared theme and boot-menu choices without growing the settings page
+			settings->themeEnabled = false;
+			settings->bootMenuCustomGif = false;
 			//fallthrough
 
 		//other cases here, in increasing order

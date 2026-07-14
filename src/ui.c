@@ -12034,6 +12034,7 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 		{"Autoclicker", UiCategoryEntryTool, UiToolAutoclicker, 0},
 		{"USB Gamepad", UiCategoryEntryTool, UiToolGamepad, 0},
 		{"RaspyJack Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolRaspyJack},
+		{"Flipper Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolFlipper},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries), runGameF, userData);

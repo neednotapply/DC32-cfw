@@ -32,6 +32,7 @@ enum DcAppId {
 	DcAppIdToolGamepad = 105,
 	DcAppIdToolLaserTag = 106,
 	DcAppIdToolRaspyJack = 107,
+	DcAppIdToolFlipper = 108,
 	DcAppIdPong = 200,
 	DcAppIdTetris = 201,
 	DcAppIdArkanoid = 202,

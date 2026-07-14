@@ -15,6 +15,7 @@ SECTIONS
 
         .text : {
                 *(.text) *(.text.*)
+                *(.time_critical) *(.time_critical.*)
                 *(.rodata) *(.rodata.*)
                 . = ALIGN(4);
         } > approm

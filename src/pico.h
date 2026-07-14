@@ -12,6 +12,9 @@ typedef  unsigned int uint;
 	#define static_assert _Static_assert
 #endif
 
+#ifdef FLIPPER_TINYUSB_HOST
+#include "inc_RP2350/pico/platform.h"
+#else
 #ifndef __not_in_flash_func
 	#ifdef NES_FASTCODE_ENABLED
 		#define __not_in_flash_func(fn) __attribute__((section(".fastcode." #fn))) fn
@@ -45,6 +48,7 @@ typedef  unsigned int uint;
 #endif
 #ifndef remove_volatile_cast
 	#define remove_volatile_cast(type, value) ((type)(uintptr_t)(value))
+#endif
 #endif
 
 void __attribute__((noreturn)) panic(const char *fmt, ...);

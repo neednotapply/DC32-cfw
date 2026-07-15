@@ -13,7 +13,6 @@ from pathlib import Path
 
 
 DCAPP_MAGIC = 0x50414344
-DCAPP_ABI_VERSION = 7
 DCAPP_HEADER_SIZE = 256
 DCAPP_CONTRACT_MAGIC = 0x43444332
 DCAPP_CONTRACT_HASH_WORDS = 4
@@ -40,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--elf", required=True, type=Path)
     parser.add_argument("--raw", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--abi-version", required=True, type=parse_int)
     parser.add_argument("--runtime-id", required=True, type=parse_int)
     parser.add_argument("--flags", type=parse_int, default=0)
     parser.add_argument("--load-addr", required=True, type=parse_int)
@@ -122,7 +122,7 @@ def main() -> int:
         "<IHH" + "I" * 14 + "32sI" + "I" * 39,
         DCAPP_MAGIC,
         DCAPP_HEADER_SIZE,
-        DCAPP_ABI_VERSION,
+        args.abi_version,
         args.runtime_id,
         args.flags,
         args.load_addr,

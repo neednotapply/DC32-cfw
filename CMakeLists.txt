@@ -57,6 +57,12 @@ set(DCAPP_RAM_START 0x2005F000)
 set(DCAPP_RAM_SIZE 0x00014000)
 
 set(DCAPP_BUILD_CONTRACT "${CMAKE_CURRENT_BINARY_DIR}/dcapp_build_contract.h")
+file(STRINGS "${SRC_DIR}/dcApp.h" DCAPP_ABI_VERSION_DEFINE
+    REGEX "^#define[ \t]+DCAPP_ABI_VERSION[ \t]+[0-9]+u?")
+string(REGEX MATCH "[0-9]+" DCAPP_ABI_VERSION "${DCAPP_ABI_VERSION_DEFINE}")
+if(NOT DCAPP_ABI_VERSION)
+    message(FATAL_ERROR "Could not determine DCAPP_ABI_VERSION from src/dcApp.h")
+endif()
 
 file(GLOB_RECURSE DCAPP_BUILD_CONTRACT_INPUTS CONFIGURE_DEPENDS
     "${SRC_DIR}/*.c"
@@ -498,6 +504,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
             --elf $<TARGET_FILE:${TARGET_NAME}>
             --raw ${RAW_FILE}
             --output ${DCAPP_FILE}
+            --abi-version ${DCAPP_ABI_VERSION}
             --runtime-id ${RUNTIME_ID}
             --load-addr ${DCAPP_TARGET_LOAD_ADDR}
             --flags ${DCAPP_TARGET_FLAGS}

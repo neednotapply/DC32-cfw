@@ -1488,6 +1488,7 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 		int32_t imageY = ((int32_t)DISP_HEIGHT - UI_SAVER_IMAGE_HEIGHT) / 2;
 		int32_t imageDx = 2, imageDy = 2;
 		uint32_t frame = 0;
+		bool scanoutPaused = false;
 		bool result = false;
 
 		if ((saver != ScreenSaverDvdBounce && saver != ScreenSaverScrollPattern) || !fb)
@@ -1535,7 +1536,15 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 				image[y * UI_SAVER_IMAGE_WIDTH + x] = fb[srcY * DISP_WIDTH + srcX];
 			}
 		}
+		if (saver == ScreenSaverScrollPattern)
+			dispPrvFrameCtrReset();
 		while (!uiGetUiKeysRaw()) {
+			if (saver == ScreenSaverScrollPattern) {
+				dispPrvFrameCtrWait();
+				if (!dispPauseScanout())
+					break;
+				scanoutPaused = true;
+			}
 			if (saver == ScreenSaverDvdBounce) {
 				memset(fb, 0, DISP_WIDTH * DISP_HEIGHT * sizeof(*fb));
 				for (uint32_t y = 0; y < UI_SAVER_IMAGE_HEIGHT; y++)
@@ -1553,22 +1562,44 @@ static bool uiAlert(struct Canvas *cnv, const char *msg, enum DialogType dialogT
 				}
 			}
 			else {
-				uint32_t scrollX = (frame * 2u) % UI_SAVER_IMAGE_WIDTH;
-				uint32_t scrollY = frame % UI_SAVER_IMAGE_HEIGHT;
+				/* A true brick grid: odd rows begin half an image-width before even rows. */
+				int32_t scrollX = (int32_t)((frame * 2u) % UI_SAVER_IMAGE_WIDTH);
+				int32_t scrollY = (int32_t)(frame % (UI_SAVER_IMAGE_HEIGHT * 2u));
+				int32_t tileY = -(scrollY % UI_SAVER_IMAGE_HEIGHT);
+				uint32_t tileRow = (uint32_t)scrollY / UI_SAVER_IMAGE_HEIGHT;
 
-				for (uint32_t y = 0; y < DISP_HEIGHT; y++) {
-					const uint16_t *src = image + ((y + scrollY) % UI_SAVER_IMAGE_HEIGHT) * UI_SAVER_IMAGE_WIDTH;
-					uint16_t *dst = fb + y * DISP_WIDTH;
+				for (; tileY < DISP_HEIGHT; tileY += UI_SAVER_IMAGE_HEIGHT, tileRow++) {
+					int32_t tileX = -scrollX - ((tileRow & 1u) ? (int32_t)(UI_SAVER_IMAGE_WIDTH / 2u) : 0);
+					int32_t top = tileY < 0 ? 0 : tileY;
+					int32_t bottom = tileY + UI_SAVER_IMAGE_HEIGHT > DISP_HEIGHT ? DISP_HEIGHT : tileY + UI_SAVER_IMAGE_HEIGHT;
 
-					for (uint32_t x = 0; x < DISP_WIDTH; x++)
-						dst[x] = src[(x + scrollX) % UI_SAVER_IMAGE_WIDTH];
+					while (tileX + UI_SAVER_IMAGE_WIDTH <= 0)
+						tileX += UI_SAVER_IMAGE_WIDTH;
+					for (; tileX < DISP_WIDTH; tileX += UI_SAVER_IMAGE_WIDTH) {
+						int32_t left = tileX < 0 ? 0 : tileX;
+						int32_t right = tileX + UI_SAVER_IMAGE_WIDTH > DISP_WIDTH ? DISP_WIDTH : tileX + UI_SAVER_IMAGE_WIDTH;
+
+						for (int32_t y = top; y < bottom; y++)
+							memcpy(fb + y * DISP_WIDTH + left,
+								image + (y - tileY) * UI_SAVER_IMAGE_WIDTH + left - tileX,
+								(uint32_t)(right - left) * sizeof(*image));
+					}
 				}
 			}
-			dispPrvWaitForScanoutStart();
+			if (scanoutPaused) {
+				if (!dispResumeScanout())
+					break;
+				scanoutPaused = false;
+			}
+			else
+				dispPrvWaitForScanoutStart();
 			badgeLedsTick();
-			timebaseIdleWaitMsec(33u);
+			if (saver != ScreenSaverScrollPattern)
+				timebaseIdleWaitMsec(33u);
 			frame++;
 		}
+		if (scanoutPaused)
+			(void)dispResumeScanout();
 		result = true;
 		toolWorkspaceRelease(ToolWorkspaceWram, ToolWorkspaceOwnerImage);
 

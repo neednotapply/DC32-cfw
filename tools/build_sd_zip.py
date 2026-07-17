@@ -133,6 +133,8 @@ APP_DATA_FILES = {
     "APPS/LICENSES/openlasir-LICENSE.txt": OPENLASIR_LICENSE,
     "APPS/LICENSES/qrcodegen-LICENSE.txt": QRCODEGEN_LICENSE,
 }
+ICON_ASSET_DIR = REPO_ROOT / "assets" / "icons"
+EMOJI_SOURCE_URL = "https://unicode.org/emoji/charts/full-emoji-list.html"
 
 SKIP_DIRS = {".git", ".github", "__pycache__"}
 SKIP_SUFFIXES = {".pyc", ".tmp"}
@@ -232,6 +234,12 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "release": DOOM_RELEASE,
                 "paths": ["doom1.whx"],
                 "sd_path": "APPS/",
+            },
+            "icons": {
+                "source": EMOJI_SOURCE_URL,
+                "unicode_emoji_version": "17.0",
+                "sd_path": "ICONS/",
+                "notes": "Committed Chrome Browser-representation captures, converted to DCEI RGBA8888 at 32, 48, and 64 px."
             },
             "tetris": {
                 "repository": NULLPOMINO_REPO,
@@ -785,8 +793,14 @@ def collect_app_hashes(apps_dir: Path) -> dict[str, str]:
     missing_data = [name for name, src in APP_DATA_FILES.items() if not src.is_file()]
     if missing_data:
         raise FileNotFoundError(f"Missing app data files: {', '.join(missing_data)}")
+
+    if not (ICON_ASSET_DIR / "manifest.json").is_file():
+        raise FileNotFoundError(f"Missing icon manifest: {ICON_ASSET_DIR / 'manifest.json'}")
     hashes = {name: sha256_file(apps_dir / name) for name in APP_BINARIES}
     hashes.update({name: sha256_file(src) for name, src in APP_DATA_FILES.items()})
+    for src in sorted(ICON_ASSET_DIR.rglob("*")):
+        if src.is_file():
+            hashes[f"ICONS/{src.relative_to(ICON_ASSET_DIR).as_posix()}"] = sha256_file(src)
     return hashes
 
 
@@ -801,6 +815,7 @@ def copy_app_binaries(apps_dir: Path, stage: Path) -> dict[str, str]:
         target = stage / sd_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target)
+    shutil.copytree(ICON_ASSET_DIR, stage / "ICONS", dirs_exist_ok=True)
     write_ports_readme(dst)
     return hashes
 
@@ -908,7 +923,7 @@ their upstream projects.
 
 
 def write_app_sources(stage: Path, app_hashes: dict[str, str]) -> None:
-    app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in (*APP_BINARIES, *APP_DATA_FILES))
+    app_lines = "\n".join(f"- {name}: `{app_hashes[name]}`" for name in app_hashes)
     nullpomino_license = NULLPOMINO_LICENSE.read_text(encoding="utf-8").rstrip()
     nullpomino_engine_license = NULLPOMINO_ENGINE_LICENSE.read_text(encoding="utf-8").rstrip()
     text = f"""# SD-apps.zip Sources
@@ -933,6 +948,13 @@ shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
 - SD path: APPS/
 - Files:
 {app_lines}
+
+## ICONS
+
+- SD path: ICONS/
+- Source: {EMOJI_SOURCE_URL} (Unicode Emoji 17.0 Full Emoji List, Browser representation)
+- Format: DCEI version 1, 16-byte header followed by RGBA8888 pixels.
+- Variants: every approved emoji is supplied at 32, 48, and 64 px.  The common loader uses 64 px.
 
 ## DOOM
 

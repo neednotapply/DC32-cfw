@@ -144,6 +144,7 @@ void doomDc32Status(const char *title, const char *detail, uint32_t done, uint32
 	struct Canvas *cnv = doomDc32CanvasValid ? &doomDc32Canvas : NULL;
 	const struct DcAppLoadingState loading = {
 		.appName = "DOOM",
+		.iconId = "1f479",
 		.title = title,
 		.detail = detail,
 		.done = done,

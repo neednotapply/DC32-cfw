@@ -133,6 +133,8 @@ struct DcAppCatalogEntry {
 	const char *name;
 	const char *path;
 	bool launcherVisible;
+	/* Directory name below /ICONS for the catalogued Unicode emoji. */
+	const char *iconId;
 };
 
 enum DcAppResult {

@@ -201,6 +201,8 @@ static void ojDrawLoading(bool force)
 		ojCopyLoadingText(detail, sizeof(detail),
 			gOjLoadingAsset[0] ? gOjLoadingAsset : "Please wait");
 	loading.appName = "OpenJazz";
+	loading.iconId = "1f430";
+	loading.iconVol = gOjLoadingArgs ? gOjLoadingArgs->vol : NULL;
 	loading.title = gOjLoadingStage[0] ? gOjLoadingStage : "Starting";
 	loading.detail = detail;
 	loading.done = gOjLoadingByteTotal ? gOjLoadingBytes : 0u;
@@ -337,6 +339,8 @@ static bool ojProgress(const struct DcAppHostApi *host, const struct DcAppRunArg
 	struct Canvas cnv = ojCanvas(host, args);
 	const struct DcAppLoadingState loading = {
 		.appName = "OpenJazz",
+		.iconId = "1f430",
+		.iconVol = args ? args->vol : NULL,
 		.title = "Installing game data",
 		.detail = name ? name : "Reading JAZZ.ZIP",
 		.hint = "FN cancels",

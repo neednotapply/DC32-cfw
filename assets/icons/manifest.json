@@ -1,0 +1,921 @@
+{
+  "schema": 1,
+  "format": {
+    "magic": "DCEI",
+    "version": 1,
+    "header_bytes": 16,
+    "pixels": "RGBA8888, row-major"
+  },
+  "source": {
+    "unicode_emoji_version": "17.0",
+    "url": "https://unicode.org/emoji/charts/full-emoji-list.html",
+    "representation": "Browser",
+    "renderer": "Google Chrome headless native emoji rendering",
+    "font_stack": "Segoe UI Emoji, Noto Color Emoji, sans-serif"
+  },
+  "catalog": [
+    {
+      "app": "Game Boy",
+      "icon_id": "1f3ae",
+      "emoji": "🎮"
+    },
+    {
+      "app": "NES",
+      "icon_id": "1f579-fe0f",
+      "emoji": "🕹️"
+    },
+    {
+      "app": "Arduboy",
+      "icon_id": "1f4df",
+      "emoji": "📟"
+    },
+    {
+      "app": "Universal Remote",
+      "icon_id": "1f4fa",
+      "emoji": "📺"
+    },
+    {
+      "app": "Image Viewer",
+      "icon_id": "1f5bc-fe0f",
+      "emoji": "🖼️"
+    },
+    {
+      "app": "Music",
+      "icon_id": "1f3b5",
+      "emoji": "🎵"
+    },
+    {
+      "app": "BadUSB",
+      "icon_id": "1f50c",
+      "emoji": "🔌"
+    },
+    {
+      "app": "Autoclicker",
+      "icon_id": "1f5b1-fe0f",
+      "emoji": "🖱️"
+    },
+    {
+      "app": "USB Gamepad",
+      "icon_id": "1f3ae",
+      "emoji": "🎮"
+    },
+    {
+      "app": "Laser Tag",
+      "icon_id": "1f3af",
+      "emoji": "🎯"
+    },
+    {
+      "app": "RaspyJack Remote",
+      "icon_id": "1f967",
+      "emoji": "🥧"
+    },
+    {
+      "app": "Pwnagotchi Remote",
+      "icon_id": "1f431",
+      "emoji": "🐱"
+    },
+    {
+      "app": "Pong",
+      "icon_id": "1f3d3",
+      "emoji": "🏓"
+    },
+    {
+      "app": "Tetris",
+      "icon_id": "1f9f1",
+      "emoji": "🧱"
+    },
+    {
+      "app": "Arkanoid",
+      "icon_id": "1f9f1",
+      "emoji": "🧱"
+    },
+    {
+      "app": "Flappy Bird",
+      "icon_id": "1f426",
+      "emoji": "🐦"
+    },
+    {
+      "app": "T-Rex Runner",
+      "icon_id": "1f996",
+      "emoji": "🦖"
+    },
+    {
+      "app": "DOOM",
+      "icon_id": "1f479",
+      "emoji": "👹"
+    },
+    {
+      "app": "Chip's Challenge",
+      "icon_id": "1f48e",
+      "emoji": "💎"
+    },
+    {
+      "app": "Scorched Earth",
+      "icon_id": "1f4a3",
+      "emoji": "💣"
+    },
+    {
+      "app": "Pipe Dream",
+      "icon_id": "1f527",
+      "emoji": "🔧"
+    },
+    {
+      "app": "Sokoban",
+      "icon_id": "1f4e6",
+      "emoji": "📦"
+    },
+    {
+      "app": "OpenJazz",
+      "icon_id": "1f430",
+      "emoji": "🐰"
+    },
+    {
+      "app": "Sensible Soccer",
+      "icon_id": "26bd",
+      "emoji": "⚽"
+    },
+    {
+      "app": "Starfield",
+      "icon_id": "1f31f",
+      "emoji": "🌟"
+    },
+    {
+      "app": "Spiro",
+      "icon_id": "1f300",
+      "emoji": "🌀"
+    },
+    {
+      "app": "Cube",
+      "icon_id": "1f9ca",
+      "emoji": "🧊"
+    },
+    {
+      "app": "DVD Bounce",
+      "icon_id": "1f4c0",
+      "emoji": "📀"
+    },
+    {
+      "app": "Scrolling Pattern",
+      "icon_id": "1f504",
+      "emoji": "🔄"
+    }
+  ],
+  "icons": {
+    "1f3ae": {
+      "emoji": "🎮",
+      "sequence": "U+1F3AE",
+      "browser_capture": "assets/emoji-browser/1f3ae.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f3ae/32.dcei",
+          "sha256": "8848cbe9aeeaa64c3e17dbcdf8c52cec62ba24e4db3ddeabfc039cafa560f995",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f3ae/48.dcei",
+          "sha256": "5d0b6eaf4a7c5ca8ebc2db91ee881a2676484562ff1dc039885694c65bf66c36",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f3ae/64.dcei",
+          "sha256": "b24c438e53624127357bea779374533e36e925a1e68ecccd23fe4e580787fe24",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f579-fe0f": {
+      "emoji": "🕹️",
+      "sequence": "U+1F579 U+FE0F",
+      "browser_capture": "assets/emoji-browser/1f579-fe0f.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f579-fe0f/32.dcei",
+          "sha256": "e12dca2f9be2ecaf0dbed738390d4e8789217d5e2897e3a3cb29da63965f684c",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f579-fe0f/48.dcei",
+          "sha256": "fadf27625ee691414a8c9a27c8c480133f851d9d2d5087da43b31d616d29de14",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f579-fe0f/64.dcei",
+          "sha256": "97ac2c91d2f8f365238a523f939bfb2ddfe52d7dfa10c542adbf07c60b7775f5",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f4df": {
+      "emoji": "📟",
+      "sequence": "U+1F4DF",
+      "browser_capture": "assets/emoji-browser/1f4df.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f4df/32.dcei",
+          "sha256": "172eaea6dced660c6f2bd9e3ba0d44f424890ee8acd515ff11d5f0c53471ec30",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f4df/48.dcei",
+          "sha256": "98daa881ecd234a0aefe3f9075e2fa91e3a33797ff79e606343a3f23915d8bce",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f4df/64.dcei",
+          "sha256": "651feb25e1689b4c6eacaf643e5c7a502cbe9f49ea1a1a46ad7ee9ab86b99a37",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f4fa": {
+      "emoji": "📺",
+      "sequence": "U+1F4FA",
+      "browser_capture": "assets/emoji-browser/1f4fa.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f4fa/32.dcei",
+          "sha256": "2182eb883a28016c84aa4900c8aebf96fb9549a3b0ab24917a5f7378cedae12b",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f4fa/48.dcei",
+          "sha256": "c1932b678940d296e5e9c3166c34bb6a0825edddc660da076eea4bc9d2dc63b5",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f4fa/64.dcei",
+          "sha256": "864a26c96d291f2e4253325252ed2ed8d1a18e05b240c4bde214dfde2f7793d9",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f5bc-fe0f": {
+      "emoji": "🖼️",
+      "sequence": "U+1F5BC U+FE0F",
+      "browser_capture": "assets/emoji-browser/1f5bc-fe0f.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f5bc-fe0f/32.dcei",
+          "sha256": "3e66dd31abe4ef06212d938ff07d38f18b13d292d4bbc991e445098356c3af0a",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f5bc-fe0f/48.dcei",
+          "sha256": "b81eda836e9bb24e596b816e335fd428aa4ddcb4f30253c72681ccb6f755aaea",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f5bc-fe0f/64.dcei",
+          "sha256": "06bd19dc8ee00af632ebfcab0331e4d71e2594d25c48de90c8ab2990c726e839",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f3b5": {
+      "emoji": "🎵",
+      "sequence": "U+1F3B5",
+      "browser_capture": "assets/emoji-browser/1f3b5.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f3b5/32.dcei",
+          "sha256": "2d2e83c575a61e8bf22e069a39507be397337a998b02de6d2913b0849af0d454",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f3b5/48.dcei",
+          "sha256": "e5e85c266981bda65945015b99e3e8a2faed4982dc973b0bfdd115c8b00f2a28",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f3b5/64.dcei",
+          "sha256": "bbf36f25df74d7a4b124d79db42bdf0d710e12c5389f82b376c347d098c9662f",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f50c": {
+      "emoji": "🔌",
+      "sequence": "U+1F50C",
+      "browser_capture": "assets/emoji-browser/1f50c.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f50c/32.dcei",
+          "sha256": "6cfb82feb13e42cdaa7ef370819328e83a3d8c9249a342b41c8fa190825ec4d7",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f50c/48.dcei",
+          "sha256": "638a4253f00bbe1d9845ae97ba6b662747d97449d61e91ae504be8196db09d1e",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f50c/64.dcei",
+          "sha256": "5aa9a9011caa85178d3721901deed136d794f88a4d50866e777ff7d463c8c70a",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f5b1-fe0f": {
+      "emoji": "🖱️",
+      "sequence": "U+1F5B1 U+FE0F",
+      "browser_capture": "assets/emoji-browser/1f5b1-fe0f.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f5b1-fe0f/32.dcei",
+          "sha256": "aed40a08be113060095a7af9b3d4d7b1ba6c654cc831b9d8ac66dec1880bdcab",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f5b1-fe0f/48.dcei",
+          "sha256": "53bee1462d5d7f572ca18a54a03c2cb468ddc1eea2bd42bd73a6ffafc3bfb4e5",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f5b1-fe0f/64.dcei",
+          "sha256": "5eca79755144bcaf20f5f2092536da355b0786b34b39fbeab4310ae5987c51c2",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f3af": {
+      "emoji": "🎯",
+      "sequence": "U+1F3AF",
+      "browser_capture": "assets/emoji-browser/1f3af.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f3af/32.dcei",
+          "sha256": "17965e95adce6547ba0aa5081698ed6adb3f56a77e606fb97468fdb40a189552",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f3af/48.dcei",
+          "sha256": "e16a1fe0faa520f3f3106a9c76277b97b893b7115f24bd4fece2c2803112348a",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f3af/64.dcei",
+          "sha256": "3529cd2304f585988e0e9e3a3e28ece715299d1febc52f391d66395329676222",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f967": {
+      "emoji": "🥧",
+      "sequence": "U+1F967",
+      "browser_capture": "assets/emoji-browser/1f967.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f967/32.dcei",
+          "sha256": "507b9b9351f9a595f4827db944befc0638f2418f6ed36e706a46ccef5a75677f",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f967/48.dcei",
+          "sha256": "c39defff5145995ff67aeae7ced440de2138f64ffac05cfa33808f203a46f6cb",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f967/64.dcei",
+          "sha256": "58988494c3f9b4904b9466dcd2e1cc900f84e980956615d64edcd4dd195345df",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f431": {
+      "emoji": "🐱",
+      "sequence": "U+1F431",
+      "browser_capture": "assets/emoji-browser/1f431.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f431/32.dcei",
+          "sha256": "b83ff9737900a39f52c6efc25fcf509ee3cc1989c8dc704395c4183d7be77d37",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f431/48.dcei",
+          "sha256": "737fbf443a8ecb9e23f960c9a18e66550374506681786b1c28cae33a6c8021f8",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f431/64.dcei",
+          "sha256": "14df7d9799e6a88c6392e8bfd834fab35cbc88bae97c5e51e3046b7107b4bb6e",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f3d3": {
+      "emoji": "🏓",
+      "sequence": "U+1F3D3",
+      "browser_capture": "assets/emoji-browser/1f3d3.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f3d3/32.dcei",
+          "sha256": "b9d41b0746d8e4ea332348ecbc5e793581a2df7ca44420ad5e441d1519a2b745",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f3d3/48.dcei",
+          "sha256": "6dd2d0529b37febd37449310aee6a01c798fdd1dfc8e8712019700f7da39ae3a",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f3d3/64.dcei",
+          "sha256": "2de492737b3e97d65965aa2e71cef6c84ece854fd87ba2a20700d4b80352de36",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f9f1": {
+      "emoji": "🧱",
+      "sequence": "U+1F9F1",
+      "browser_capture": "assets/emoji-browser/1f9f1.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f9f1/32.dcei",
+          "sha256": "17daa76dab356593d4ec7fb38015a51b43cbcd181ba5c2cf70874623c481ea89",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f9f1/48.dcei",
+          "sha256": "f05059126f1b3666b44b6ee33ee623680aa506aa0e2fa51443b87e50a83eed92",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f9f1/64.dcei",
+          "sha256": "497edc44cd7015951ef7192cffe40d800cdb7593be295bc62eaff429c17c0a81",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f426": {
+      "emoji": "🐦",
+      "sequence": "U+1F426",
+      "browser_capture": "assets/emoji-browser/1f426.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f426/32.dcei",
+          "sha256": "31faeaa62a15356c6ac6041c3b4bcd8b0acd70993d58de18babf46691eb85d37",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f426/48.dcei",
+          "sha256": "5765a61b3f5ccabadad91a85980ea5749a07e0737516c88fd431e9c152e6637f",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f426/64.dcei",
+          "sha256": "68f720f5ce3cbcb88ab0b0f0142fdcef8c871f251789f6d19efae20898454805",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f996": {
+      "emoji": "🦖",
+      "sequence": "U+1F996",
+      "browser_capture": "assets/emoji-browser/1f996.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f996/32.dcei",
+          "sha256": "22b62c9fd174235d097e5b00c93205a5d317e1a5c7de731e09173271986e1317",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f996/48.dcei",
+          "sha256": "8516e859136653de884e877bb5699012a6e79935d007b4eba0e0be2e0a035f09",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f996/64.dcei",
+          "sha256": "6284fdf977e790b5940278b1c21cd906f2498107f87f14e915fd77d78042afd3",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f479": {
+      "emoji": "👹",
+      "sequence": "U+1F479",
+      "browser_capture": "assets/emoji-browser/1f479.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f479/32.dcei",
+          "sha256": "5965723fadfd00aebbd876520d0667202e9fcff89c9bc8a1eca47a99d7f65a8d",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f479/48.dcei",
+          "sha256": "dd8df896f2e71fe5063c5c357b14e28989008e0334d0abc6b8ac1aea4cc42019",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f479/64.dcei",
+          "sha256": "3821f1863510691d25daf6ee7fcaa8fedf4b39e82f55e5b956ac8808fecd8760",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f48e": {
+      "emoji": "💎",
+      "sequence": "U+1F48E",
+      "browser_capture": "assets/emoji-browser/1f48e.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f48e/32.dcei",
+          "sha256": "ae6e2719c9397fae7c86323243a1f9cf8e42a70af716541d602df807aa7190cb",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f48e/48.dcei",
+          "sha256": "75447dfee76e384e558a691d5cfd4c3b210eb84772177f3b4b13b166a186714f",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f48e/64.dcei",
+          "sha256": "337116901750e0dca59f59fec77d200f0b609d4a8446b1d50dbf6719c3de4cfb",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f4a3": {
+      "emoji": "💣",
+      "sequence": "U+1F4A3",
+      "browser_capture": "assets/emoji-browser/1f4a3.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f4a3/32.dcei",
+          "sha256": "ca903aa315bc2db2c383bba2e4922f50067fcae6bafa77285259421733d4c4da",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f4a3/48.dcei",
+          "sha256": "cd1f13c180cc2c932ea0f12dd3e7af630fec60bd13a0a3544913f99f71cbfac6",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f4a3/64.dcei",
+          "sha256": "83d9cc857049752570bd024c954dfe73eae614b0e098d33437e1bf0028cbfcb2",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f527": {
+      "emoji": "🔧",
+      "sequence": "U+1F527",
+      "browser_capture": "assets/emoji-browser/1f527.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f527/32.dcei",
+          "sha256": "dd09cbab3f45b60ebc3a2ccb1abcfbbe2ae44c641e688cf66d93ffd99f202bcc",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f527/48.dcei",
+          "sha256": "e0944e75264bfe1b4522d52dd7244a2b7d22da49dd004c8d01318ed497b631c4",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f527/64.dcei",
+          "sha256": "fcc3e80b50dd67d68bb904bb7997411100901706e0c454a432cb1a218d818ab0",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f4e6": {
+      "emoji": "📦",
+      "sequence": "U+1F4E6",
+      "browser_capture": "assets/emoji-browser/1f4e6.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f4e6/32.dcei",
+          "sha256": "b5c62494f5bb44d5e13622238d157e290d54d07fb8e318a34462fd149ca2f254",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f4e6/48.dcei",
+          "sha256": "3fdacb8abf56b62fa67e3c8b0057520e30b44e3545ff39cada216314c2230122",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f4e6/64.dcei",
+          "sha256": "1f5d983936c0d885f9deca6a974102e91a3f938d792f890edfb141047785946f",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f430": {
+      "emoji": "🐰",
+      "sequence": "U+1F430",
+      "browser_capture": "assets/emoji-browser/1f430.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f430/32.dcei",
+          "sha256": "3cdd7523837151c36ce5e9bb2b0ed172317f45b37c856116950767484ffc18fd",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f430/48.dcei",
+          "sha256": "2549d896a8dccd7b98f2b54d4a931d2b0a13e996f4173f01d6b6c38c328765f8",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f430/64.dcei",
+          "sha256": "2b941a79833a8b5fa82bced5d9428b84ae0268207006cf424aba006d876d8a02",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "26bd": {
+      "emoji": "⚽",
+      "sequence": "U+26BD",
+      "browser_capture": "assets/emoji-browser/26bd.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/26bd/32.dcei",
+          "sha256": "1f8c75b0637abd76f57f6a8cdca1d14b5fa69af723ff2d336d2afe22de6dd6dc",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/26bd/48.dcei",
+          "sha256": "fb2237bcef3397679f8d4704a0e2bb8fc47252e09379bf10e9667a473c19c077",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/26bd/64.dcei",
+          "sha256": "e72cbf8fa5c66cc8a4054bb70cb65a39099437c1b6168a29830639f04ce8fb0d",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f31f": {
+      "emoji": "🌟",
+      "sequence": "U+1F31F",
+      "browser_capture": "assets/emoji-browser/1f31f.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f31f/32.dcei",
+          "sha256": "64ddffc9367caaf75014fb2ebd289f8cb74b9e459b8bc5e1e7f9f5d982e7b95e",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f31f/48.dcei",
+          "sha256": "92c5dd77629f420a2783141b6bf1049bde05e27bcfd1504be243ecd335a0f1f1",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f31f/64.dcei",
+          "sha256": "0a665841d0bf16fa0a0a99af1dfd52c515f3ac16672a60e16301446674eaad82",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f300": {
+      "emoji": "🌀",
+      "sequence": "U+1F300",
+      "browser_capture": "assets/emoji-browser/1f300.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f300/32.dcei",
+          "sha256": "b86881d175ec21c580454ba029b7d41047711d2be5ac532b54b03f815f4a715f",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f300/48.dcei",
+          "sha256": "ce6007b2477a0f50bb1bd9ccabdafca2b51422fa45a66a39a26cd10c8bfd6935",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f300/64.dcei",
+          "sha256": "dc77ba409551dd2605597dd4dd8548d0162909227d5ae6a6a75f03610e6886fd",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f9ca": {
+      "emoji": "🧊",
+      "sequence": "U+1F9CA",
+      "browser_capture": "assets/emoji-browser/1f9ca.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f9ca/32.dcei",
+          "sha256": "a298c220b36eb7971a5f7a8ff22e80d7037a9e420d678af81f9e9c9eaa6d3358",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f9ca/48.dcei",
+          "sha256": "8bce83d1a7714361624fb7553c3084df12babdd2837b8f3e3f734c62575b3476",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f9ca/64.dcei",
+          "sha256": "29bf29e53cce5bcb9fdfdde51500a2ba0aef9812277fbb75875ca6a2357e5390",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f4c0": {
+      "emoji": "📀",
+      "sequence": "U+1F4C0",
+      "browser_capture": "assets/emoji-browser/1f4c0.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f4c0/32.dcei",
+          "sha256": "784b5bc3556b945a0181b65dfb9fd19d404fce6688b7c711aeefe7228a427cd0",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f4c0/48.dcei",
+          "sha256": "c1f4dc719aaa5212c60a35275051c06ff11501b35f2c093d855d8b1d23a7e7bc",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f4c0/64.dcei",
+          "sha256": "9451ca2d91b3de3a25a4a81a6be4cb931a34ab9d6220022565ebef627de479cd",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    },
+    "1f504": {
+      "emoji": "🔄",
+      "sequence": "U+1F504",
+      "browser_capture": "assets/emoji-browser/1f504.png",
+      "files": {
+        "32": {
+          "path": "/ICONS/1f504/32.dcei",
+          "sha256": "9793b835cae5b91aaf54beb2874446f5552f1b8244da920dda7823bed393c836",
+          "width": 32,
+          "height": 32,
+          "format": "RGBA8888"
+        },
+        "48": {
+          "path": "/ICONS/1f504/48.dcei",
+          "sha256": "a25d90eab3c825ebcd4a69c62c6a3f6cbce5d5d08822c23a72af3dec17c41131",
+          "width": 48,
+          "height": 48,
+          "format": "RGBA8888"
+        },
+        "64": {
+          "path": "/ICONS/1f504/64.dcei",
+          "sha256": "67594ad2911fbe0b7e9ae47d1e90507d2f711e44da852cb04456e637db57150f",
+          "width": 64,
+          "height": 64,
+          "format": "RGBA8888"
+        }
+      }
+    }
+  }
+}

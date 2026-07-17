@@ -400,6 +400,7 @@ static bool soccerDrawCacheProgress(struct SoccerApp *app, const char *asset,
 	char line[64];
 	struct DcAppLoadingState loading = {
 		.appName = "Sensible Soccer",
+		.iconId = "26bd",
 		.title = "Preloading game",
 		.hint = "B cancels   FN menu",
 		.done = done,
@@ -2873,6 +2874,7 @@ int soccerAppRun(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 	{
 		const struct DcAppLoadingState loading = {
 			.appName = "Sensible Soccer",
+			.iconId = "26bd",
 			.title = "Preparing game data",
 			.detail = "Opening asset pack",
 			.animationStep = app->draw.frame,

@@ -39,36 +39,39 @@ static const uint32_t mDcAppBuildContractWords[DCAPP_CONTRACT_HASH_WORDS] = {
 	DCAPP_BUILD_CONTRACT_WORDS
 };
 
+static bool dcAppPrvDiskRead(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP);
+static bool dcAppPrvDiskWrite(void *diskUserData, uint32_t sec, uint32_t numSec, const void *srcP);
+
 static const struct DcAppCatalogEntry mDcAppCatalog[] = {
-	{DcAppIdGameGb, "Game Boy", "/APPS/gb.DC32", false},
-	{DcAppIdGameNes, "NES", "/APPS/nes.DC32", false},
-	{DcAppIdGameArduboy, "Arduboy", "/APPS/arduboy.DC32", false},
-	{DcAppIdToolIr, "Universal Remote", "/APPS/ir.DC32", false},
-	{DcAppIdToolImage, "Image Viewer", "/APPS/image.DC32", false},
-	{DcAppIdToolMusic, "Music", "/APPS/music.DC32", false},
-	{DcAppIdToolBadUsb, "BadUSB", "/APPS/badusb.DC32", false},
-	{DcAppIdToolAutoclicker, "Autoclicker", "/APPS/autoclicker.DC32", false},
-	{DcAppIdToolGamepad, "USB Gamepad", "/APPS/gamepad.DC32", false},
-	{DcAppIdToolLaserTag, "Laser Tag", "/APPS/lasertag.DC32", false},
-	{DcAppIdToolRaspyJack, "RaspyJack Remote", "/APPS/raspyjack.DC32", false},
-	{DcAppIdToolPwnagotchi, "Pwnagotchi Remote", "/APPS/pwnagotchi.DC32", false},
-	{DcAppIdPong, "Pong", "/APPS/pong.DC32", true},
-	{DcAppIdTetris, "Tetris (NullpoMino)", "/APPS/tetris.DC32", true},
-	{DcAppIdArkanoid, "Arkanoid (wkeeling)", "/APPS/arkanoid.DC32", true},
-	{DcAppIdFlappy, "Flappy Bird (VadimBoev)", "/APPS/flappy.DC32", true},
-	{DcAppIdTrex, "T-Rex Runner (wayou)", "/APPS/trex.DC32", true},
-	{DcAppIdDoom, "DOOM (rp2040-doom)", "/APPS/doom.DC32", true},
-	{DcAppIdChips, "Chip's Challenge (Tile World)", "/APPS/chips.DC32", true},
-	{DcAppIdScorch, "Scorched Earth (xscorch)", "/APPS/scorch.DC32", true},
-	{DcAppIdPipe, "Pipe Dream (PipeDreamer)", "/APPS/pipe.DC32", true},
-	{DcAppIdSokoban, "Sokoban (XSokoban)", "/APPS/sokoban.DC32", true},
-	{DcAppIdOpenJazz, "Jazz Jackrabbit (OpenJazz)", "/APPS/openjazz.DC32", true},
-	{DcAppIdSoccer, "Sensible Soccer (YSoccer)", "/APPS/soccer.DC32", true},
-	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true},
-	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true},
-	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true},
-	{DcAppIdDvdBounce, "DVD Bounce", "/APPS/dvd-bounce.DC32", true},
-	{DcAppIdScrollPattern, "Scrolling Pattern", "/APPS/scroll-pattern.DC32", true},
+	{DcAppIdGameGb, "Game Boy", "/APPS/gb.DC32", false, "1f3ae"},
+	{DcAppIdGameNes, "NES", "/APPS/nes.DC32", false, "1f579-fe0f"},
+	{DcAppIdGameArduboy, "Arduboy", "/APPS/arduboy.DC32", false, "1f4df"},
+	{DcAppIdToolIr, "Universal Remote", "/APPS/ir.DC32", false, "1f4fa"},
+	{DcAppIdToolImage, "Image Viewer", "/APPS/image.DC32", false, "1f5bc-fe0f"},
+	{DcAppIdToolMusic, "Music", "/APPS/music.DC32", false, "1f3b5"},
+	{DcAppIdToolBadUsb, "BadUSB", "/APPS/badusb.DC32", false, "1f50c"},
+	{DcAppIdToolAutoclicker, "Autoclicker", "/APPS/autoclicker.DC32", false, "1f5b1-fe0f"},
+	{DcAppIdToolGamepad, "USB Gamepad", "/APPS/gamepad.DC32", false, "1f3ae"},
+	{DcAppIdToolLaserTag, "Laser Tag", "/APPS/lasertag.DC32", false, "1f3af"},
+	{DcAppIdToolRaspyJack, "RaspyJack Remote", "/APPS/raspyjack.DC32", false, "1f967"},
+	{DcAppIdToolPwnagotchi, "Pwnagotchi Remote", "/APPS/pwnagotchi.DC32", false, "1f431"},
+	{DcAppIdPong, "Pong", "/APPS/pong.DC32", true, "1f3d3"},
+	{DcAppIdTetris, "Tetris (NullpoMino)", "/APPS/tetris.DC32", true, "1f9f1"},
+	{DcAppIdArkanoid, "Arkanoid (wkeeling)", "/APPS/arkanoid.DC32", true, "1f9f1"},
+	{DcAppIdFlappy, "Flappy Bird (VadimBoev)", "/APPS/flappy.DC32", true, "1f426"},
+	{DcAppIdTrex, "T-Rex Runner (wayou)", "/APPS/trex.DC32", true, "1f996"},
+	{DcAppIdDoom, "DOOM (rp2040-doom)", "/APPS/doom.DC32", true, "1f479"},
+	{DcAppIdChips, "Chip's Challenge (Tile World)", "/APPS/chips.DC32", true, "1f48e"},
+	{DcAppIdScorch, "Scorched Earth (xscorch)", "/APPS/scorch.DC32", true, "1f4a3"},
+	{DcAppIdPipe, "Pipe Dream (PipeDreamer)", "/APPS/pipe.DC32", true, "1f527"},
+	{DcAppIdSokoban, "Sokoban (XSokoban)", "/APPS/sokoban.DC32", true, "1f4e6"},
+	{DcAppIdOpenJazz, "Jazz Jackrabbit (OpenJazz)", "/APPS/openjazz.DC32", true, "1f430"},
+	{DcAppIdSoccer, "Sensible Soccer (YSoccer)", "/APPS/soccer.DC32", true, "26bd"},
+	{DcAppIdStarfield, "Starfield", "/APPS/starfield.DC32", true, "1f31f"},
+	{DcAppIdSpiro, "Spiro", "/APPS/spiro.DC32", true, "1f300"},
+	{DcAppIdCube, "Cube", "/APPS/cube.DC32", true, "1f9ca"},
+	{DcAppIdDvdBounce, "DVD Bounce", "/APPS/dvd-bounce.DC32", true, "1f4c0"},
+	{DcAppIdScrollPattern, "Scrolling Pattern", "/APPS/scroll-pattern.DC32", true, "1f504"},
 };
 
 static void *dcAppPrvDisplayFb(void)
@@ -183,6 +186,13 @@ static const char *dcAppPrvRuntimeName(uint32_t runtime)
 	return entry ? entry->name : "app";
 }
 
+static const char *dcAppPrvRuntimeIcon(uint32_t runtime)
+{
+	const struct DcAppCatalogEntry *entry = dcAppCatalogFind(runtime);
+
+	return entry ? entry->iconId : NULL;
+}
+
 /*
  * An app can take a noticeable amount of time to copy from SD, verify, or
  * initialize its own assets.  Put a visible status on the current canvas
@@ -192,8 +202,12 @@ static void dcAppPrvDrawLaunchLoading(const struct DcAppRunArgs *args,
 	uint32_t runtime, const char *title, const char *detail)
 {
 	struct Canvas cnv = {0};
-	const struct DcAppLoadingState loading = {
+	struct FatfsVol *iconVol = args ? args->vol : NULL;
+	bool iconVolOwned = false;
+	struct DcAppLoadingState loading = {
 		.appName = dcAppPrvRuntimeName(runtime),
+		.iconId = dcAppPrvRuntimeIcon(runtime),
+		.iconVol = NULL,
 		.title = title,
 		.detail = detail,
 	};
@@ -208,8 +222,18 @@ static void dcAppPrvDrawLaunchLoading(const struct DcAppRunArgs *args,
 		return;
 	if (!cnv.bpp)
 		cnv.bpp = DISP_BPP;
+	/* Game runtime loading has already closed its one permitted FAT volume by
+	 * this point.  Re-mount briefly for the visual only; failure is expressly
+	 * non-fatal and merely leaves the icon out. */
+	if (!iconVol && loading.iconId && sdCardInit()) {
+		iconVol = fatfsMount(dcAppPrvDiskRead, dcAppPrvDiskWrite, NULL);
+		iconVolOwned = iconVol != NULL;
+	}
+	loading.iconVol = iconVol;
 	dispPrvWaitForScanoutStart();
 	dcAppDrawLoadingCanvas(&cnv, &loading);
+	if (iconVolOwned)
+		(void)fatfsUnmount(iconVol);
 }
 
 static bool dcAppPrvDiskRead(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP)

@@ -332,6 +332,8 @@ target_link_options(${APP} PRIVATE
     -Wl,--undefined=dcAppDrawFill
     -Wl,--undefined=dcAppDrawPixel
     -Wl,--undefined=dcAppDrawLine
+    -Wl,--undefined=dcAppDrawIcon
+    -Wl,--undefined=dcAppDrawIconCanvas
     -Wl,--undefined=dcAppDrawPresent
     -Wl,--undefined=dcAppDrawFrame
     -Wl,--undefined=dcAppDrawWaitRelease

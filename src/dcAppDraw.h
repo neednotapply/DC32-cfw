@@ -19,6 +19,7 @@ struct DcAppDrawCtx {
 	uint_fast16_t prevKeys;
 	uint_fast16_t pressed;
 	uint32_t frame;
+	struct FatfsVol *vol;
 };
 
 /*
@@ -28,6 +29,8 @@ struct DcAppDrawCtx {
  */
 struct DcAppLoadingState {
 	const char *appName;
+	const char *iconId;
+	struct FatfsVol *iconVol;
 	const char *title;
 	const char *detail;
 	const char *hint;
@@ -43,6 +46,12 @@ void dcAppDrawClear(struct DcAppDrawCtx *ctx, uint16_t color);
 void dcAppDrawFill(struct DcAppDrawCtx *ctx, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color);
 void dcAppDrawPixel(struct DcAppDrawCtx *ctx, int32_t x, int32_t y, uint16_t color);
 void dcAppDrawLine(struct DcAppDrawCtx *ctx, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t color);
+/* Draw a DCEI RGBA8888 asset from /ICONS/<iconId>/<size>.dcei.  Missing or
+ * invalid assets return false and leave the caller's UI usable. */
+bool dcAppDrawIcon(struct DcAppDrawCtx *ctx, const char *iconId, uint16_t size,
+	int32_t x, int32_t y, uint16_t background);
+bool dcAppDrawIconCanvas(const struct Canvas *cnv, struct FatfsVol *vol,
+	const char *iconId, uint16_t size, int32_t x, int32_t y, uint16_t background);
 void dcAppDrawPresent(struct DcAppDrawCtx *ctx);
 bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask);
 void dcAppDrawWaitRelease(struct DcAppDrawCtx *ctx, uint_fast16_t mask);

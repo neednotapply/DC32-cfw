@@ -24,7 +24,7 @@ Arduboy emulation is playable but not yet 100% accurate. Many games run at or ne
 A release consists of:
 
 - `DC32-cfw.uf2` — firmware for the RP2350 USB bootloader
-- `SD-apps.zip` — `/APPS` binaries and required redistributable app data
+- `SD-apps.zip` — `/APPS` binaries, required app data, and `/ICONS` loading icons
 - `SD-assets.zip` — optional starter IR, BadUSB, music, image, and ROM folders
 
 Extract SD archives to the card root. Use the firmware and SD-apps bundle from the same build because SD apps are checked against the resident firmware contract.
@@ -42,6 +42,7 @@ OpenLASIR identifies a sender with two 8-bit values. The Block ID identifies a p
 | Path | Contents |
 | --- | --- |
 | `/APPS` | `.DC32` apps and app data from `SD-apps.zip` |
+| `/ICONS` | Browser-rendered Unicode Emoji 17.0 loading icons (32/48/64 px DCEI RGBA assets) from `SD-apps.zip` |
 | `/ROMS/AB` | Arduboy `.hex` and `.arduboy` games |
 | `/ROMS/GB` | Game Boy ROMs |
 | `/ROMS/GBC` | Game Boy Color ROMs |

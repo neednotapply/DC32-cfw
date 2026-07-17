@@ -1,6 +1,7 @@
 #include "dcAppDraw.h"
 
 #include <string.h>
+#include <stdio.h>
 #include "dispDefcon.h"
 #include "fonts.h"
 #include "ui.h"
@@ -8,6 +9,19 @@
 static uint16_t mDcAppDrawRgb332To565[256];
 static bool mDcAppDrawPaletteReady;
 static uint16_t mDcAppDrawThemeColor = 0xa534u;
+
+#define DCEI_HEADER_SIZE 16u
+#define DCEI_MAX_SIZE 64u
+
+struct DcAppDceiHeader {
+	uint8_t magic[4];
+	uint16_t version;
+	uint16_t width;
+	uint16_t height;
+	uint8_t bitsPerPixel;
+	uint8_t reserved;
+	uint32_t payloadSize;
+} __attribute__((packed));
 
 static int32_t dcAppDrawPrvAbsI32(int32_t v)
 {
@@ -95,6 +109,74 @@ static void dcAppDrawPrvCanvasFill(const struct Canvas *cnv, int32_t x, int32_t 
 	for (int32_t yy = y; yy < y + h; yy++)
 		for (int32_t xx = x; xx < x + w; xx++)
 			dcAppDrawPrvCanvasPixel(cnv, xx, yy, color);
+}
+
+static uint16_t dcAppDrawPrvBlend(uint16_t dst, const uint8_t *rgba)
+{
+	uint32_t a = rgba[3];
+	uint32_t dr = (dst >> 11) & 31u, dg = (dst >> 5) & 63u, db = dst & 31u;
+	uint32_t sr = rgba[0] >> 3, sg = rgba[1] >> 2, sb = rgba[2] >> 3;
+
+	dr = (sr * a + dr * (255u - a) + 127u) / 255u;
+	dg = (sg * a + dg * (255u - a) + 127u) / 255u;
+	db = (sb * a + db * (255u - a) + 127u) / 255u;
+	return (uint16_t)((dr << 11) | (dg << 5) | db);
+}
+
+static bool dcAppDrawPrvReadExact(struct FatfsFil *fil, void *dst, uint32_t len)
+{
+	uint32_t got = 0;
+
+	return fatfsFileRead(fil, dst, len, &got) && got == len;
+}
+
+bool dcAppDrawIconCanvas(const struct Canvas *cnv, struct FatfsVol *vol,
+	const char *iconId, uint16_t size, int32_t x, int32_t y, uint16_t background)
+{
+	char path[40];
+	struct FatfsFil *fil;
+	struct DcAppDceiHeader header;
+	uint8_t row[DCEI_MAX_SIZE * 4u];
+	uint32_t expected;
+
+	if (!cnv || !cnv->framebuffer || cnv->bpp != 16u || !vol || !iconId || !iconId[0] ||
+		size > DCEI_MAX_SIZE || !size || snprintf(path, sizeof(path), "/ICONS/%s/%u.dcei",
+		iconId, (unsigned)size) >= (int)sizeof(path))
+		return false;
+	fil = fatfsFileOpen(vol, path, OPEN_MODE_READ);
+	if (!fil)
+		return false;
+	if (!dcAppDrawPrvReadExact(fil, &header, sizeof(header)) ||
+		memcmp(header.magic, "DCEI", 4) || header.version != 1u ||
+		header.width != size || header.height != size || header.bitsPerPixel != 32u ||
+		header.payloadSize != (uint32_t)size * size * 4u ||
+		fatfsFileGetSize(fil) != DCEI_HEADER_SIZE + header.payloadSize) {
+		fatfsFileClose(fil);
+		return false;
+	}
+	expected = (uint32_t)size * 4u;
+	for (uint32_t yy = 0; yy < size; yy++) {
+		if (!dcAppDrawPrvReadExact(fil, row, expected)) {
+			fatfsFileClose(fil);
+			return false;
+		}
+		for (uint32_t xx = 0; xx < size; xx++) {
+			int32_t dstX = x + (int32_t)xx, dstY = y + (int32_t)yy;
+			uint16_t *fb;
+			uint16_t dst;
+
+			if (dstX < 0 || dstY < 0 || dstX >= (int32_t)cnv->w || dstY >= (int32_t)cnv->h)
+				continue;
+			fb = (uint16_t*)cnv->framebuffer;
+			dst = fb[dcAppDrawPrvDisplayIndex(cnv, (uint32_t)dstX, (uint32_t)dstY)];
+			if (!dst && background)
+				dst = background;
+			fb[dcAppDrawPrvDisplayIndex(cnv, (uint32_t)dstX, (uint32_t)dstY)] =
+				dcAppDrawPrvBlend(dst, &row[xx * 4u]);
+		}
+	}
+	fatfsFileClose(fil);
+	return true;
 }
 
 static void dcAppDrawPrvCanvasText(const struct Canvas *cnv, int32_t x, int32_t y,
@@ -194,6 +276,7 @@ bool dcAppDrawInit(struct DcAppDrawCtx *ctx, const struct DcAppHostApi *host, co
 	dcAppDrawPrvInitPalette();
 	ctx->host = host;
 	ctx->fb = (uint8_t*)backbuffer;
+	ctx->vol = args ? args->vol : NULL;
 	ctx->w = w;
 	ctx->h = h;
 	if (args && args->canvas)
@@ -250,6 +333,52 @@ void dcAppDrawPixel(struct DcAppDrawCtx *ctx, int32_t x, int32_t y, uint16_t col
 {
 	if (ctx && ctx->fb && x >= 0 && y >= 0 && x < (int32_t)ctx->w && y < (int32_t)ctx->h)
 		ctx->fb[(uint32_t)y * ctx->w + (uint32_t)x] = dcAppDrawPrvRgb565ToRgb332(color);
+}
+
+bool dcAppDrawIcon(struct DcAppDrawCtx *ctx, const char *iconId, uint16_t size,
+	int32_t x, int32_t y, uint16_t background)
+{
+	char path[40];
+	struct FatfsFil *fil;
+	struct DcAppDceiHeader header;
+	uint8_t row[DCEI_MAX_SIZE * 4u];
+	uint32_t expected;
+
+	if (!ctx || !ctx->fb || !ctx->vol || !iconId || !iconId[0] || size > DCEI_MAX_SIZE ||
+		!size || snprintf(path, sizeof(path), "/ICONS/%s/%u.dcei", iconId,
+		(unsigned)size) >= (int)sizeof(path))
+		return false;
+	fil = fatfsFileOpen(ctx->vol, path, OPEN_MODE_READ);
+	if (!fil)
+		return false;
+	if (!dcAppDrawPrvReadExact(fil, &header, sizeof(header)) ||
+		memcmp(header.magic, "DCEI", 4) || header.version != 1u ||
+		header.width != size || header.height != size || header.bitsPerPixel != 32u ||
+		header.payloadSize != (uint32_t)size * size * 4u ||
+		fatfsFileGetSize(fil) != DCEI_HEADER_SIZE + header.payloadSize) {
+		fatfsFileClose(fil);
+		return false;
+	}
+	expected = (uint32_t)size * 4u;
+	for (uint32_t yy = 0; yy < size; yy++) {
+		if (!dcAppDrawPrvReadExact(fil, row, expected)) {
+			fatfsFileClose(fil);
+			return false;
+		}
+		for (uint32_t xx = 0; xx < size; xx++) {
+			int32_t dstX = x + (int32_t)xx, dstY = y + (int32_t)yy;
+			uint16_t dst;
+
+			if (dstX < 0 || dstY < 0 || dstX >= (int32_t)ctx->w || dstY >= (int32_t)ctx->h)
+				continue;
+			dst = mDcAppDrawRgb332To565[ctx->fb[(uint32_t)dstY * ctx->w + (uint32_t)dstX]];
+			if (!dst && background)
+				dst = background;
+			dcAppDrawPixel(ctx, dstX, dstY, dcAppDrawPrvBlend(dst, &row[xx * 4u]));
+		}
+	}
+	fatfsFileClose(fil);
+	return true;
 }
 
 void dcAppDrawLine(struct DcAppDrawCtx *ctx, int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t color)
@@ -317,7 +446,8 @@ void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *
 	uint16_t track = dcAppDrawRgb565(48, 48, 48);
 	uint16_t accent = mDcAppDrawThemeColor;
 	uint32_t barW, fill, offset;
-	int32_t centerY, barX, barY;
+	int32_t centerY, barX, barY, iconY, nameY, titleY, detailY;
+	uint32_t iconSize = 0;
 
 	if (!ctx || !ctx->fb || !ctx->w || !ctx->h)
 		return;
@@ -328,19 +458,28 @@ void dcAppDrawLoading(struct DcAppDrawCtx *ctx, const struct DcAppLoadingState *
 	offset = dcAppDrawPrvLoadingOffset(barW, state, fill);
 	centerY = (int32_t)ctx->h / 2;
 	barX = ((int32_t)ctx->w - (int32_t)barW) / 2;
-	barY = centerY + 24;
+	if (state && state->iconId && ctx->vol && ctx->h >= 160u)
+		iconSize = 64u;
+	iconY = centerY - 106;
+	nameY = centerY - (iconSize ? 34 : 78);
+	titleY = centerY - (iconSize ? 2 : 38);
+	detailY = centerY + (iconSize ? 22 : -12);
+	barY = centerY + (iconSize ? 54 : 24);
 
 	dcAppDrawClear(ctx, bg);
-	dcAppDrawPrvCtxCentered(ctx, centerY - 78,
+	if (iconSize)
+		(void)dcAppDrawIcon(ctx, state->iconId, (uint16_t)iconSize,
+			((int32_t)ctx->w - (int32_t)iconSize) / 2, iconY, bg);
+	dcAppDrawPrvCtxCentered(ctx, nameY,
 		state && state->appName ? state->appName : "Loading", FontLarge, primary);
-	dcAppDrawPrvCtxCentered(ctx, centerY - 38,
+	dcAppDrawPrvCtxCentered(ctx, titleY,
 		state && state->title ? state->title : "Please wait", FontMedium, primary);
 	if (state && state->detail && state->detail[0])
-		dcAppDrawPrvCtxCentered(ctx, centerY - 12, state->detail, FontSmall, secondary);
+		dcAppDrawPrvCtxCentered(ctx, detailY, state->detail, FontSmall, secondary);
 	dcAppDrawFill(ctx, barX, barY, (int32_t)barW, 12, track);
 	dcAppDrawFill(ctx, barX + (int32_t)offset, barY + 2, (int32_t)fill, 8, accent);
 	if (state && state->hint && state->hint[0])
-		dcAppDrawPrvCtxCentered(ctx, centerY + 54, state->hint, FontSmall, secondary);
+		dcAppDrawPrvCtxCentered(ctx, centerY + (iconSize ? 84 : 54), state->hint, FontSmall, secondary);
 }
 
 void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingState *state)
@@ -351,7 +490,8 @@ void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingS
 	uint16_t track = dcAppDrawRgb565(48, 48, 48);
 	uint16_t accent = mDcAppDrawThemeColor;
 	uint32_t barW, fill, offset;
-	int32_t centerY, barX, barY;
+	int32_t centerY, barX, barY, iconY, nameY, titleY, detailY;
+	uint32_t iconSize = 0;
 
 	if (!cnv || !cnv->framebuffer || cnv->bpp != 16u || !cnv->w || !cnv->h)
 		return;
@@ -362,19 +502,28 @@ void dcAppDrawLoadingCanvas(const struct Canvas *cnv, const struct DcAppLoadingS
 	offset = dcAppDrawPrvLoadingOffset(barW, state, fill);
 	centerY = (int32_t)cnv->h / 2;
 	barX = ((int32_t)cnv->w - (int32_t)barW) / 2;
-	barY = centerY + 24;
+	if (state && state->iconId && state->iconVol && cnv->h >= 160u)
+		iconSize = 64u;
+	iconY = centerY - 106;
+	nameY = centerY - (iconSize ? 34 : 78);
+	titleY = centerY - (iconSize ? 2 : 38);
+	detailY = centerY + (iconSize ? 22 : -12);
+	barY = centerY + (iconSize ? 54 : 24);
 
 	dcAppDrawPrvCanvasFill(cnv, 0, 0, cnv->w, cnv->h, bg);
-	dcAppDrawPrvCanvasCentered(cnv, centerY - 78,
+	if (iconSize)
+		(void)dcAppDrawIconCanvas(cnv, state->iconVol, state->iconId, (uint16_t)iconSize,
+			((int32_t)cnv->w - (int32_t)iconSize) / 2, iconY, bg);
+	dcAppDrawPrvCanvasCentered(cnv, nameY,
 		state && state->appName ? state->appName : "Loading", FontLarge, primary);
-	dcAppDrawPrvCanvasCentered(cnv, centerY - 38,
+	dcAppDrawPrvCanvasCentered(cnv, titleY,
 		state && state->title ? state->title : "Please wait", FontMedium, primary);
 	if (state && state->detail && state->detail[0])
-		dcAppDrawPrvCanvasCentered(cnv, centerY - 12, state->detail, FontSmall, secondary);
+		dcAppDrawPrvCanvasCentered(cnv, detailY, state->detail, FontSmall, secondary);
 	dcAppDrawPrvCanvasFill(cnv, barX, barY, (int32_t)barW, 12, track);
 	dcAppDrawPrvCanvasFill(cnv, barX + (int32_t)offset, barY + 2, (int32_t)fill, 8, accent);
 	if (state && state->hint && state->hint[0])
-		dcAppDrawPrvCanvasCentered(cnv, centerY + 54, state->hint, FontSmall, secondary);
+		dcAppDrawPrvCanvasCentered(cnv, centerY + (iconSize ? 84 : 54), state->hint, FontSmall, secondary);
 }
 
 bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)

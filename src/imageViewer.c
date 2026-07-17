@@ -324,6 +324,7 @@ static bool imagePrvFlashLoadRangeRaw(struct FatfsFil *fil, uint32_t fileOffset,
 	uint8_t *buf;
 	struct DcAppLoadingState loading = {
 		.appName = "Image Viewer",
+		.iconId = "1f5bc-fe0f",
 		.title = "Loading image",
 		.detail = "Preparing image data",
 		.total = size,

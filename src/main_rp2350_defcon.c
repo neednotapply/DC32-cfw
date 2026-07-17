@@ -1563,8 +1563,8 @@ static void defconIoCmd(uint_fast8_t byte)
 
                 case 9:                                 //LEDSYNC
                         pr("leds refresh\n");
-                        badgeLedsGameWrite();
-                        ws2812refresh();
+                        if (badgeLedsGameRefresh())
+                                ws2812refresh();
                         break;
 
                 case 10:                                //RDPEN / RDIMU / RDADC
@@ -2169,9 +2169,7 @@ static void uiPrvSelfTestsIfNeeded(void)
         iobank0_hw->io[magicGpio].ctrl = (iobank0_hw->io[magicGpio].ctrl &~ IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS) | (IO_BANK0_GPIO0_CTRL_FUNCSEL_VALUE_SIO_0 << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB);
         pr("Wait for self test indication to settle\n");
         delayMsec(1000);
-        doSelfTest = (sio_hw->gpio_in >> magicGpio) & 1;
-        pr("SELF TEST: magic gpio read: %d\n", doSelfTest);
-        doSelfTest |= uiGetKeys() == (KEY_BIT_START     | KEY_BIT_SEL);
+        doSelfTest = uiGetKeys() == (KEY_BIT_START | KEY_BIT_SEL | KEY_BIT_A | KEY_BIT_B);
         pr("SELF TEST: buttons too: %d\n", doSelfTest);
 
 

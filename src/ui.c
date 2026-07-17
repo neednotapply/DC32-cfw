@@ -56,6 +56,7 @@
 #define UI_SAVER_IMAGE_WIDTH			90u
 #define UI_SAVER_IMAGE_HEIGHT			120u
 #define UI_SAVER_IMAGE_BYTES			(UI_SAVER_IMAGE_WIDTH * UI_SAVER_IMAGE_HEIGHT * sizeof(uint16_t))
+#define UI_IR_HEADER_TITLE			"IR Remote"
 
 #ifdef UI_ROTATED
 	#undef UI_ROTATED
@@ -1052,6 +1053,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 		if (!mToolExitEnabled && uiPowerScreenSaverWoke()) {
 			if (btnsMaskP)
 				*btnsMaskP = 0;
+			cnv->foreColor = fore;
 			return curChoice;
 		}
 		
@@ -1067,6 +1069,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 					uiPrvRequestToolExit();
 					if (btnsMaskP)
 						*btnsMaskP = gotKey;
+					cnv->foreColor = fore;
 					return curChoice;
 				}
 				break;
@@ -1089,6 +1092,7 @@ static uint_fast8_t uiPrvMenu(struct Canvas *cnv, uint_fast8_t curChoice, uint_f
 				if (btnsMask & gotKey) {
 					if (btnsMaskP)
 						*btnsMaskP = gotKey;
+					cnv->foreColor = fore;
 					return curChoice;
 				}
 				break;
@@ -3517,6 +3521,16 @@ static void uiPrvApplyTheme(const struct Settings *settings)
 	}
 	mUiHeaderClockMinute = 0xffffffffu;
 }
+
+#ifdef DCAPP_TOOL_BUILD
+	static void uiPrvApplySavedTheme(void)
+	{
+		struct Settings settings;
+
+		settingsGet(&settings);
+		uiPrvApplyTheme(&settings);
+	}
+#endif
 
 static void uiPrvThemeAdjustColor(struct Settings *settings, uint8_t *value, uint_fast16_t button)
 {
@@ -8075,7 +8089,7 @@ bool uiGetGameSelection(struct GameSelection *selectionP)
 			uint_fast8_t numRemotes = sizeof(mIrUniversalRemotes) / sizeof(*mIrUniversalRemotes);
 			uint_fast16_t button = KEY_BIT_A | KEY_BIT_B;
 
-			uiPrvSetHeaderTitle("Universal Remote");
+			uiPrvSetHeaderTitle(UI_IR_HEADER_TITLE);
 			uiPrvReset(cnv, false);
 
 			for (i = 0; i < numRemotes; i++)
@@ -10714,7 +10728,7 @@ static const char *uiPrvToolHeaderTitle(enum UiToolId tool)
 	switch (tool) {
 		case UiToolBrowser: return "File Manager";
 		case UiToolInfrared: return "Infrared";
-		case UiToolIr: return "Universal Remote";
+		case UiToolIr: return UI_IR_HEADER_TITLE;
 		case UiToolUsbStorage: return "USB Storage";
 		case UiToolBadUsb: return "BadUSB";
 		case UiToolUsb: return "USB";
@@ -11128,12 +11142,15 @@ static enum UiToolId uiPrvToolSwitcher(struct Canvas *cnv, enum UiToolId curTool
 		uiPuts(cnv, uiPrvMenuRow(cnv, i), 10, names[toolOrder[i]], -1);
 	}
 
-	selOption = uiPrvMenu(cnv, curOption, numTools, &button);
-	if (uiPowerConsumeScreenSaverWake())
-		return UiToolRefresh;
-	if (button == KEY_BIT_B)
-		return curTool;
-	return toolOrder[selOption];
+	while (1) {
+		button = KEY_BIT_A | KEY_BIT_B;
+		selOption = uiPrvMenu(cnv, curOption, numTools, &button);
+		if (uiPowerConsumeScreenSaverWake())
+			return UiToolRefresh;
+		if (button != KEY_BIT_B)
+			return toolOrder[selOption];
+		curOption = selOption;
+	}
 }
 
 static enum UiBrowserOpenWithId uiPrvBrowserOpenWith(struct Canvas *cnv, const struct UiFileRef *ref)
@@ -11292,7 +11309,7 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 {
 	switch (uiPrvBrowserOpenWith(cnv, ref)) {
 	case UiBrowserOpenIrButtonSpam:
-		uiPrvSetHeaderTitle("Universal Remote");
+		uiPrvSetHeaderTitle(UI_IR_HEADER_TITLE);
 		(void)uiPrvRunSdApp(cnv, DcAppIdToolIr, DcAppToolActionIrButton, vol, &ref->locator, ref->name, ref->parentPath);
 		return uiPrvBrowserLaunchedToolReturn(UiToolIr);
 
@@ -11476,6 +11493,7 @@ int uiDcAppRunIr(const struct DcAppHostApi *host, const struct DcAppRunArgs *arg
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	switch (args->toolAction) {
 	case DcAppToolActionMain:
 		(void)uiPrvIrTools(args->canvas);
@@ -11505,6 +11523,7 @@ int uiDcAppRunImage(const struct DcAppHostApi *host, const struct DcAppRunArgs *
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	if (args->toolAction == DcAppToolActionMain) {
 		uiPrvImageViewerTool(args->canvas);
 		return 0;
@@ -11522,6 +11541,7 @@ int uiDcAppRunMusic(const struct DcAppHostApi *host, const struct DcAppRunArgs *
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	if (args->toolAction == DcAppToolActionMain) {
 		if (!uiPrvMusicBatteryOkToLaunch(args->canvas))
 			return 0;
@@ -11547,6 +11567,7 @@ int uiDcAppRunBadUsb(const struct DcAppHostApi *host, const struct DcAppRunArgs 
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	if (args->toolAction == DcAppToolActionMain) {
 		(void)uiPrvBadUsbTool(args->canvas);
 		return 0;
@@ -11563,6 +11584,7 @@ int uiDcAppRunAutoclicker(const struct DcAppHostApi *host, const struct DcAppRun
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	if (args->toolAction == DcAppToolActionMain) {
 		uiPrvAutoclickerTool(args->canvas);
 		return 0;
@@ -11575,6 +11597,7 @@ int uiDcAppRunGamepad(const struct DcAppHostApi *host, const struct DcAppRunArgs
 	(void)host;
 	if (!args || !args->canvas)
 		return -1;
+	uiPrvApplySavedTheme();
 	if (args->toolAction == DcAppToolActionMain) {
 		uiPrvGamepadTool(args->canvas);
 		return 0;

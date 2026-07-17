@@ -8,6 +8,7 @@
 
 
 #include "timebase.h"
+#include "badgeLeds.h"
 #include "printf.h"
 
 #define SYSTICK_BITS		24
@@ -70,6 +71,7 @@ void timebaseInit(void)
 void SysTick_Handler(void)
 {
 	mTicks++;
+	badgeLedsWatchdogTick();
 }
 
 void TIMER0_IRQ_1_IRQHandler(void)

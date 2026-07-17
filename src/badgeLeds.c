@@ -7,6 +7,8 @@
 
 
 #define LED_GAME_WRITE_PAUSE_TICKS		(TICKS_PER_SECOND * 2)
+#define LED_NON_SETTINGS_REFRESH_TICKS	TICKS_PER_SECOND
+#define LED_DYNAMIC_STALL_TICKS		(TICKS_PER_SECOND * 2)
 #define LED_DEFAULT_TINT				56
 #define LED_MIN_BRIGHTNESS				15
 #define LED_MIN_SPEED					1
@@ -33,7 +35,10 @@ static const struct BadgeLedButtonZone mButtonZones[] = {
 
 static struct Settings mLedSettings;
 static bool mHaveLedSettings;
-static uint64_t mNextLedFrameTime, mLastGameLedWriteTime, mNextTouchPollTime, mTouchLastPressed;
+static uint64_t mNextLedFrameTime, mLastGameLedWriteTime, mNextGameLedRefreshTime,
+	mNextOverrideRefreshTime, mNextTouchPollTime, mTouchLastPressed;
+static volatile uint32_t mDynamicLedDeadline;
+static volatile bool mDynamicLedWatchdogArmed;
 static uint64_t mButtonLastPressed[sizeof(mButtonZones) / sizeof(*mButtonZones)];
 static bool mTouchSeen;
 static bool mButtonSeen[sizeof(mButtonZones) / sizeof(*mButtonZones)];
@@ -64,6 +69,27 @@ static uint_fast8_t badgeLedsPrvBrightness(void)
 static uint_fast8_t badgeLedsPrvSanitizeBrightness(uint_fast8_t brightness)
 {
 	return brightness >= LED_MIN_BRIGHTNESS ? brightness : LED_MIN_BRIGHTNESS;
+}
+
+static bool badgeLedsPrvModeIsAnimated(uint_fast8_t mode)
+{
+	mode = badgeLedsPrvSanitizeMode(mode);
+	if (mode == LedModeOff)
+		return false;
+	if (mode == LedModeSolid || mode == LedModeFlashlight || mode == LedModeFrontOn)
+		return badgeLedsPrvSanitizeColor(mLedSettings.ledColor) != LedColorCustom;
+	return true;
+}
+
+static void badgeLedsPrvArmDynamicWatchdog(void)
+{
+	mDynamicLedDeadline = (uint32_t)getTime() + LED_DYNAMIC_STALL_TICKS;
+	mDynamicLedWatchdogArmed = true;
+}
+
+static void badgeLedsPrvDisarmDynamicWatchdog(void)
+{
+	mDynamicLedWatchdogArmed = false;
 }
 
 const char* badgeLedsModeName(uint_fast8_t mode)
@@ -480,8 +506,13 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force)
 		mLedFrame = 0;
 		mNextLedFrameTime = getTime();
 		badgeLedsPrvResetReactive();
-		if (!mIdle)
+		if (!mIdle) {
 			badgeLedsPrvRenderCurrent();
+			if (badgeLedsPrvModeIsAnimated(mLedSettings.ledMode))
+				badgeLedsPrvArmDynamicWatchdog();
+			else
+				badgeLedsPrvDisarmDynamicWatchdog();
+		}
 	}
 }
 
@@ -492,6 +523,7 @@ void badgeLedsSetIdle(bool idle)
 
 	mIdle = idle;
 	if (idle) {
+		badgeLedsPrvDisarmDynamicWatchdog();
 		ws2812SetAllRgb(0, 0, 0);
 		ws2812refresh();
 		return;
@@ -502,10 +534,18 @@ void badgeLedsSetIdle(bool idle)
 	badgeLedsPrvResetReactive();
 	if (mHaveLedSettings)
 		badgeLedsPrvRenderCurrent();
+	if (mHaveLedSettings && badgeLedsPrvModeIsAnimated(mLedSettings.ledMode))
+		badgeLedsPrvArmDynamicWatchdog();
 }
 
 void badgeLedsOverrideRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue)
 {
+	uint64_t now = getTime();
+
+	badgeLedsPrvArmDynamicWatchdog();
+	if (now < mNextOverrideRefreshTime)
+		return;
+	mNextOverrideRefreshTime = now + LED_NON_SETTINGS_REFRESH_TICKS;
 	ws2812SetAllRgb(red, green, blue);
 	ws2812refresh();
 }
@@ -519,10 +559,13 @@ void badgeLedsTick(void)
 		return;
 
 	mode = badgeLedsPrvSanitizeMode(mLedSettings.ledMode);
-	if (mode == LedModeOff || (mode == LedModeSolid && badgeLedsPrvSanitizeColor(mLedSettings.ledColor) == LedColorCustom))
+	if (!badgeLedsPrvModeIsAnimated(mode)) {
+		badgeLedsPrvDisarmDynamicWatchdog();
 		return;
+	}
 
 	now = getTime();
+	badgeLedsPrvArmDynamicWatchdog();
 	if (mLastGameLedWriteTime && now - mLastGameLedWriteTime < LED_GAME_WRITE_PAUSE_TICKS)
 		return;
 
@@ -539,7 +582,30 @@ void badgeLedsTick(void)
 	badgeLedsPrvRenderCurrent();
 }
 
+void badgeLedsWatchdogTick(void)
+{
+	uint32_t now = (uint32_t)getTime();
+
+	if (!mDynamicLedWatchdogArmed || (int32_t)(now - mDynamicLedDeadline) < 0)
+		return;
+	mDynamicLedWatchdogArmed = false;
+	ws2812SetAllRgb(0, 0, 0);
+	ws2812refresh();
+}
+
 void badgeLedsGameWrite(void)
 {
 	mLastGameLedWriteTime = getTime();
+}
+
+bool badgeLedsGameRefresh(void)
+{
+	uint64_t now = getTime();
+
+	mLastGameLedWriteTime = now;
+	if (now < mNextGameLedRefreshTime)
+		return false;
+	mNextGameLedRefreshTime = now + LED_NON_SETTINGS_REFRESH_TICKS;
+	badgeLedsPrvArmDynamicWatchdog();
+	return true;
 }

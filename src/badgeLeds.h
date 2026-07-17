@@ -11,6 +11,8 @@ void badgeLedsApplySettings(const struct Settings *settings, bool force);
 void badgeLedsSetIdle(bool idle);
 void badgeLedsOverrideRgb(uint_fast8_t red, uint_fast8_t green, uint_fast8_t blue);
 void badgeLedsTick(void);
+void badgeLedsWatchdogTick(void);
 void badgeLedsGameWrite(void);
+bool badgeLedsGameRefresh(void);
 
 #endif

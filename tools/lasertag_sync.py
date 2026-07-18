@@ -6,22 +6,26 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import struct
 from pathlib import Path
 
 
-PREFIX = "DC32LT1."
+PREFIX_V1 = "DC32LT1."
+PREFIX_V2 = "DC32LT2."
+PREFIXES = (PREFIX_V2, PREFIX_V1)
 ENTRY_SIZE = 8
-SCHEMAS = (1, 2)
+SCHEMAS = (1, 2, 3)
 
 
 def decode_sync_text(value: str) -> dict[str, object]:
     value = value.strip()
-    marker = value.find(PREFIX)
-    if marker < 0:
-        raise ValueError(f"sync payload does not contain {PREFIX}")
-    encoded = value[marker + len(PREFIX):]
+    matches = [(value.find(prefix), prefix) for prefix in PREFIXES if value.find(prefix) >= 0]
+    if not matches:
+        raise ValueError("sync payload does not contain a DC32LT1. or DC32LT2. prefix")
+    marker, prefix = min(matches)
+    encoded = value[marker + len(prefix):]
     encoded = encoded.split("#", 1)[0].split("&", 1)[0].strip()
     padding = "=" * ((4 - len(encoded) % 4) % 4)
     try:
@@ -48,16 +52,25 @@ def decode_sync_text(value: str) -> dict[str, object]:
     if expected_crc != actual_crc:
         raise ValueError("sync payload CRC mismatch")
 
-    opponents = []
+    entries = []
     for index in range(count):
         offset = header_size + index * ENTRY_SIZE
-        block, device, color, _reserved, hits = struct.unpack_from("<4BI", raw, offset)
-        opponents.append({
-            "block_id": block,
-            "device_id": device,
-            "color": color,
-            "hits_received": hits,
-        })
+        if schema == 3:
+            packet_raw, uptime_seconds, flags, _reserved = struct.unpack_from("<I H B B", raw, offset)
+            entries.append({
+                "raw": f"{packet_raw:08x}",
+                "uptime_seconds": uptime_seconds,
+                "direction": "tx" if flags & 1 else "rx",
+                "protocol": "openlasir" if flags & 2 else "standard_nec",
+            })
+        else:
+            block, device, color, _reserved, hits = struct.unpack_from("<4BI", raw, offset)
+            entries.append({
+                "block_id": block,
+                "device_id": device,
+                "color": color,
+                "hits_received": hits,
+            })
 
     flags = raw[5]
     result = {
@@ -72,12 +85,19 @@ def decode_sync_text(value: str) -> dict[str, object]:
         "badge_uid_hash": f"{struct.unpack_from('<I', raw, 12)[0]:08x}",
         "shots_fired": struct.unpack_from("<I", raw, 16)[0],
         "hits_received": struct.unpack_from("<I", raw, 20)[0],
-        "opponents": opponents,
         "payload_crc32": f"{expected_crc:08x}",
     }
-    if schema == 1:
+    if schema == 3:
+        result.update({
+            "export_kind": "dc32_local_unsigned_diagnostic",
+            "events": entries,
+            "badge_uptime_seconds": struct.unpack_from("<I", raw, 24)[0],
+        })
+    elif schema == 1:
+        result["opponents"] = entries
         result["auto_fire"] = bool(flags & 0x02)
     else:
+        result["opponents"] = entries
         result.update({
             "sound": bool(flags & 0x02),
             "vibration": bool(flags & 0x04),
@@ -89,8 +109,23 @@ def decode_sync_text(value: str) -> dict[str, object]:
     return result
 
 
+def inspect_qr_text(value: str) -> dict[str, object]:
+    """Return a lossless local report for a QR string without submitting it anywhere."""
+    try:
+        return {"recognized": True, "decoded": decode_sync_text(value), "raw_text": value.strip()}
+    except ValueError as exc:
+        text = value.strip()
+        return {
+            "recognized": False,
+            "reason": str(exc),
+            "raw_text": text,
+            "length": len(text),
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+
+
 def decode_sync_document(value: str) -> dict[str, object]:
-    lines = [line.strip() for line in value.splitlines() if PREFIX in line]
+    lines = [line.strip() for line in value.splitlines() if any(prefix in line for prefix in PREFIXES)]
     if not lines:
         return decode_sync_text(value)
     pages = [decode_sync_text(line) for line in lines]
@@ -106,7 +141,10 @@ def decode_sync_document(value: str) -> dict[str, object]:
         raise ValueError("sync document contains duplicate pages")
     result = dict(pages[0])
     result["complete"] = len(pages) == expected and [int(page["page_index"]) for page in pages] == list(range(expected))
-    result["opponents"] = [opponent for page in pages for opponent in page["opponents"]]
+    if int(result["schema"]) == 3:
+        result["events"] = [event for page in pages for event in page["events"]]
+    else:
+        result["opponents"] = [opponent for page in pages for opponent in page["opponents"]]
     result["pages_decoded"] = len(pages)
     return result
 
@@ -114,10 +152,13 @@ def decode_sync_document(value: str) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("payload", help="LASERTAG.SYNC file path, QR text, or QR URL")
+    parser.add_argument("--forensic", action="store_true",
+                        help="retain and report an unknown QR string locally without decoding or submitting it")
     args = parser.parse_args()
     path = Path(args.payload)
     value = path.read_text(encoding="ascii") if path.is_file() else args.payload
-    print(json.dumps(decode_sync_document(value), indent=2, sort_keys=True))
+    result = inspect_qr_text(value) if args.forensic else decode_sync_document(value)
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

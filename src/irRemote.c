@@ -103,7 +103,7 @@ void irRemoteOpenLasirEndReceive(void)
 	mOpenLasirBit = 0xff;
 }
 
-bool irRemoteOpenLasirFeedSpaceUsec(uint32_t spaceUsec, struct IrRemoteOpenLasirFrame *frame)
+bool irRemoteNecFeedSpaceUsec(uint32_t spaceUsec, struct IrRemoteNecFrame *frame)
 {
 	uint8_t block, inverse, commandLow, commandHigh;
 
@@ -136,11 +136,10 @@ bool irRemoteOpenLasirFeedSpaceUsec(uint32_t spaceUsec, struct IrRemoteOpenLasir
 		return false;
 	commandLow = (uint8_t)(mOpenLasirRaw >> 16);
 	commandHigh = (uint8_t)(mOpenLasirRaw >> 24);
-	/* Match the reference decoder's NEC/OpenLASIR disambiguation rule. */
-	if ((uint8_t)(commandLow ^ commandHigh) == 0xffu)
-		return false;
 	if (frame) {
 		frame->raw = mOpenLasirRaw;
+		frame->kind = (uint8_t)(commandLow ^ commandHigh) == 0xffu ?
+			IrRemoteNecStandard : IrRemoteNecOpenLasir;
 		frame->blockId = block;
 		frame->deviceId = commandLow;
 		frame->mode = (uint8_t)((mOpenLasirRaw >> 24) & 0x1f);
@@ -149,13 +148,48 @@ bool irRemoteOpenLasirFeedSpaceUsec(uint32_t spaceUsec, struct IrRemoteOpenLasir
 	return true;
 }
 
-bool irRemoteOpenLasirPoll(struct IrRemoteOpenLasirFrame *frame)
+bool irRemoteNecPoll(struct IrRemoteNecFrame *frame)
 {
 	uint32_t spaceUsec;
 
 	while (mOpenLasirRxActive && irRemoteRxControl(IrRemoteRxControlPoll, &spaceUsec))
-		if (irRemoteOpenLasirFeedSpaceUsec(spaceUsec, frame))
+		if (irRemoteNecFeedSpaceUsec(spaceUsec, frame))
 			return true;
+	return false;
+}
+
+bool irRemoteOpenLasirFeedSpaceUsec(uint32_t spaceUsec, struct IrRemoteOpenLasirFrame *frame)
+{
+	struct IrRemoteNecFrame nec;
+
+	if (!irRemoteNecFeedSpaceUsec(spaceUsec, &nec) || nec.kind != IrRemoteNecOpenLasir)
+		return false;
+	if (frame) {
+		frame->raw = nec.raw;
+		frame->blockId = nec.blockId;
+		frame->deviceId = nec.deviceId;
+		frame->mode = nec.mode;
+		frame->data = nec.data;
+	}
+	return true;
+}
+
+bool irRemoteOpenLasirPoll(struct IrRemoteOpenLasirFrame *frame)
+{
+	struct IrRemoteNecFrame nec;
+
+	while (irRemoteNecPoll(&nec)) {
+		if (nec.kind != IrRemoteNecOpenLasir)
+			continue;
+		if (frame) {
+			frame->raw = nec.raw;
+			frame->blockId = nec.blockId;
+			frame->deviceId = nec.deviceId;
+			frame->mode = nec.mode;
+			frame->data = nec.data;
+		}
+		return true;
+	}
 	return false;
 }
 
@@ -167,22 +201,33 @@ static void irRemotePrvOpenLasirByte(uint8_t value)
 	}
 }
 
-void irRemoteOpenLasirSend(uint8_t blockId, uint8_t deviceId, uint8_t color)
+void irRemoteNecSend(uint32_t raw)
 {
 	bool restartRx = mOpenLasirRxActive;
-	uint8_t modeData = (uint8_t)((color & 7u) << 5);
 
 	if (restartRx)
 		irRemoteOpenLasirEndReceive();
 	irRemoteBegin();
 	irRemoteMarkUsec(38000, 9000);
 	irRemoteSpaceUsec(4500);
-	irRemotePrvOpenLasirByte(blockId);
-	irRemotePrvOpenLasirByte((uint8_t)~blockId);
-	irRemotePrvOpenLasirByte(deviceId);
-	irRemotePrvOpenLasirByte(modeData);
+	for (uint_fast8_t byte = 0; byte < 4u; byte++)
+		irRemotePrvOpenLasirByte((uint8_t)(raw >> (byte * 8u)));
 	irRemoteMarkUsec(38000, 563);
 	irRemoteEnd();
 	if (restartRx)
 		(void)irRemoteOpenLasirBeginReceive();
+}
+
+void irRemoteOpenLasirSendFrame(uint8_t blockId, uint8_t deviceId, uint8_t mode, uint8_t data)
+{
+	uint32_t raw = (uint32_t)blockId | ((uint32_t)(uint8_t)~blockId << 8) |
+		((uint32_t)deviceId << 16) | ((uint32_t)(mode & 31u) << 24) |
+		((uint32_t)(data & 7u) << 29);
+
+	irRemoteNecSend(raw);
+}
+
+void irRemoteOpenLasirSend(uint8_t blockId, uint8_t deviceId, uint8_t color)
+{
+	irRemoteOpenLasirSendFrame(blockId, deviceId, 0u, color);
 }

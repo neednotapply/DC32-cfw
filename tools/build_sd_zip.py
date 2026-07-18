@@ -279,7 +279,7 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
                 "qr_repository": QRCODEGEN_REPO,
                 "qr_commit": QRCODEGEN_COMMIT,
                 "sd_path": "APPS/lasertag.DC32",
-                "notes": "OpenLASIR mode-0 laser tag with DC32-native transmit/receive, persistent statistics, and a versioned unsigned QR/file sync export.",
+                "notes": "OpenLASIR Lab with passive NEC/OpenLASIR diagnostics, Mj0ln1r and DC33 test vectors, persistent packet history, and a versioned local unsigned diagnostic export.",
             },
             "openjazz_pack": {
                 "sd_path": "APPS/openjazz.pak",
@@ -939,8 +939,8 @@ contains generated pre-scaled RGB332 copies of that source's visible PNG sprites
 Scorched Earth, Pipe Dream, Sokoban, and Jazz Jackrabbit are included as
 source-derived/data-compatible ports. Jazz Jackrabbit includes Epic
 MegaGames' original unmodified shareware ZIP. This build accepts that
-shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
-{OPENLASIR_COMMIT} and uses Project Nayuki QR Code generator commit
+shareware data only. Laser Tag is a diagnostic-first OpenLASIR Lab based on
+commit {OPENLASIR_COMMIT} and uses Project Nayuki QR Code generator commit
 {QRCODEGEN_COMMIT}.
 
 ## APPS
@@ -989,7 +989,7 @@ shareware data only. Laser Tag implements OpenLASIR mode 0 from commit
 - QR generator: {QRCODEGEN_REPO} commit {QRCODEGEN_COMMIT}
 - QR license: MIT (`APPS/LICENSES/qrcodegen-LICENSE.txt`)
 - SD path: APPS/lasertag.DC32
-- Notes: Implements bidirectional OpenLASIR mode-0 play with DC32-native PIO receive capture, manual-fire rate limits, hit lockout, hardware-bound locked identity, persistent statistics, and a versioned unsigned QR/file sync export. The export is not Dani's private leaderboard submission format.
+- Notes: Passively classifies valid OpenLASIR and standard NEC packets, records a persistent 32-packet history, and provides manually confirmed Mj0ln1r, Defcon33 legacy, and custom OpenLASIR test sends. The versioned local unsigned QR/file diagnostic export is not Dani's private leaderboard submission format.
 
 ## RaspyJack Remote
 

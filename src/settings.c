@@ -11,7 +11,6 @@
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
-#define SETTINGS_LED_MIN_BRIGHTNESS	15
 #define SETTINGS_AUDIO_VOLUME_MAX	15
 #define SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13	9
 #define SETTINGS_BADUSB_DEFAULT_VID	0x1209
@@ -87,8 +86,6 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->ledColor = LedColorCustom;
 	if (settings->ledSpeed < SETTINGS_LED_MIN_SPEED || settings->ledSpeed > SETTINGS_LED_MAX_SPEED)
 		settings->ledSpeed = 4;
-	if (settings->ledBrightness < SETTINGS_LED_MIN_BRIGHTNESS)
-		settings->ledBrightness = SETTINGS_LED_MIN_BRIGHTNESS;
 	if (settings->audioVolume > SETTINGS_AUDIO_VOLUME_MAX)
 		settings->audioVolume = 7;
 	if (!settings->badUsbVid)

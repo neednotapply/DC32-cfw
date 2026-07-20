@@ -90,25 +90,35 @@ static void audioPwmPrvClearDuty(void)
 	pwm_hw->slice[AUDIO_PWM_IDX].cc = 0;
 }
 
-static void audioPwmPrvWriteToneDuty(void)
+static uint8_t audioPwmPrvVolumeGain(uint_fast8_t volume)
 {
-	static const uint16_t toneGain[AUDIO_PWM_VOLUME_MAX + 1] = {
-		0, 16, 24, 34, 46, 60, 76, 94, 114, 136, 160, 188, 220, 256, 294, 336
+	/*
+	 * Keep the full-scale endpoint, but make the lower user-visible levels
+	 * genuinely quiet.  Settings still exposes all 16 levels so the curve can
+	 * be reviewed before choosing a smaller range.
+	 */
+	static const uint8_t volumeGain[AUDIO_PWM_VOLUME_MAX + 1] = {
+		0, 1, 2, 3, 4, 6, 8, 11, 15, 21, 30, 43, 62, 91, 137, 255
 	};
 
-	uint_fast8_t effective = (mVolume * mMasterVolume + AUDIO_PWM_VOLUME_MAX / 2u) /
-		AUDIO_PWM_VOLUME_MAX;
+	return volumeGain[volume];
+}
 
-	audioPwmPrvWriteDuty((mToneDuty * toneGain[effective]) / (256 * 2));
+static void audioPwmPrvWriteToneDuty(void)
+{
+	uint32_t gain = ((uint32_t)audioPwmPrvVolumeGain(mVolume) *
+		audioPwmPrvVolumeGain(mMasterVolume) + 127u) / 255u;
+
+	audioPwmPrvWriteDuty((uint32_t)(((uint64_t)mToneDuty * gain * 336u) / (255u * 256u * 2u)));
 }
 
 static void audioPwmPrvWritePcmDuty(uint8_t sample)
 {
 	int32_t centered = (int32_t)sample - 128;
 	int32_t top = (int32_t)mPcmTop;
-	int32_t duty = top / 2 + (centered * (top / 2) * (int32_t)mVolume *
-		(int32_t)mMasterVolume) /
-		(128 * AUDIO_PWM_VOLUME_MAX * AUDIO_PWM_VOLUME_MAX);
+	uint32_t gain = ((uint32_t)audioPwmPrvVolumeGain(mVolume) *
+		audioPwmPrvVolumeGain(mMasterVolume) + 127u) / 255u;
+	int32_t duty = top / 2 + (int32_t)(((int64_t)centered * (top / 2) * gain) / (128 * 255));
 
 	if (duty < 0)
 		duty = 0;

@@ -10,7 +10,6 @@
 #define LED_NON_SETTINGS_REFRESH_TICKS	TICKS_PER_SECOND
 #define LED_DYNAMIC_STALL_TICKS		(TICKS_PER_SECOND * 2)
 #define LED_DEFAULT_TINT				56
-#define LED_MIN_BRIGHTNESS				15
 #define LED_MIN_SPEED					1
 #define LED_MAX_SPEED					10
 #define LED_REACTIVE_DEFAULT_SPEED		4
@@ -68,7 +67,7 @@ static uint_fast8_t badgeLedsPrvBrightness(void)
 
 static uint_fast8_t badgeLedsPrvSanitizeBrightness(uint_fast8_t brightness)
 {
-	return brightness >= LED_MIN_BRIGHTNESS ? brightness : LED_MIN_BRIGHTNESS;
+	return brightness > 255u ? 255u : brightness;
 }
 
 static bool badgeLedsPrvModeIsAnimated(uint_fast8_t mode)

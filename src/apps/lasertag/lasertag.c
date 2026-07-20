@@ -514,7 +514,7 @@ static void ltRenderLeds(struct LtApp *app, uint64_t now)
 		settingsGet(&app->baseSettings);
 		app->nextLedSettingsRefresh = now + TICKS_PER_SECOND / 4u;
 	}
-	brightness = app->baseSettings.ledBrightness < 15u ? 15u : app->baseSettings.ledBrightness;
+	brightness = app->baseSettings.ledBrightness;
 	speedFactor = ltLedSpeedFactor(app->baseSettings.ledSpeed);
 	dotPeriod = TICKS_PER_SECOND / speedFactor;
 	hitAlternateTicks = TICKS_PER_SECOND / speedFactor;

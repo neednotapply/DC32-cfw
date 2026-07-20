@@ -3262,10 +3262,8 @@ reload_dir:
 	}
 #endif
 
-#define LED_BRIGHTNESS_RAW_MIN			15
+#define LED_BRIGHTNESS_RAW_MIN			0
 #define LED_BRIGHTNESS_RAW_MAX			255
-#define LED_BRIGHTNESS_MENU_MIN			1
-#define LED_BRIGHTNESS_MENU_MAX			10
 #define LED_COLOR_RAW_MAX				255
 #define LED_COLOR_MENU_MAX				25
 #define LED_SPEED_MENU_MIN				1
@@ -3273,22 +3271,16 @@ reload_dir:
 
 static uint_fast8_t uiPrvLedBrightnessToMenu(uint_fast8_t brightness)
 {
-	if (brightness <= LED_BRIGHTNESS_RAW_MIN)
-		return LED_BRIGHTNESS_MENU_MIN;
 	if (brightness >= LED_BRIGHTNESS_RAW_MAX)
-		return LED_BRIGHTNESS_MENU_MAX;
-
-	return LED_BRIGHTNESS_MENU_MIN + (((uint32_t)brightness - LED_BRIGHTNESS_RAW_MIN) * (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) + (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) / 2) / (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN);
+		return LED_BRIGHTNESS_RAW_MAX;
+	return brightness;
 }
 
 static uint8_t uiPrvLedBrightnessFromMenu(uint_fast8_t brightness)
 {
-	if (brightness <= LED_BRIGHTNESS_MENU_MIN)
-		return LED_BRIGHTNESS_RAW_MIN;
-	if (brightness >= LED_BRIGHTNESS_MENU_MAX)
+	if (brightness >= LED_BRIGHTNESS_RAW_MAX)
 		return LED_BRIGHTNESS_RAW_MAX;
-
-	return LED_BRIGHTNESS_RAW_MIN + (((uint32_t)brightness - LED_BRIGHTNESS_MENU_MIN) * (LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) + (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) / 2) / (LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN);
+	return (uint8_t)brightness;
 }
 
 static uint_fast8_t uiPrvLedColorToMenu(uint_fast8_t color)
@@ -3401,13 +3393,13 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 			uint_fast8_t brightness = uiPrvLedBrightnessToMenu(settings->ledBrightness);
 
 			if (button == KEY_BIT_LEFT) {
-				if (brightness > LED_BRIGHTNESS_MENU_MIN)
+				if (brightness > LED_BRIGHTNESS_RAW_MIN)
 					brightness--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (brightness < LED_BRIGHTNESS_MENU_MAX)
+				if (brightness < LED_BRIGHTNESS_RAW_MAX)
 					brightness++;
 				else
 					continue;

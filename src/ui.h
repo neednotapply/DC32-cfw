@@ -45,14 +45,16 @@ enum GameRuntime {
 	GameRuntimeArduboy,
 };
 
-#define UI_FN_SETTINGS_MAX 6u
+#define UI_FN_SETTINGS_MAX 8u
 
 struct UiFnSettings {
 	const char *title;
+	const char *menuLabel;
 	uint8_t count;
 	const char *const *labels;
 	void (*value)(void *context, uint8_t index, char *dst, uint32_t dstSize);
 	void (*adjust)(void *context, uint8_t index, int8_t direction);
+	bool directOpen;
 };
 
 #define UI_KEY_BIT_CENTER	0x100u

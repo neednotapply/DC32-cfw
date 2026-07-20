@@ -8,6 +8,7 @@ import binascii
 import hashlib
 import struct
 import tempfile
+import zipfile
 from pathlib import Path
 
 from lasertag_protocol import COLOR_NAMES, MODE_NAMES, classify_raw, parse_flipper_ir
@@ -130,24 +131,63 @@ def check_wiring_and_contracts() -> None:
     header = (ROOT / "src/irRemote.h").read_text(encoding="utf-8")
     ir = (ROOT / "src/irRemote.c").read_text(encoding="utf-8")
     app = (ROOT / "src/apps/lasertag/lasertag.c").read_text(encoding="utf-8")
+    leds = (ROOT / "src/badgeLeds.c").read_text(encoding="utf-8")
+    catalog = (ROOT / "src/dcApp.c").read_text(encoding="utf-8")
     package = (ROOT / "tools/build_sd_zip.py").read_text(encoding="utf-8")
     ui = (ROOT / "src/ui.c").read_text(encoding="utf-8")
+    ui_header = (ROOT / "src/ui.h").read_text(encoding="utf-8")
+    draw = (ROOT / "src/dcAppDraw.c").read_text(encoding="utf-8")
     require("add_dcapp(dcapp_lasertag lasertag 106" in cmake, "Laser Tag target missing")
-    require('"Universal Remote"' in ui and '"Laser Tag"' in ui, "Infrared menu label/wiring missing")
+    require('"Universal Remote"' in ui and '"OpenLasir Tag"' in ui,
+            "Infrared menu label/wiring missing")
+    require('"OpenLasir Tag"' in catalog, "OpenLasir Tag catalog name missing")
     for token in ("struct IrRemoteNecFrame", "IrRemoteNecOpenLasir", "IrRemoteNecStandard",
                   "irRemoteNecPoll", "irRemoteNecSend", "irRemoteOpenLasirSendFrame"):
         require(token in header and token in ir, f"generic NEC API missing {token}")
-    for token in ("OPENLASIR LAB", "MANUAL TRANSMIT", "PACKET HISTORY", "LOCAL DIAGNOSTIC EXPORT",
-                  "Mj0ln1r fire", "DC33 legacy", "mLtDc33Raw", "LT_EVENTS 32u", "LT_EVENT_TX",
-                  "LT_EVENT_OPENLASIR", "LT_SYNC_PREFIX \"DC32LT2.\"", "UNSIGNED DC32 EXPORT - NOT OFFICIAL SYNC",
-                  "irRemoteNecPoll", "irRemoteNecSend", "ltModeName", "CONFIRM MANUAL SEND", "legacyVector"):
+    for token in ("OPENLASIR TAG", "SHOTS FIRED", "HITS RECEIVED", "LAST ACTIVITY",
+                  "Shots fired by %s", "Hit by %s", "TEAM & SCOREBOARD", "SCAN FOR TEAM SCORES",
+                  "dani.pink/lasertag/leaderboard", "LT_LEADERBOARD_QR_SIZE 29u", "mLtLeaderboardQr",
+                  "SELECT: TEAM & SCORES", "FN: OPTIONS / EXIT", "PERSONAL EVENT LOG",
+                  "Mj0ln1r by Viking", "mLtDc33Raw", "LT_EVENTS 32u", "LT_EVENT_TX",
+                  "LT_EVENT_OPENLASIR",
+                  "irRemoteNecPoll", "irRemoteNecSend", "ltModeName", "ltTeamName", "ltTransmit(app, now)",
+                  "legacyVector", "DC32cfwCyan", "DC32cfwMag", "DC32cfwYello", "DC32cfwGreen", "DC32cfwRed",
+                  "DC32cfwBlue", "DC32cfwOrang", "DC32cfwWhite", "LT_SAVE_VERSION 7u",
+                  "TamaBadge", "Array BlastIR", "LaserBag by blorfus", "CyanDolphin", "OrangDolphib",
+                  "MrUnicorn", "LtProfileTeamFire", "ltRandomTeam", "ltSetTeam", "mLtTeams",
+                  "ltRenderLeds", "LT_HIT_SIGNAL_TICKS",
+                  "hitFlashOn", "frame.data & 7u", "LT_SHOT_SIGNAL_TICKS", "pioWS2812.h",
+                  "badgeLedsGameWrite", "audioPwm.h", "LtSoundFire", "LtSoundHit", "ltStartSound",
+                  "ltUpdateSound", "LT_FIRE_BEEP_TICKS", "LT_HIT_SIREN_TICKS", "settingsGet(&app->baseSettings)",
+                  "audioMuted", "ledBrightness", "ledSpeed", "ltLedSpeedFactor", "nextLedSettingsRefresh", "mLtFnSettings",
+                  "\"TEAM\"", "OpenLasir Settings", "setFnSettings", "FN: OPTIONS / EXIT",
+                  "returnedFromPortMenu", "menuLabel",
+                  "DcAppToolActionLaserTagSettings", "directOpen"):
         require(token in app, f"diagnostic app contract missing {token}")
-    require("OpenLASIR Lab" in package and "Mj0ln1r" in package, "package metadata was not updated")
+    for token in ("qrcodegen", "LT_SYNC_PREFIX", "LtViewExport", "QR EXPORT", "LASERTAG.SYNC",
+                  "TEAM SCORE: NOT ON BADGE", "PERSONAL ACTIVITY - THIS BADGE", "LISTENING"):
+        require(token not in app, f"OpenLasir Tag still includes removed QR export feature: {token}")
+    require("NeedNotApply" not in app, "DC32 team labels still include the author suffix")
+    require("#define UI_FN_SETTINGS_MAX 8u" in ui_header,
+            "OpenLASIR's complete manual configuration must fit in FN settings")
+    require("ctx->returnedFromPortMenu = resume;" in draw,
+            "DC app display options must refresh when the FN menu returns")
+    require("void badgeLedsGameWrite(void)" in leds and "badgeLedsPrvArmDynamicWatchdog();" in leds,
+            "Laser Tag LED ownership must be watchdog-protected")
+    require("OpenLasir Tag" in package and "official scoreboard" in package and "local event export" not in package,
+            "package metadata does not describe the team-score model")
     artifact = ROOT / "build/apps/lasertag.DC32"
     if artifact.exists():
         data = artifact.read_bytes()
         require(len(data) < 256 * 1024 and struct.unpack_from("<I", data)[0] == 0x50414344,
                 "Laser Tag app artifact is invalid")
+        for marker in (b"OpenLasir Settings", b"TEAM", b"DC32cfwCyan", b"SELECT: TEAM & SCORES"):
+            require(marker in data, f"Laser Tag app artifact is stale: missing {marker!r}")
+        bundle = ROOT / "build/SD-apps.zip"
+        if bundle.is_file():
+            with zipfile.ZipFile(bundle) as archive:
+                require(archive.read("APPS/lasertag.DC32") == data,
+                        "SD-apps.zip contains a stale Laser Tag app artifact")
 
 
 def main() -> None:
@@ -155,7 +195,7 @@ def main() -> None:
     check_protocol_model()
     check_sync_decoder()
     check_wiring_and_contracts()
-    print("Laser Tag Lab checks passed")
+    print("OpenLasir Tag checks passed")
 
 
 if __name__ == "__main__":

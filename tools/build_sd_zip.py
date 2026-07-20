@@ -272,14 +272,9 @@ def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
             "lasertag": {
                 "repository": OPENLASIR_REPO,
                 "commit": OPENLASIR_COMMIT,
-                "licenses": [
-                    "third_party/openlasir/LICENSE",
-                    "third_party/qrcodegen/LICENSE",
-                ],
-                "qr_repository": QRCODEGEN_REPO,
-                "qr_commit": QRCODEGEN_COMMIT,
+                "licenses": ["third_party/openlasir/LICENSE"],
                 "sd_path": "APPS/lasertag.DC32",
-                "notes": "OpenLASIR Lab with passive NEC/OpenLASIR diagnostics, Mj0ln1r and DC33 test vectors, persistent packet history, and a versioned local unsigned diagnostic export.",
+                "notes": "OpenLasir Tag with team-ID firing, locally observed shot/hit activity, passive NEC/OpenLASIR diagnostics, and a fixed QR link to the official team leaderboard. Team totals remain on the official scoreboard.",
             },
             "openjazz_pack": {
                 "sd_path": "APPS/openjazz.pak",
@@ -986,10 +981,8 @@ commit {OPENLASIR_COMMIT} and uses Project Nayuki QR Code generator commit
 - Repository: {OPENLASIR_REPO}
 - Commit: {OPENLASIR_COMMIT}
 - License: MIT (`APPS/LICENSES/openlasir-LICENSE.txt`)
-- QR generator: {QRCODEGEN_REPO} commit {QRCODEGEN_COMMIT}
-- QR license: MIT (`APPS/LICENSES/qrcodegen-LICENSE.txt`)
 - SD path: APPS/lasertag.DC32
-- Notes: Passively classifies valid OpenLASIR and standard NEC packets, records a persistent 32-packet history, and provides manually confirmed Mj0ln1r, Defcon33 legacy, and custom OpenLASIR test sends. The versioned local unsigned QR/file diagnostic export is not Dani's private leaderboard submission format.
+- Notes: Fires the selected DC32 team identity, passively classifies valid OpenLASIR and standard NEC packets, and keeps a persistent local event history. Team scores are reported by official badges to the official scoreboard; this app does not submit scores.
 
 ## RaspyJack Remote
 

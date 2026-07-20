@@ -19,6 +19,7 @@ struct DcAppDrawCtx {
 	uint_fast16_t prevKeys;
 	uint_fast16_t pressed;
 	uint32_t frame;
+	bool returnedFromPortMenu;
 	struct FatfsVol *vol;
 };
 

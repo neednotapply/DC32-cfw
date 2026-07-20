@@ -60,6 +60,7 @@ enum DcAppToolAction {
 	DcAppToolActionImageFile,
 	DcAppToolActionMusicFile,
 	DcAppToolActionBadUsbFile,
+	DcAppToolActionLaserTagSettings,
 };
 
 struct DcAppImageHeader {

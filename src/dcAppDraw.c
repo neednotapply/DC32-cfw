@@ -530,6 +530,7 @@ bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)
 {
 	if (!ctx)
 		return false;
+	ctx->returnedFromPortMenu = false;
 	dispPrvFrameCtrWait();
 	if (ctx->host && ctx->host->ledsTick)
 		ctx->host->ledsTick();
@@ -542,6 +543,7 @@ bool dcAppDrawFrame(struct DcAppDrawCtx *ctx, uint_fast16_t exitMask)
 	if ((ctx->pressed & UI_KEY_BIT_CENTER) && ctx->host && ctx->host->portMenu) {
 		bool resume = ctx->host->portMenu(&ctx->displayCnv);
 
+		ctx->returnedFromPortMenu = resume;
 		ctx->keys = ctx->host->uiKeysRaw ? ctx->host->uiKeysRaw() : 0;
 		ctx->prevKeys = ctx->keys;
 		ctx->pressed = 0;

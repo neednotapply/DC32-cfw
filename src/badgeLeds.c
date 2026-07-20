@@ -596,6 +596,7 @@ void badgeLedsWatchdogTick(void)
 void badgeLedsGameWrite(void)
 {
 	mLastGameLedWriteTime = getTime();
+	badgeLedsPrvArmDynamicWatchdog();
 }
 
 bool badgeLedsGameRefresh(void)

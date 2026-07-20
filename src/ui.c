@@ -4473,6 +4473,24 @@ static void uiPrvMusicAppSettings(struct Canvas *cnv, struct Settings *settings)
 static void uiPrvAutoclickerAppSettings(struct Canvas *cnv, struct Settings *settings);
 static void uiPrvPongAppSettings(struct Canvas *cnv, struct Settings *settings);
 static void uiPrvTetrisAppSettings(struct Canvas *cnv, struct Settings *settings);
+static bool uiPrvRunSdApp(struct Canvas *cnv, enum DcAppId appId, enum DcAppToolAction action,
+	struct FatfsVol *vol, const struct FatFileLocator *locator, const char *name, const char *parentPath);
+
+static void uiPrvLaserTagAppSettings(struct Canvas *cnv)
+{
+#ifndef NO_SD_CARD
+	struct FatfsVol *vol = uiPrvMountCard(cnv, false);
+
+	if (!vol)
+		return;
+	uiPrvSetHeaderTitle("OpenLasir Settings");
+	(void)uiPrvRunSdApp(cnv, DcAppIdToolLaserTag, DcAppToolActionLaserTagSettings,
+		vol, NULL, NULL, NULL);
+	(void)fatfsUnmount(vol);
+#else
+	uiAlert(cnv, "OpenLasir Tag requires SD card support", DialogTypeOk);
+#endif
+}
 
 static bool uiPrvAppSettings(struct Canvas *cnv, struct Settings *settings)
 {
@@ -4484,10 +4502,11 @@ static bool uiPrvAppSettings(struct Canvas *cnv, struct Settings *settings)
 		AppSettingsEmulators,
 		AppSettingsPong,
 		AppSettingsTetris,
+		AppSettingsLaserTag,
 		AppSettingsBack,
 	};
 	static const char *const labels[] = {
-		"File Manager", "Music", "Autoclicker", "BadUSB", "Emulators", "Pong", "Tetris", "Back",
+		"File Manager", "Music", "Autoclicker", "BadUSB", "Emulators", "Pong", "Tetris", "OpenLasir", "Back",
 	};
 	bool restartCurGame = false;
 	uint_fast8_t selected = 0;
@@ -4523,6 +4542,9 @@ static bool uiPrvAppSettings(struct Canvas *cnv, struct Settings *settings)
 			break;
 		case AppSettingsTetris:
 			uiPrvTetrisAppSettings(cnv, settings);
+			break;
+		case AppSettingsLaserTag:
+			uiPrvLaserTagAppSettings(cnv);
 			break;
 		default:
 			break;
@@ -12115,6 +12137,10 @@ bool uiPortMenu(struct Canvas *activeCanvas)
 	uint_fast8_t selOption = PortMenuOptionResume;
 
 	uiPrvWaitKeysReleased();
+	if (mUiFnSettings && mUiFnSettings->directOpen) {
+		uiPrvFnAppSettingsMenu(cnv);
+		return !uiPrvToolExitRequested();
+	}
 	while (1) {
 		const char *labels[6];
 		uint_fast8_t optionIds[6], numOptions = 0;
@@ -12125,7 +12151,8 @@ bool uiPortMenu(struct Canvas *activeCanvas)
 		labels[numOptions] = "Resume";
 		optionIds[numOptions++] = PortMenuOptionResume;
 		if (mUiFnSettings) {
-			labels[numOptions] = "App Settings";
+			labels[numOptions] = mUiFnSettings->menuLabel && mUiFnSettings->menuLabel[0] ?
+				mUiFnSettings->menuLabel : "App Settings";
 			optionIds[numOptions++] = PortMenuOptionAppSettings;
 		}
 		labels[numOptions] = "Audio";
@@ -12401,7 +12428,7 @@ static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF ru
 {
 	static const struct UiCategoryEntry entries[] = {
 		{"Universal Remote", UiCategoryEntryTool, UiToolIr, 0},
-		{"Laser Tag", UiCategoryEntrySdApp, UiToolInfrared, DcAppIdToolLaserTag},
+		{"OpenLasir Tag", UiCategoryEntrySdApp, UiToolInfrared, DcAppIdToolLaserTag},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolInfrared, "Infrared", entries,

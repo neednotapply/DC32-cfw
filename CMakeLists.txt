@@ -586,7 +586,6 @@ add_dcapp(dcapp_lasertag lasertag 106
     ${SRC_DIR}/apps/lasertag/lasertag.c
     ${SRC_DIR}/dcAppDraw.c
     ${SRC_DIR}/irRemote.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen/qrcodegen.c
 )
 
 add_dcapp(dcapp_raspyjack raspyjack 107
@@ -603,21 +602,8 @@ add_dcapp(dcapp_pwnagotchi pwnagotchi 108
     ${SRC_DIR}/raster.c
 )
 
-set(DC32_LASERTAG_BLOCK_ID "0" CACHE STRING "Provisioned OpenLASIR Block ID (0-255)")
-set(DC32_LASERTAG_DEVICE_ID "256" CACHE STRING "Provisioned OpenLASIR Device ID (0-255, or 256 for flash-UID-derived)")
-if(DC32_LASERTAG_BLOCK_ID LESS 0 OR DC32_LASERTAG_BLOCK_ID GREATER 255)
-    message(FATAL_ERROR "DC32_LASERTAG_BLOCK_ID must be 0-255")
-endif()
-if(DC32_LASERTAG_DEVICE_ID LESS 0 OR DC32_LASERTAG_DEVICE_ID GREATER 256)
-    message(FATAL_ERROR "DC32_LASERTAG_DEVICE_ID must be 0-256")
-endif()
-target_include_directories(dcapp_lasertag PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qrcodegen
-)
 target_compile_definitions(dcapp_lasertag PRIVATE
     NDEBUG=1
-    LT_PROVISIONED_BLOCK_ID=${DC32_LASERTAG_BLOCK_ID}
-    LT_PROVISIONED_DEVICE_ID=${DC32_LASERTAG_DEVICE_ID}
 )
 
 set(DEMOS_APP_SOURCES

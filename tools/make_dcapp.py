@@ -14,8 +14,17 @@ from pathlib import Path
 
 DCAPP_MAGIC = 0x50414344
 DCAPP_HEADER_SIZE = 256
-DCAPP_CONTRACT_MAGIC = 0x43444332
-DCAPP_CONTRACT_HASH_WORDS = 4
+DCAPP_METADATA_MAGIC = 0x314D4344
+DCAPP_METADATA_SCHEMA = 1
+DCAPP_METADATA_NAME_SIZE = 64
+CATEGORY_IDS = {
+    "games": 1,
+    "ports": 2,
+    "demos": 3,
+    "media": 4,
+    "infrared": 5,
+    "usb": 6,
+}
 
 SYMBOL_NAMES = {
     "__data_data",
@@ -39,13 +48,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--elf", required=True, type=Path)
     parser.add_argument("--raw", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--abi-version", required=True, type=parse_int)
+    parser.add_argument("--abi-version", required=True, type=parse_int,
+                        help="SDK ABI required by this app")
     parser.add_argument("--runtime-id", required=True, type=parse_int)
     parser.add_argument("--flags", type=parse_int, default=0)
     parser.add_argument("--load-addr", required=True, type=parse_int)
     parser.add_argument("--app-ram-start", required=True, type=parse_int)
     parser.add_argument("--app-ram-size", required=True, type=parse_int)
-    parser.add_argument("--contract-header", required=True, type=Path)
+    parser.add_argument("--app-name", required=True)
+    parser.add_argument("--category", required=True, choices=sorted(CATEGORY_IDS))
     return parser.parse_args()
 
 
@@ -84,21 +95,18 @@ def optional_thumb_offset(symbols: dict[str, int], name: str, load_addr: int) ->
     return (symbols[name] - load_addr) | 1
 
 
-def read_contract_words(path: Path) -> list[int]:
-    text = path.read_text(encoding="ascii")
-    match = re.search(r"^#define\s+DCAPP_BUILD_CONTRACT_WORDS\s+(.+)$", text, re.MULTILINE)
-    if not match:
-        raise RuntimeError(f"{path} does not define DCAPP_BUILD_CONTRACT_WORDS")
-    words = [int(part.rstrip("uU"), 0) for part in match.group(1).split(",")]
-    if len(words) != DCAPP_CONTRACT_HASH_WORDS:
-        raise RuntimeError(f"{path} has {len(words)} contract words, expected {DCAPP_CONTRACT_HASH_WORDS}")
-    return words
+def metadata(name: str, category: str, sdk_abi: int) -> bytes:
+    encoded = name.encode("utf-8")
+    if not encoded or len(encoded) > DCAPP_METADATA_NAME_SIZE:
+        raise RuntimeError(f"--app-name must be 1-{DCAPP_METADATA_NAME_SIZE} UTF-8 bytes")
+    return struct.pack("<IHHBBH64s80s", DCAPP_METADATA_MAGIC, DCAPP_METADATA_SCHEMA,
+                       sdk_abi, CATEGORY_IDS[category], len(encoded), 0,
+                       encoded.ljust(DCAPP_METADATA_NAME_SIZE, b"\0"), b"\0" * 80)
 
 
 def main() -> int:
     args = parse_args()
     symbols = read_symbols(args.nm, args.elf)
-    contract_words = read_contract_words(args.contract_header)
     raw = bytearray(args.raw.read_bytes())
     if len(raw) < DCAPP_HEADER_SIZE:
         raise RuntimeError(f"{args.raw} is smaller than the DCAPP header")
@@ -114,12 +122,8 @@ def main() -> int:
     build_id = hashlib.sha256(payload).digest()
     crc32 = binascii.crc32(payload) & 0xFFFFFFFF
 
-    reserved = [0] * 39
-    reserved[0] = DCAPP_CONTRACT_MAGIC
-    reserved[1 : 1 + DCAPP_CONTRACT_HASH_WORDS] = contract_words
-
     header = struct.pack(
-        "<IHH" + "I" * 14 + "32sI" + "I" * 39,
+        "<IHH" + "I" * 14 + "32sI156s",
         DCAPP_MAGIC,
         DCAPP_HEADER_SIZE,
         args.abi_version,
@@ -139,7 +143,7 @@ def main() -> int:
         args.app_ram_size,
         build_id,
         crc32,
-        *reserved,
+        metadata(args.app_name, args.category, args.abi_version),
     )
     if len(header) != DCAPP_HEADER_SIZE:
         raise RuntimeError(f"internal header size error: {len(header)}")

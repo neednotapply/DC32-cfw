@@ -56,45 +56,40 @@ set(DCAPP_LARGE_LOAD_START 0x10100000)
 set(DCAPP_RAM_START 0x2005F000)
 set(DCAPP_RAM_SIZE 0x00014000)
 
-set(DCAPP_BUILD_CONTRACT "${CMAKE_CURRENT_BINARY_DIR}/dcapp_build_contract.h")
 file(STRINGS "${SRC_DIR}/dcApp.h" DCAPP_ABI_VERSION_DEFINE
-    REGEX "^#define[ \t]+DCAPP_ABI_VERSION[ \t]+[0-9]+u?")
+    REGEX "^#define[ \t]+DCAPP_SDK_ABI[ \t]+[0-9]+u?")
 string(REGEX MATCH "[0-9]+" DCAPP_ABI_VERSION "${DCAPP_ABI_VERSION_DEFINE}")
 if(NOT DCAPP_ABI_VERSION)
     message(FATAL_ERROR "Could not determine DCAPP_ABI_VERSION from src/dcApp.h")
 endif()
 
-file(GLOB_RECURSE DCAPP_BUILD_CONTRACT_INPUTS CONFIGURE_DEPENDS
-    "${SRC_DIR}/*.c"
-    "${SRC_DIR}/*.cpp"
-    "${SRC_DIR}/*.h"
-    "${SRC_DIR}/*.S"
-    "${SRC_DIR}/*.lkr"
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/*.cmake"
-    "${TINYUSB_DIR}/src/*.c"
-    "${TINYUSB_DIR}/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/pngle/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/image_decoders/picojpeg/*.h"
-)
-list(FILTER DCAPP_BUILD_CONTRACT_INPUTS EXCLUDE REGEX "[/\\\\]src[/\\\\]apps[/\\\\]")
-list(APPEND DCAPP_BUILD_CONTRACT_INPUTS
-    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_build_contract.py"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_host_symbols.py"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_dcapp.py"
-)
+set(DCAPP_ABI_VENEERS "${CMAKE_CURRENT_BINARY_DIR}/dcapp_abi_veneers.S")
 add_custom_command(
-    OUTPUT ${DCAPP_BUILD_CONTRACT}
-    DEPENDS ${DCAPP_BUILD_CONTRACT_INPUTS}
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_build_contract.py
-        --root ${CMAKE_CURRENT_SOURCE_DIR}
-        --output ${DCAPP_BUILD_CONTRACT}
-        ${DCAPP_BUILD_CONTRACT_INPUTS}
+    OUTPUT ${DCAPP_ABI_VENEERS}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_abi_veneers.py
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_abi_veneers.py
+        --output ${DCAPP_ABI_VENEERS}
     VERBATIM
 )
-add_custom_target(dcapp_build_contract DEPENDS ${DCAPP_BUILD_CONTRACT})
+add_custom_target(dcapp_abi_veneers DEPENDS ${DCAPP_ABI_VENEERS})
+
+set(DCAPP_SDK_ARCHIVE "${CMAKE_CURRENT_BINARY_DIR}/DC32-App-SDK-v${DCAPP_ABI_VERSION}.zip")
+add_custom_command(
+    OUTPUT ${DCAPP_SDK_ARCHIVE}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_dcapp_sdk.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_abi_veneers.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_dcapp.py
+		${CMAKE_CURRENT_SOURCE_DIR}/sdk/DC32App.cmake
+        ${SRC_DIR}/dcApp.h
+		${SRC_DIR}/syscalls.c
+        ${SRC_DIR}/linker_dcapp.lkr
+        ${SRC_DIR}/linker_dcapp_large.lkr
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/build_dcapp_sdk.py
+        --output ${DCAPP_SDK_ARCHIVE}
+    VERBATIM
+)
+add_custom_target(dcapp_sdk DEPENDS ${DCAPP_SDK_ARCHIVE})
 
 set(GB_RUNTIME_SOURCES
     ${SRC_DIR}/gb.c
@@ -121,6 +116,7 @@ set(ARDUBOY_RUNTIME_SOURCES
 )
 
 add_executable(${APP}
+	${DCAPP_ABI_VENEERS}
     ${SRC_DIR}/audioPwm.c
     ${SRC_DIR}/arduboy/arduboy_format.cpp
     ${SRC_DIR}/badgePower.c
@@ -188,7 +184,6 @@ target_include_directories(${APP} PRIVATE
     ${TINYUSB_DIR}/src
     ${TINYUSB_DIR}/src/portable/raspberrypi/rp2040
 )
-add_dependencies(${APP} dcapp_build_contract)
 
 target_compile_definitions(${APP} PRIVATE
     EMBEDDED
@@ -208,6 +203,7 @@ target_compile_definitions(${APP} PRIVATE
     ZWT_ADDR=0x20081ff8
     PICO_BOARD="${PICO_BOARD}"
 )
+add_dependencies(${APP} dcapp_abi_veneers)
 
 target_compile_options(${APP} PRIVATE
     -Ofast
@@ -392,7 +388,9 @@ target_link_options(${APP} PRIVATE
 target_link_libraries(${APP} PRIVATE m)
 
 add_custom_command(TARGET ${APP} POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${APP}> ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin -j.text -j.rodata -j.data -j.vectors
+    # SDK-v1 apps import through fixed veneers at 0x10070000.  Keep this
+    # section in the flat image so the UF2 programs it on the badge.
+    COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${APP}> ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin -j.text -j.rodata -j.data -j.vectors -j.dcapp_abi_veneer
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/bin_to_uf2.py
         ${CMAKE_CURRENT_BINARY_DIR}/${APP}.bin
         ${CMAKE_CURRENT_BINARY_DIR}/${APP}.uf2
@@ -411,11 +409,12 @@ add_custom_command(TARGET ${APP} POST_BUILD
 set(DCAPP_HOST_SYMBOLS "${CMAKE_CURRENT_BINARY_DIR}/dcapp_host_symbols.ld")
 add_custom_command(
     OUTPUT ${DCAPP_HOST_SYMBOLS}
-    DEPENDS ${APP}
+    DEPENDS ${APP} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_host_symbols.py
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_dcapp_host_symbols.py
         --nm ${CMAKE_NM}
         --elf $<TARGET_FILE:${APP}>
         --output ${DCAPP_HOST_SYMBOLS}
+		--veneer-prefix dcapp_abi_veneer_
     VERBATIM
 )
 add_custom_target(dcapp_host_symbols DEPENDS ${DCAPP_HOST_SYMBOLS})
@@ -425,7 +424,10 @@ get_target_property(DC32_FIRMWARE_COMPILE_DEFINITIONS ${APP} COMPILE_DEFINITIONS
 get_target_property(DC32_FIRMWARE_COMPILE_OPTIONS ${APP} COMPILE_OPTIONS)
 
 function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
-    cmake_parse_arguments(DCAPP "LARGE_XIP;CXX_EXCEPTIONS" "" "" ${ARGN})
+    cmake_parse_arguments(DCAPP "LARGE_XIP;CXX_EXCEPTIONS" "CATEGORY" "" ${ARGN})
+    if(NOT DCAPP_CATEGORY)
+        set(DCAPP_CATEGORY ports)
+    endif()
     if(DCAPP_LARGE_XIP)
         if(DCAPP_CXX_EXCEPTIONS)
             set(DCAPP_TARGET_LINKER_SCRIPT "${DCAPP_LARGE_EH_LINKER_SCRIPT}")
@@ -447,7 +449,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
     set(DCAPP_FILE "${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.DC32")
 
     add_executable(${TARGET_NAME} ${DCAPP_UNPARSED_ARGUMENTS} ${SRC_DIR}/syscalls.c)
-    add_dependencies(${TARGET_NAME} dcapp_host_symbols dcapp_build_contract)
+    add_dependencies(${TARGET_NAME} dcapp_host_symbols)
     target_include_directories(${TARGET_NAME} PRIVATE ${DC32_FIRMWARE_INCLUDE_DIRS})
     target_compile_definitions(${TARGET_NAME} PRIVATE
         ${DC32_FIRMWARE_COMPILE_DEFINITIONS}
@@ -495,7 +497,7 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
 
     add_custom_command(
         OUTPUT ${DCAPP_FILE}
-        DEPENDS ${TARGET_NAME} ${DCAPP_BUILD_CONTRACT}
+        DEPENDS ${TARGET_NAME}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/apps
         COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_CURRENT_BINARY_DIR}/apps/${OUTPUT_NAME}.dcapp
         COMMAND ${CMAKE_OBJCOPY} -O binary
@@ -512,7 +514,8 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
             --flags ${DCAPP_TARGET_FLAGS}
             --app-ram-start ${DCAPP_RAM_START}
             --app-ram-size ${DCAPP_RAM_SIZE}
-            --contract-header ${DCAPP_BUILD_CONTRACT}
+			--app-name ${OUTPUT_NAME}
+			--category ${DCAPP_CATEGORY}
         COMMAND ${CMAKE_SIZE} -A $<TARGET_FILE:${TARGET_NAME}>
         VERBATIM
     )
@@ -521,11 +524,13 @@ function(add_dcapp TARGET_NAME OUTPUT_NAME RUNTIME_ID)
 endfunction()
 
 add_dcapp(dcapp_gb gb 1
+	CATEGORY games
     ${SRC_DIR}/apps/gb_app.c
     ${GB_RUNTIME_SOURCES}
 )
 
 add_dcapp(dcapp_nes nes 2
+	CATEGORY games
     ${SRC_DIR}/apps/nes_app.c
     ${NES_RUNTIME_SOURCES}
 )
@@ -535,6 +540,7 @@ if(DC32_NES_PERF_PROFILE)
 endif()
 
 add_dcapp(dcapp_arduboy arduboy 3
+	CATEGORY games
     ${SRC_DIR}/apps/arduboy_app.c
     ${ARDUBOY_RUNTIME_SOURCES}
 )
@@ -543,12 +549,14 @@ if(DC32_ARDUBOY_HLE)
 endif()
 
 add_dcapp(dcapp_ir ir 100
+	CATEGORY infrared
     ${SRC_DIR}/apps/ir_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/irRemote.c
 )
 
 add_dcapp(dcapp_image image 101
+	CATEGORY media
     ${SRC_DIR}/apps/image_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/imageViewer.c
@@ -558,6 +566,7 @@ add_dcapp(dcapp_image image 101
 )
 
 add_dcapp(dcapp_music music 102
+	CATEGORY media
     ${SRC_DIR}/apps/music_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/abcPlayer.c
@@ -566,22 +575,26 @@ add_dcapp(dcapp_music music 102
 )
 
 add_dcapp(dcapp_badusb badusb 103
+	CATEGORY usb
     ${SRC_DIR}/apps/badusb_app.c
     ${SRC_DIR}/ui.c
     ${SRC_DIR}/badUsb.c
 )
 
 add_dcapp(dcapp_autoclicker autoclicker 104
+	CATEGORY usb
     ${SRC_DIR}/apps/autoclicker_app.c
     ${SRC_DIR}/ui.c
 )
 
 add_dcapp(dcapp_gamepad gamepad 105
+	CATEGORY usb
     ${SRC_DIR}/apps/gamepad_app.c
     ${SRC_DIR}/ui.c
 )
 
 add_dcapp(dcapp_lasertag lasertag 106
+	CATEGORY infrared
     ${SRC_DIR}/apps/lasertag/lasertag_app.c
     ${SRC_DIR}/apps/lasertag/lasertag.c
     ${SRC_DIR}/dcAppDraw.c
@@ -589,6 +602,7 @@ add_dcapp(dcapp_lasertag lasertag 106
 )
 
 add_dcapp(dcapp_raspyjack raspyjack 107
+	CATEGORY usb
     ${SRC_DIR}/apps/raspyjack_app.c
     ${SRC_DIR}/apps/raspyjack_remote.c
     ${SRC_DIR}/raster.c
@@ -597,6 +611,7 @@ add_dcapp(dcapp_raspyjack raspyjack 107
 )
 
 add_dcapp(dcapp_pwnagotchi pwnagotchi 108
+	CATEGORY usb
     ${SRC_DIR}/apps/pwnagotchi_app.c
     ${SRC_DIR}/apps/pwnagotchi_remote.c
     ${SRC_DIR}/raster.c
@@ -1221,6 +1236,7 @@ set_source_files_properties(
 )
 
 add_dcapp(dcapp_doom doom 206
+	CATEGORY ports
     ${DOOM_APP_SOURCES}
 )
 
@@ -1391,10 +1407,12 @@ set_source_files_properties(
 )
 
 add_dcapp(dcapp_pong pong 200
+	CATEGORY ports
     ${PONG_APP_SOURCES}
 )
 
 add_dcapp(dcapp_tetris tetris 201
+	CATEGORY ports
     ${TETRIS_APP_SOURCES}
 )
 
@@ -1404,6 +1422,7 @@ target_include_directories(dcapp_tetris BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_arkanoid arkanoid 202
+	CATEGORY ports
     ${ARKANOID_APP_SOURCES}
 )
 
@@ -1416,6 +1435,7 @@ target_include_directories(dcapp_arkanoid BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_flappy flappy 203
+	CATEGORY ports
     ${FLAPPY_APP_SOURCES}
 )
 
@@ -1428,6 +1448,7 @@ target_include_directories(dcapp_flappy BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_trex trex 205
+	CATEGORY ports
     ${TREX_APP_SOURCES}
 )
 
@@ -1440,6 +1461,7 @@ target_include_directories(dcapp_trex BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_chips chips 207 LARGE_XIP
+	CATEGORY ports
     ${CHIPS_APP_SOURCES}
 )
 
@@ -1476,6 +1498,7 @@ target_compile_options(dcapp_chips PRIVATE
 )
 
 add_dcapp(dcapp_scorch scorch 208 LARGE_XIP
+	CATEGORY ports
     ${SCORCH_APP_SOURCES}
 )
 
@@ -1494,6 +1517,7 @@ target_compile_options(dcapp_scorch PRIVATE
 )
 
 add_dcapp(dcapp_pipe pipe 209 LARGE_XIP
+	CATEGORY ports
     ${PIPE_APP_SOURCES}
 )
 
@@ -1512,6 +1536,7 @@ target_compile_options(dcapp_pipe PRIVATE
 )
 
 add_dcapp(dcapp_sokoban sokoban 211
+	CATEGORY ports
     ${SOKOBAN_APP_SOURCES}
 )
 
@@ -1525,6 +1550,7 @@ target_include_directories(dcapp_sokoban BEFORE PRIVATE
 )
 
 add_dcapp(dcapp_openjazz openjazz 212 CXX_EXCEPTIONS
+	CATEGORY ports
     ${OPENJAZZ_APP_SOURCES}
 )
 add_dependencies(dcapp_openjazz_dcapp dcapp_openjazz_assets)
@@ -1567,6 +1593,7 @@ target_compile_options(dcapp_openjazz PRIVATE
 )
 
 add_dcapp(dcapp_soccer soccer 213 LARGE_XIP
+	CATEGORY ports
     ${SOCCER_APP_SOURCES}
 )
 
@@ -1582,21 +1609,26 @@ target_compile_options(dcapp_soccer PRIVATE
 )
 
 add_dcapp(dcapp_starfield starfield 220
+	CATEGORY demos
     ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_spiro spiro 221
+	CATEGORY demos
     ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_cube cube 222
+	CATEGORY demos
     ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_dvd_bounce dvd-bounce 223
+	CATEGORY demos
     ${DEMOS_APP_SOURCES}
 )
 
 add_dcapp(dcapp_scroll_pattern scroll-pattern 224
+	CATEGORY demos
     ${DEMOS_APP_SOURCES}
 )

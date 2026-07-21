@@ -3,7 +3,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "dcapp_build_contract.h"
 #include "audioPwm.h"
 #include "badgeLeds.h"
 #include "dispDefcon.h"
@@ -35,9 +34,6 @@ static volatile void *mCore1Context;
 static volatile bool mCore1Owned;
 static volatile bool mCore1Done;
 static char mLastError[128];
-static const uint32_t mDcAppBuildContractWords[DCAPP_CONTRACT_HASH_WORDS] = {
-	DCAPP_BUILD_CONTRACT_WORDS
-};
 
 static bool dcAppPrvDiskRead(void *diskUserData, uint32_t sec, uint32_t numSec, void *dstP);
 static bool dcAppPrvDiskWrite(void *diskUserData, uint32_t sec, uint32_t numSec, const void *srcP);
@@ -81,6 +77,7 @@ static void *dcAppPrvDisplayFb(void)
 
 static const struct DcAppHostApi mHostApi = {
 	.abiVersion = DCAPP_ABI_VERSION,
+	.size = sizeof(struct DcAppHostApi),
 	.log = prRaw,
 	.getTime = getTime,
 	.delayMsec = delayMsec,
@@ -298,23 +295,16 @@ static bool dcAppPrvRangeInAppRam(uint32_t addr, uint32_t size)
 	return addr >= DCAPP_RAM_START && end <= DCAPP_RAM_END;
 }
 
-static bool dcAppPrvHeaderHasCurrentBuildContract(const struct DcAppImageHeader *hdr)
+static bool dcAppPrvHeaderHasSdkMetadata(const struct DcAppImageHeader *hdr)
 {
-	if (!hdr || hdr->reserved[DCAPP_CONTRACT_RESERVED_INDEX] != DCAPP_CONTRACT_MAGIC)
+	if (!hdr || hdr->metadata.magic != DCAPP_METADATA_MAGIC ||
+			hdr->metadata.schema != DCAPP_METADATA_SCHEMA ||
+			hdr->metadata.sdkAbi != DCAPP_SDK_ABI ||
+			hdr->metadata.nameLength > DCAPP_METADATA_NAME_SIZE ||
+			hdr->metadata.category < DcAppCategoryGames ||
+			hdr->metadata.category > DcAppCategoryUsb)
 		return false;
-	for (uint_fast8_t i = 0; i < DCAPP_CONTRACT_HASH_WORDS; i++)
-		if (hdr->reserved[DCAPP_CONTRACT_HASH_RESERVED_INDEX + i] != mDcAppBuildContractWords[i])
-			return false;
 	return true;
-}
-
-static bool dcAppPrvHeaderLooksLikeThisRuntime(const struct DcAppImageHeader *hdr, uint32_t runtime)
-{
-	return hdr &&
-		hdr->magic == DCAPP_MAGIC &&
-		hdr->headerSize == DCAPP_HEADER_SIZE &&
-		hdr->abiVersion == DCAPP_ABI_VERSION &&
-		hdr->runtime == runtime;
 }
 
 static bool dcAppPrvImageLimit(const struct DcAppImageHeader *hdr, uint32_t *limitP)
@@ -344,9 +334,10 @@ static enum DcAppResult dcAppPrvValidateHeader(const struct DcAppImageHeader *hd
 
 	if (!hdr || hdr->magic != DCAPP_MAGIC || hdr->headerSize != DCAPP_HEADER_SIZE)
 		return DcAppResultInvalid;
-	if (hdr->abiVersion != DCAPP_ABI_VERSION || hdr->runtime != (uint32_t)runtime)
+	if (hdr->abiVersion != DCAPP_ABI_VERSION || !hdr->runtime ||
+			(runtime && hdr->runtime != runtime))
 		return DcAppResultIncompatible;
-	if (!dcAppPrvHeaderHasCurrentBuildContract(hdr))
+	if (!dcAppPrvHeaderHasSdkMetadata(hdr))
 		return DcAppResultIncompatible;
 	if (!dcAppPrvImageLimit(hdr, &imageLimit))
 		return DcAppResultIncompatible;
@@ -380,7 +371,7 @@ static bool dcAppPrvCachedHeaderLooksValidAt(const struct DcAppImageHeader *hdr,
 
 	if (!hdr || hdr->magic != DCAPP_MAGIC || hdr->headerSize != DCAPP_HEADER_SIZE)
 		return false;
-	if (hdr->abiVersion != DCAPP_ABI_VERSION)
+	if (hdr->abiVersion != DCAPP_ABI_VERSION || !dcAppPrvHeaderHasSdkMetadata(hdr))
 		return false;
 	if (hdr->loadAddr != loadAddr ||
 			hdr->appRamStart != DCAPP_RAM_START ||
@@ -623,9 +614,9 @@ static void *dcAppPrvImageFunc(uint32_t offset)
 	return (void*)(uintptr_t)(mLoadedHeader.loadAddr + offset);
 }
 
-static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *mountedVol)
+static enum DcAppResult dcAppLoadPathFromVol(const char *path, uint32_t expectedRuntime,
+	struct FatfsVol *mountedVol)
 {
-	const char *path = dcAppPrvRuntimePath(runtime);
 	struct DcAppImageHeader hdr;
 	struct FatfsVol *vol = mountedVol;
 	struct FatfsFil *fil = NULL;
@@ -635,8 +626,8 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 
 	dcAppClearError();
 	dcAppPrvClearActiveAppContext();
-	if (!path)
-		return dcAppPrvFail(DcAppResultInvalid, "No app is registered for this game type");
+	if (!path || path[0] != '/')
+		return dcAppPrvFail(DcAppResultInvalid, "Invalid app path");
 	if (!vol) {
 		if (!sdCardInit())
 			return dcAppPrvFail(DcAppResultMissing, "Insert an SD card containing /APPS");
@@ -657,17 +648,17 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultReadError, "Cannot read app header");
 		goto out;
 	}
-	result = dcAppPrvValidateHeader(&hdr, runtime);
+	result = dcAppPrvValidateHeader(&hdr, expectedRuntime);
 	if (result != DcAppResultOk) {
 		char msg[96];
 
-		if (result == DcAppResultIncompatible &&
-				dcAppPrvHeaderLooksLikeThisRuntime(&hdr, runtime) &&
-				!dcAppPrvHeaderHasCurrentBuildContract(&hdr))
-			snprintf(msg, sizeof(msg), "Update /APPS: %s does not match this firmware",
-				path[6] ? path + 6 : path);
+		if (result == DcAppResultIncompatible && hdr.magic == DCAPP_MAGIC &&
+				hdr.headerSize == DCAPP_HEADER_SIZE && hdr.abiVersion != DCAPP_SDK_ABI)
+			snprintf(msg, sizeof(msg), "%s requires SDK ABI %u (firmware has %u)",
+				path[6] ? path + 6 : path, hdr.abiVersion, DCAPP_SDK_ABI);
 		else
-			snprintf(msg, sizeof(msg), "%s app is %s", dcAppPrvRuntimeName(runtime), dcAppResultName(result));
+			snprintf(msg, sizeof(msg), "%s app is %s", expectedRuntime ?
+				dcAppPrvRuntimeName(expectedRuntime) : "SD", dcAppResultName(result));
 		result = dcAppPrvFail(result, msg);
 		goto out;
 	}
@@ -675,9 +666,9 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultInvalid, "App file size does not match its header");
 		goto out;
 	}
-	if (dcAppPrvCachedBuildMatches(&hdr, runtime)) {
+	if (dcAppPrvCachedBuildMatches(&hdr, hdr.runtime)) {
 		mLoadedHeader = *dcAppPrvCachedHeaderAt(hdr.loadAddr);
-		mLoadedRuntime = runtime;
+		mLoadedRuntime = hdr.runtime;
 		result = DcAppResultOk;
 		goto out;
 	}
@@ -721,14 +712,14 @@ static enum DcAppResult dcAppLoadByIdFromVol(uint32_t runtime, struct FatfsVol *
 		result = dcAppPrvFail(DcAppResultInvalid, "App CRC check failed");
 		goto out;
 	}
-	if (!dcAppPrvVerifyCachedImage(&hdr, runtime)) {
+	if (!dcAppPrvVerifyCachedImage(&hdr, hdr.runtime)) {
 		result = dcAppPrvFail(DcAppResultFlashError, "App flash verify failed");
 		goto out;
 	}
 	dcAppPrvSyncExecutableImage(&hdr);
 
 	mLoadedHeader = *dcAppPrvCachedHeaderAt(hdr.loadAddr);
-	mLoadedRuntime = runtime;
+	mLoadedRuntime = hdr.runtime;
 	result = DcAppResultOk;
 
 out:
@@ -741,7 +732,11 @@ out:
 
 static enum DcAppResult dcAppLoadById(uint32_t runtime)
 {
-	return dcAppLoadByIdFromVol(runtime, NULL);
+	const char *path = dcAppPrvRuntimePath(runtime);
+
+	if (!path)
+		return dcAppPrvFail(DcAppResultInvalid, "No app is registered for this game type");
+	return dcAppLoadPathFromVol(path, runtime, NULL);
 }
 
 enum DcAppResult dcAppLoadGameRuntime(enum GameRuntime runtime)
@@ -804,13 +799,30 @@ enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *arg
 		toolWorkspaceBegin();
 	dcAppPrvDrawLaunchLoading(args, (uint32_t)appId, "Loading application",
 		"Preparing runtime");
-	result = dcAppLoadByIdFromVol((uint32_t)appId, args ? args->vol : NULL);
+	result = dcAppLoadPathFromVol(dcAppPrvRuntimePath((uint32_t)appId), (uint32_t)appId,
+		args ? args->vol : NULL);
 
 	if (result != DcAppResultOk)
 		goto out;
 	result = dcAppRunLoadedById((uint32_t)appId, args);
 
 out:
+	if (!workspaceWasActive)
+		toolWorkspaceEnd();
+	return result;
+}
+
+enum DcAppResult dcAppRunPath(const char *path, const struct DcAppRunArgs *args)
+{
+	bool workspaceWasActive = toolWorkspaceActive();
+	enum DcAppResult result;
+
+	if (!workspaceWasActive)
+		toolWorkspaceBegin();
+	dcAppPrvDrawLaunchLoading(args, 0, "Loading application", "Preparing runtime");
+	result = dcAppLoadPathFromVol(path, 0, args ? args->vol : NULL);
+	if (result == DcAppResultOk)
+		result = dcAppRunLoadedById(mLoadedRuntime, args);
 	if (!workspaceWasActive)
 		toolWorkspaceEnd();
 	return result;

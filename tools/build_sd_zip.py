@@ -221,13 +221,15 @@ def source_manifest(ir_sha: str, badusb_sha: str, music_sha: str, abc_sha: str,
 
 def app_source_manifest(app_hashes: dict[str, str]) -> dict[str, object]:
     return {
-        "schema": 1,
+        "schema": 2,
+        "sdk_abi": 1,
         "builder_sha256": builder_hash(),
         "sources": {
             "apps": {
                 "sd_path": "APPS/",
                 "files": app_hashes,
-                "notes": "Built .DC32 binaries from this repository plus app data payloads copied to their runtime SD paths.",
+                "sdk_abi": 1,
+                "notes": "Built SDK-v1 .DC32 binaries from this repository plus app data payloads copied to their runtime SD paths. They do not require an exactly paired firmware build.",
             },
             "doom": {
                 "repository": DOOM_REPO,

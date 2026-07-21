@@ -11,14 +11,23 @@ extern "C" {
 #endif
 
 #define DCAPP_MAGIC             0x50414344u
-#define DCAPP_ABI_VERSION       8u
+#define DCAPP_SDK_ABI           1u
+/* Kept as the source-compatible name used by existing app sources. */
+#define DCAPP_ABI_VERSION       DCAPP_SDK_ABI
 #define DCAPP_HEADER_SIZE       256u
 #define DCAPP_IMAGE_FLAG_LARGE_XIP 0x00000001u
-#define DCAPP_CONTRACT_MAGIC    0x43444332u
-#define DCAPP_CONTRACT_RESERVED_INDEX 0u
-#define DCAPP_CONTRACT_HASH_RESERVED_INDEX 1u
-#define DCAPP_CONTRACT_HASH_WORDS 4u
-#define DCAPP_CONTRACT_RESERVED_WORDS (1u + DCAPP_CONTRACT_HASH_WORDS)
+#define DCAPP_METADATA_MAGIC    0x314d4344u /* DCM1 */
+#define DCAPP_METADATA_SCHEMA   1u
+#define DCAPP_METADATA_NAME_SIZE 64u
+
+enum DcAppCategory {
+	DcAppCategoryGames = 1,
+	DcAppCategoryPorts,
+	DcAppCategoryDemos,
+	DcAppCategoryMedia,
+	DcAppCategoryInfrared,
+	DcAppCategoryUsb,
+};
 
 enum DcAppId {
 	DcAppIdGameGb = GameRuntimeGb,
@@ -83,7 +92,16 @@ struct DcAppImageHeader {
 	uint32_t appRamSize;
 	uint8_t buildId[32];
 	uint32_t crc32;
-	uint32_t reserved[39];
+	struct {
+		uint32_t magic;
+		uint16_t schema;
+		uint16_t sdkAbi;
+		uint8_t category;
+		uint8_t nameLength;
+		uint16_t reserved;
+		char name[DCAPP_METADATA_NAME_SIZE];
+		uint8_t future[80];
+	} metadata;
 };
 
 struct DcAppRunArgs {
@@ -106,6 +124,7 @@ struct DcAppRunArgs {
 
 struct DcAppHostApi {
 	uint32_t abiVersion;
+	uint32_t size;
 	void (*log)(const char *fmt, ...);
 	uint64_t (*getTime)(void);
 	void (*delayMsec)(uint32_t msec);
@@ -155,6 +174,8 @@ enum DcAppResult dcAppLoadGameRuntime(enum GameRuntime runtime);
 enum DcAppResult dcAppRunLoadedRuntime(enum GameRuntime runtime, const struct DcAppRunArgs *args);
 enum DcAppResult dcAppRunGameRuntime(enum GameRuntime runtime, const struct DcAppRunArgs *args);
 enum DcAppResult dcAppRunTool(enum DcAppId appId, const struct DcAppRunArgs *args);
+/* Launch an SDK app discovered on the SD card rather than in the built-in catalog. */
+enum DcAppResult dcAppRunPath(const char *path, const struct DcAppRunArgs *args);
 void dcAppAbortActive(void);
 void dcAppRefreshActive(void);
 bool dcAppGetActiveScratch(struct ToolWorkspaceSpan *spanP);

@@ -11405,7 +11405,21 @@ static enum UiToolId uiPrvLaunchBrowserFile(struct Canvas *cnv, struct FatfsVol 
 		enum UiToolId launchedTool;
 
 		if (!entry) {
-			uiAlert(cnv, "That .DC32 app is not registered.", DialogTypeOk);
+			char path[UI_PICK_FILE_PATH_BUF_SZ];
+			struct DcAppRunArgs args = {};
+			enum DcAppResult result;
+
+			uiPrvCopyStr(path, sizeof(path), ref->parentPath && ref->parentPath[0] ? ref->parentPath : "/");
+			uiPrvAppendPathComponent(path, sizeof(path), ref->name);
+			args.canvas = cnv;
+			args.vol = vol;
+			args.name = ref->name;
+			args.parentPath = ref->parentPath;
+			uiPrvSetHeaderTitle(ref->name);
+			result = dcAppRunPath(path, &args);
+			if (result != DcAppResultOk)
+				uiAlert(cnv, dcAppLastError()[0] ? dcAppLastError() : dcAppResultName(result), DialogTypeOk);
+			dcAppClearError();
 			return UiToolBrowser;
 		}
 		if (uiPrvBrowserDcAppIsRuntimeEngine(entry->appId)) {
@@ -12256,6 +12270,8 @@ enum UiCategoryEntryKind {
 	UiCategoryEntryTool,
 	UiCategoryEntrySdApp,
 	UiCategoryEntryDemos,
+	UiCategoryEntrySdAppPath,
+	UiCategoryEntryDynamicApps,
 };
 
 struct UiCategoryEntry {
@@ -12264,10 +12280,21 @@ struct UiCategoryEntry {
 	enum UiToolId tool;
 	enum DcAppId appId;
 	const char *detail;
+	const char *path;
 };
 
 static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData);
 static enum UiToolId uiPrvDemosCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData);
+static enum UiToolId uiPrvDynamicAppsCategoryTool(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *title, enum DcAppCategory category, UiRunGameF runGameF, void *userData);
+static enum UiToolId uiPrvCategoryTool(struct Canvas *cnv, enum UiToolId categoryTool, const char *title,
+	const struct UiCategoryEntry *entries, uint_fast8_t numEntries, uint_fast8_t entryColor,
+	UiRunGameF runGameF, void *userData);
+static void uiPrvRunCategorySdAppPathEntry(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *label, const char *path);
+static enum UiToolId uiPrvCategoryWithDynamicApps(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *title, const struct UiCategoryEntry *base, uint_fast8_t baseCount,
+	enum DcAppCategory category, UiRunGameF runGameF, void *userData);
 
 static void uiPrvCategoryReturnFence(void)
 {
@@ -12444,6 +12471,12 @@ static enum UiToolId uiPrvCategoryTool(struct Canvas *cnv, enum UiToolId categor
 			uiPrvRunCategoryToolEntry(cnv, entries[selOption].tool, runGameF, userData);
 		else if (entries[selOption].kind == UiCategoryEntryDemos)
 			(void)uiPrvDemosCategoryTool(cnv, runGameF, userData);
+		else if (entries[selOption].kind == UiCategoryEntryDynamicApps)
+			(void)uiPrvDynamicAppsCategoryTool(cnv, categoryTool, "Apps", DcAppCategoryGames,
+				runGameF, userData);
+		else if (entries[selOption].kind == UiCategoryEntrySdAppPath)
+			uiPrvRunCategorySdAppPathEntry(cnv, categoryTool, entries[selOption].label,
+				entries[selOption].path);
 		else
 			uiPrvRunCategorySdAppEntry(cnv, categoryTool, entries[selOption].label, entries[selOption].appId);
 	}
@@ -12461,8 +12494,151 @@ static enum UiToolId uiPrvUsbCategoryTool(struct Canvas *cnv, UiRunGameF runGame
 		{"Pwnagotchi Remote", UiCategoryEntrySdApp, UiToolUsb, DcAppIdToolPwnagotchi},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries),
-		15, runGameF, userData);
+	return uiPrvCategoryWithDynamicApps(cnv, UiToolUsb, "USB", entries, sizeof(entries) / sizeof(*entries),
+		DcAppCategoryUsb, runGameF, userData);
+}
+
+static void uiPrvRunCategorySdAppPathEntry(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *label, const char *path)
+{
+#ifndef NO_SD_CARD
+	struct FatfsVol *vol = uiPrvMountCard(cnv, false);
+	struct DcAppRunArgs args = {};
+
+	if (!vol)
+		return;
+	args.canvas = cnv;
+	args.vol = vol;
+	args.name = label;
+	args.parentPath = "/APPS";
+	uiPrvSetHeaderTitle(label);
+	uiPrvEnterTool(ownerTool);
+	(void)dcAppRunPath(path, &args);
+	uiPrvExitTool(ownerTool);
+	(void)fatfsUnmount(vol);
+#else
+	(void)ownerTool;
+	(void)label;
+	(void)path;
+	uiAlert(cnv, "This app requires SD card support", DialogTypeOk);
+#endif
+	uiPrvCategoryReturnFence();
+}
+
+#define UI_DYNAMIC_DCAPP_MAX 32u
+#define UI_CATEGORY_STATIC_MAX 16u
+
+static bool uiPrvDcAppFileName(const char *name)
+{
+	uint32_t len = name ? strlen(name) : 0;
+
+	return len > 5u && !strsCaselesslyCompareUtf(name + len - 5u, ".DC32", 5u);
+}
+
+static bool uiPrvDcAppIsCatalogued(const char *path)
+{
+	const struct DcAppCatalogEntry *entries;
+	uint_fast8_t count, i;
+
+	entries = dcAppCatalogEntries(&count);
+	for (i = 0; i < count; i++)
+		if (!strsCaselesslyCompareUtf(path, entries[i].path, 0xffffffff))
+			return true;
+	return false;
+}
+
+static uint_fast8_t uiPrvAppendDynamicApps(struct Canvas *cnv, enum DcAppCategory category,
+	struct UiCategoryEntry *entries, uint_fast8_t count, uint_fast8_t capacity,
+	char labels[UI_DYNAMIC_DCAPP_MAX][DCAPP_METADATA_NAME_SIZE + 1u],
+	char paths[UI_DYNAMIC_DCAPP_MAX][FATFS_NAME_BUF_LEN + 7u])
+{
+#ifndef NO_SD_CARD
+	struct FatfsVol *vol = uiPrvMountCard(cnv, false);
+	struct FatfsDir *dir;
+	char name[FATFS_NAME_BUF_LEN];
+	uint32_t size;
+	uint8_t attrs;
+	uint_fast8_t dynamicStart = count;
+
+	if (!vol)
+		return count;
+	dir = fatfsDirOpen(vol, "/APPS");
+	if (dir) {
+		while (count < capacity && fatfsDirRead(dir, name, &size, &attrs, NULL)) {
+			struct FatfsFil *fil;
+			struct DcAppImageHeader header;
+			uint32_t got = 0;
+			uint_fast8_t dynamicIndex;
+
+			if ((attrs & (FATFS_ATTR_VOL_LBL | FATFS_ATTR_DIR)) || !uiPrvDcAppFileName(name))
+				continue;
+			snprintf(paths[count - dynamicStart], FATFS_NAME_BUF_LEN + 7u, "/APPS/%s", name);
+			if (uiPrvDcAppIsCatalogued(paths[count - dynamicStart]))
+				continue;
+			fil = fatfsFileOpen(vol, paths[count - dynamicStart], OPEN_MODE_READ);
+			if (!fil || !fatfsFileRead(fil, &header, sizeof(header), &got) || got != sizeof(header)) {
+				if (fil)
+					(void)fatfsFileClose(fil);
+				continue;
+			}
+			(void)fatfsFileClose(fil);
+			if (header.magic != DCAPP_MAGIC || header.headerSize != DCAPP_HEADER_SIZE ||
+					header.abiVersion != DCAPP_SDK_ABI || header.metadata.magic != DCAPP_METADATA_MAGIC ||
+					header.metadata.schema != DCAPP_METADATA_SCHEMA || header.metadata.sdkAbi != DCAPP_SDK_ABI ||
+					header.metadata.category != category || !header.metadata.nameLength ||
+					header.metadata.nameLength > DCAPP_METADATA_NAME_SIZE)
+				continue;
+			dynamicIndex = count - dynamicStart;
+			memcpy(labels[dynamicIndex], header.metadata.name, header.metadata.nameLength);
+			labels[dynamicIndex][header.metadata.nameLength] = 0;
+			uint_fast8_t i;
+			for (i = dynamicStart; i < count; i++)
+				if (!strsCaselesslyCompareUtf(entries[i].label, labels[dynamicIndex], 0xffffffff))
+					break;
+			if (i != count)
+				continue;
+			entries[count++] = (struct UiCategoryEntry){labels[dynamicIndex], UiCategoryEntrySdAppPath,
+				UiToolBrowser, 0, NULL, paths[dynamicIndex]};
+		}
+		(void)fatfsDirClose(dir);
+	}
+	(void)fatfsUnmount(vol);
+	for (uint_fast8_t i = dynamicStart + 1u; i < count; i++) {
+		struct UiCategoryEntry item = entries[i];
+		uint_fast8_t j = i;
+
+		while (j > dynamicStart && strsCaselesslyCompareUtf(entries[j - 1u].label, item.label, 0xffffffff) > 0) {
+			entries[j] = entries[j - 1u];
+			j--;
+		}
+		entries[j] = item;
+	}
+#else
+	(void)cnv;
+	(void)category;
+	(void)entries;
+	(void)capacity;
+	(void)labels;
+	(void)paths;
+#endif
+	return count;
+}
+
+static enum UiToolId uiPrvCategoryWithDynamicApps(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *title, const struct UiCategoryEntry *base, uint_fast8_t baseCount,
+	enum DcAppCategory category, UiRunGameF runGameF, void *userData)
+{
+	struct UiCategoryEntry entries[UI_CATEGORY_STATIC_MAX + UI_DYNAMIC_DCAPP_MAX];
+	char labels[UI_DYNAMIC_DCAPP_MAX][DCAPP_METADATA_NAME_SIZE + 1u] = {};
+	char paths[UI_DYNAMIC_DCAPP_MAX][FATFS_NAME_BUF_LEN + 7u] = {};
+	uint_fast8_t count = baseCount;
+
+	if (count > UI_CATEGORY_STATIC_MAX)
+		count = UI_CATEGORY_STATIC_MAX;
+	memcpy(entries, base, count * sizeof(*entries));
+	count = uiPrvAppendDynamicApps(cnv, category, entries, count,
+		UI_CATEGORY_STATIC_MAX + UI_DYNAMIC_DCAPP_MAX, labels, paths);
+	return uiPrvCategoryTool(cnv, ownerTool, title, entries, count, 15, runGameF, userData);
 }
 
 static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12472,8 +12648,8 @@ static enum UiToolId uiPrvInfraredCategoryTool(struct Canvas *cnv, UiRunGameF ru
 		{"OpenLasir Tag", UiCategoryEntrySdApp, UiToolInfrared, DcAppIdToolLaserTag},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolInfrared, "Infrared", entries,
-		sizeof(entries) / sizeof(*entries), 15, runGameF, userData);
+	return uiPrvCategoryWithDynamicApps(cnv, UiToolInfrared, "Infrared", entries,
+		sizeof(entries) / sizeof(*entries), DcAppCategoryInfrared, runGameF, userData);
 }
 
 static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12484,8 +12660,8 @@ static enum UiToolId uiPrvMediaCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Demos", UiCategoryEntryDemos, UiToolMedia, 0},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries),
-		15, runGameF, userData);
+	return uiPrvCategoryWithDynamicApps(cnv, UiToolMedia, "Media", entries, sizeof(entries) / sizeof(*entries),
+		DcAppCategoryMedia, runGameF, userData);
 }
 
 static enum UiToolId uiPrvDemosCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12498,8 +12674,16 @@ static enum UiToolId uiPrvDemosCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Scrolling Pattern", UiCategoryEntrySdApp, UiToolMedia, DcAppIdScrollPattern},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolMedia, "Demos", entries, sizeof(entries) / sizeof(*entries),
-		15, runGameF, userData);
+	return uiPrvCategoryWithDynamicApps(cnv, UiToolMedia, "Demos", entries, sizeof(entries) / sizeof(*entries),
+		DcAppCategoryDemos, runGameF, userData);
+}
+
+static enum UiToolId uiPrvDynamicAppsCategoryTool(struct Canvas *cnv, enum UiToolId ownerTool,
+	const char *title, enum DcAppCategory category, UiRunGameF runGameF, void *userData)
+{
+	static const struct UiCategoryEntry none[1] = {};
+
+	return uiPrvCategoryWithDynamicApps(cnv, ownerTool, title, none, 0, category, runGameF, userData);
 }
 
 static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12519,8 +12703,8 @@ static enum UiToolId uiPrvPortsCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 		{"Sensible Soccer", UiCategoryEntrySdApp, UiToolPorts, DcAppIdSoccer, " (YSoccer)"},
 	};
 
-	return uiPrvCategoryTool(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries),
-		15, runGameF, userData);
+	return uiPrvCategoryWithDynamicApps(cnv, UiToolPorts, "Ports", entries, sizeof(entries) / sizeof(*entries),
+		DcAppCategoryPorts, runGameF, userData);
 }
 
 static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGameF, void *userData)
@@ -12528,6 +12712,7 @@ static enum UiToolId uiPrvGamesCategoryTool(struct Canvas *cnv, UiRunGameF runGa
 	static const struct UiCategoryEntry entries[] = {
 		{"Emulators", UiCategoryEntryTool, UiToolGame, 0},
 		{"Ports", UiCategoryEntryTool, UiToolPorts, 0},
+		{"Apps", UiCategoryEntryDynamicApps, UiToolGames, 0},
 	};
 
 	return uiPrvCategoryTool(cnv, UiToolGames, "Games", entries, sizeof(entries) / sizeof(*entries),

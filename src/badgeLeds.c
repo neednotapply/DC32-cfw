@@ -67,7 +67,9 @@ static uint_fast8_t badgeLedsPrvBrightness(void)
 
 static uint_fast8_t badgeLedsPrvSanitizeBrightness(uint_fast8_t brightness)
 {
-	return brightness > 255u ? 255u : brightness;
+	if (brightness < SETTINGS_LED_BRIGHTNESS_MIN)
+		return SETTINGS_LED_BRIGHTNESS_MIN;
+	return brightness > SETTINGS_LED_BRIGHTNESS_MAX ? SETTINGS_LED_BRIGHTNESS_MAX : brightness;
 }
 
 static bool badgeLedsPrvModeIsAnimated(uint_fast8_t mode)
@@ -93,7 +95,7 @@ static void badgeLedsPrvDisarmDynamicWatchdog(void)
 
 const char* badgeLedsModeName(uint_fast8_t mode)
 {
-	static const char names[][11] = {
+	static const char names[][14] = {
 		[LedModeOff] = "OFF",
 		[LedModeSolid] = "ALL ON",
 		[LedModeRainbow] = "RAINBOW",
@@ -102,7 +104,8 @@ const char* badgeLedsModeName(uint_fast8_t mode)
 		[LedModeRandom] = "RANDOM",
 		[LedModeFlashlight] = "REAR ON",
 		[LedModeFrontOn] = "FRONT ON",
-		[LedModeReactive] = "REACTIVE",
+		[LedModeReactiveTouch] = "REACT TOUCH",
+		[LedModeReactiveButtons] = "REACT BUTTON",
 	};
 
 	mode = badgeLedsPrvSanitizeMode(mode);
@@ -423,14 +426,16 @@ static void badgeLedsPrvAddReactiveButtons(uint64_t now, uint8_t ledScales[NUM_W
 	}
 }
 
-static void badgeLedsPrvRenderReactive(void)
+static void badgeLedsPrvRenderReactive(bool touch)
 {
 	uint64_t now = getTime();
 	uint8_t ledScales[NUM_WS2812s] = {0};
 	uint_fast8_t i;
 
-	badgeLedsPrvAddReactiveTouch(now, ledScales);
-	badgeLedsPrvAddReactiveButtons(now, ledScales);
+	if (touch)
+		badgeLedsPrvAddReactiveTouch(now, ledScales);
+	else
+		badgeLedsPrvAddReactiveButtons(now, ledScales);
 
 	ws2812SetAllRgb(0, 0, 0);
 	for (i = 0; i < NUM_WS2812s; i++) {
@@ -476,8 +481,12 @@ static void badgeLedsPrvRenderCurrent(void)
 			badgeLedsPrvRenderFrontOn();
 			break;
 
-		case LedModeReactive:
-			badgeLedsPrvRenderReactive();
+		case LedModeReactiveTouch:
+			badgeLedsPrvRenderReactive(true);
+			break;
+
+		case LedModeReactiveButtons:
+			badgeLedsPrvRenderReactive(false);
 			break;
 
 		case LedModeOff:
@@ -568,10 +577,10 @@ void badgeLedsTick(void)
 	if (mLastGameLedWriteTime && now - mLastGameLedWriteTime < LED_GAME_WRITE_PAUSE_TICKS)
 		return;
 
-	if (mode == LedModeReactive) {
+	if (mode == LedModeReactiveTouch)
 		badgeLedsPrvPollReactiveTouch(now);
+	else if (mode == LedModeReactiveButtons)
 		badgeLedsPrvPollReactiveButtons(now);
-	}
 
 	if (now < mNextLedFrameTime)
 		return;

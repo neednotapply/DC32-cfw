@@ -7,12 +7,11 @@
 
 
 #define SETTINGS_MAGIC				0x4447687a
-#define SETTINGS_CUR_VER			26
+#define SETTINGS_CUR_VER			27
 #define SETTINGS_NUM_SPEEDS			4
 #define SETTINGS_LED_MIN_SPEED		1
 #define SETTINGS_LED_MAX_SPEED		10
 #define SETTINGS_AUDIO_VOLUME_MAX	15
-#define SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13	9
 #define SETTINGS_BADUSB_DEFAULT_VID	0x1209
 #define SETTINGS_BADUSB_DEFAULT_PID	0xdc32
 #define SETTINGS_AUTOCLICKER_MIN_CPS	1
@@ -78,14 +77,18 @@ static void settingsPrvNormalize(struct Settings *settings)
 		settings->gbcSpeed = settings->speed;
 	if (settings->nesSpeed >= SETTINGS_NUM_SPEEDS)
 		settings->nesSpeed = settings->speed;
-	if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
-		settings->ledMode = LedModeReactive;
-	else if (settings->ledMode >= LedModeNumModes)
+	if (settings->ledMode >= LedModeNumModes)
 		settings->ledMode = LedModeOff;
 	if (settings->ledColor >= LedColorNumColors)
 		settings->ledColor = LedColorCustom;
 	if (settings->ledSpeed < SETTINGS_LED_MIN_SPEED || settings->ledSpeed > SETTINGS_LED_MAX_SPEED)
 		settings->ledSpeed = 4;
+	if (settings->ledBrightness < SETTINGS_LED_BRIGHTNESS_MIN)
+		settings->ledBrightness = SETTINGS_LED_BRIGHTNESS_MIN;
+	else if (settings->ledBrightness > SETTINGS_LED_BRIGHTNESS_MAX)
+		settings->ledBrightness = SETTINGS_LED_BRIGHTNESS_MAX;
+	if (settings->brightness > SETTINGS_DISPLAY_BRIGHTNESS_MAX)
+		settings->brightness = SETTINGS_DISPLAY_BRIGHTNESS_MAX;
 	if (settings->audioVolume > SETTINGS_AUDIO_VOLUME_MAX)
 		settings->audioVolume = 7;
 	if (!settings->badUsbVid)
@@ -217,9 +220,7 @@ void settingsGet(struct Settings *settings)
 				settings->ledColor = LedColorCustom;
 			//fallthrough
 
-		case 13:			//merge reactive touch and button LED patterns
-			if (settings->ledMode == SETTINGS_LED_MODE_REACTIVE_BUTTONS_V13)
-				settings->ledMode = LedModeReactive;
+		case 13:			//v13 stored reactive touch (8) and buttons (9) separately
 			//fallthrough
 
 		case 14:			//add USB HID defaults and Autoclicker settings
@@ -285,6 +286,11 @@ void settingsGet(struct Settings *settings)
 		case 25:			//add shared theme choice without growing the settings page
 			settings->themeEnabled = false;
 			settings->bootMenuCustomGif = false;
+			//fallthrough
+
+		case 26:			//split the merged reactive mode; avoid background touch polling
+			if (curVer >= 14u && settings->ledMode == LedModeReactiveTouch)
+				settings->ledMode = LedModeReactiveButtons;
 			//fallthrough
 
 		//other cases here, in increasing order

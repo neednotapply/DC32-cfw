@@ -5,6 +5,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define SETTINGS_LED_BRIGHTNESS_MIN		2u
+#define SETTINGS_LED_BRIGHTNESS_MAX		51u
+#define SETTINGS_DISPLAY_BRIGHTNESS_MIN	0u
+#define SETTINGS_DISPLAY_BRIGHTNESS_MAX	20u
+
 enum LedMode {
 	LedModeOff,
 	LedModeSolid,
@@ -15,7 +20,8 @@ enum LedMode {
 	LedModeRandom,
 	LedModeFlashlight,
 	LedModeFrontOn,
-	LedModeReactive,
+	LedModeReactiveTouch,
+	LedModeReactiveButtons,
 	LedModeNumModes,
 };
 

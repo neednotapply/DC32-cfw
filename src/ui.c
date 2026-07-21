@@ -3262,8 +3262,10 @@ reload_dir:
 	}
 #endif
 
-#define LED_BRIGHTNESS_RAW_MIN			0
-#define LED_BRIGHTNESS_RAW_MAX			255
+#define LED_BRIGHTNESS_RAW_MIN			SETTINGS_LED_BRIGHTNESS_MIN
+#define LED_BRIGHTNESS_RAW_MAX			SETTINGS_LED_BRIGHTNESS_MAX
+#define LED_BRIGHTNESS_MENU_MIN			1u
+#define LED_BRIGHTNESS_MENU_MAX			25u
 #define LED_COLOR_RAW_MAX				255
 #define LED_COLOR_MENU_MAX				25
 #define LED_SPEED_MENU_MIN				1
@@ -3271,16 +3273,28 @@ reload_dir:
 
 static uint_fast8_t uiPrvLedBrightnessToMenu(uint_fast8_t brightness)
 {
+	if (brightness <= LED_BRIGHTNESS_RAW_MIN)
+		return LED_BRIGHTNESS_MENU_MIN;
 	if (brightness >= LED_BRIGHTNESS_RAW_MAX)
-		return LED_BRIGHTNESS_RAW_MAX;
-	return brightness;
+		return LED_BRIGHTNESS_MENU_MAX;
+
+	return LED_BRIGHTNESS_MENU_MIN + (((brightness - LED_BRIGHTNESS_RAW_MIN) *
+		(LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) +
+		(LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) / 2u) /
+		(LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN));
 }
 
 static uint8_t uiPrvLedBrightnessFromMenu(uint_fast8_t brightness)
 {
-	if (brightness >= LED_BRIGHTNESS_RAW_MAX)
+	if (brightness <= LED_BRIGHTNESS_MENU_MIN)
+		return LED_BRIGHTNESS_RAW_MIN;
+	if (brightness >= LED_BRIGHTNESS_MENU_MAX)
 		return LED_BRIGHTNESS_RAW_MAX;
-	return (uint8_t)brightness;
+
+	return LED_BRIGHTNESS_RAW_MIN + (((brightness - LED_BRIGHTNESS_MENU_MIN) *
+		(LED_BRIGHTNESS_RAW_MAX - LED_BRIGHTNESS_RAW_MIN) +
+		(LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN) / 2u) /
+		(LED_BRIGHTNESS_MENU_MAX - LED_BRIGHTNESS_MENU_MIN));
 }
 
 static uint_fast8_t uiPrvLedColorToMenu(uint_fast8_t color)
@@ -3393,13 +3407,13 @@ static void __attribute__((noinline)) uiPrvLedSettings(struct Canvas *cnv, struc
 			uint_fast8_t brightness = uiPrvLedBrightnessToMenu(settings->ledBrightness);
 
 			if (button == KEY_BIT_LEFT) {
-				if (brightness > LED_BRIGHTNESS_RAW_MIN)
+				if (brightness > LED_BRIGHTNESS_MENU_MIN)
 					brightness--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (brightness < LED_BRIGHTNESS_RAW_MAX)
+				if (brightness < LED_BRIGHTNESS_MENU_MAX)
 					brightness++;
 				else
 					continue;
@@ -3649,10 +3663,42 @@ static const char *uiPrvScreenSaverImageBaseName(const char *path)
 	return slash && slash[1] ? slash + 1 : "SELECT IMAGE";
 }
 
+#define DISPLAY_BRIGHTNESS_RAW_MIN		SETTINGS_DISPLAY_BRIGHTNESS_MIN
+#define DISPLAY_BRIGHTNESS_RAW_MAX		SETTINGS_DISPLAY_BRIGHTNESS_MAX
+#define DISPLAY_BRIGHTNESS_MENU_MIN		1u
+#define DISPLAY_BRIGHTNESS_MENU_MAX		10u
+
+static uint_fast8_t uiPrvDisplayBrightnessToMenu(uint_fast8_t brightness)
+{
+	if (brightness <= DISPLAY_BRIGHTNESS_RAW_MIN)
+		return DISPLAY_BRIGHTNESS_MENU_MIN;
+	if (brightness >= DISPLAY_BRIGHTNESS_RAW_MAX)
+		return DISPLAY_BRIGHTNESS_MENU_MAX;
+
+	return DISPLAY_BRIGHTNESS_MENU_MIN + (((brightness - DISPLAY_BRIGHTNESS_RAW_MIN) *
+		(DISPLAY_BRIGHTNESS_MENU_MAX - DISPLAY_BRIGHTNESS_MENU_MIN) +
+		(DISPLAY_BRIGHTNESS_RAW_MAX - DISPLAY_BRIGHTNESS_RAW_MIN) / 2u) /
+		(DISPLAY_BRIGHTNESS_RAW_MAX - DISPLAY_BRIGHTNESS_RAW_MIN));
+}
+
+static uint8_t uiPrvDisplayBrightnessFromMenu(uint_fast8_t brightness)
+{
+	if (brightness <= DISPLAY_BRIGHTNESS_MENU_MIN)
+		return DISPLAY_BRIGHTNESS_RAW_MIN;
+	if (brightness >= DISPLAY_BRIGHTNESS_MENU_MAX)
+		return DISPLAY_BRIGHTNESS_RAW_MAX;
+
+	return DISPLAY_BRIGHTNESS_RAW_MIN + (((brightness - DISPLAY_BRIGHTNESS_MENU_MIN) *
+		(DISPLAY_BRIGHTNESS_RAW_MAX - DISPLAY_BRIGHTNESS_RAW_MIN) +
+		(DISPLAY_BRIGHTNESS_MENU_MAX - DISPLAY_BRIGHTNESS_MENU_MIN) / 2u) /
+		(DISPLAY_BRIGHTNESS_MENU_MAX - DISPLAY_BRIGHTNESS_MENU_MIN));
+}
+
 static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, struct Settings *settings)
 {
 	int_fast8_t selOption = 0;
 
+	settings->brightness = uiPrvDisplayBrightnessFromMenu(uiPrvDisplayBrightnessToMenu(settings->brightness));
 	uiPowerSetActiveBrightness(settings->brightness);
 	uiPowerApplySettings(settings);
 	uiPrvSetHeaderTitle("Display");
@@ -3689,7 +3735,8 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 		cnv->foreColor = 11;
 		uiPuts(cnv, uiPrvMenuRow(cnv, brightnessOption), 10, "BRIGHTNESS:", -1);
 		cnv->foreColor = 15;
-		uiPrintf(cnv, uiPrvMenuRow(cnv, brightnessOption), 111, "%u         ", settings->brightness);
+		uiPrintf(cnv, uiPrvMenuRow(cnv, brightnessOption), 111, "%u         ",
+			uiPrvDisplayBrightnessToMenu(settings->brightness));
 	#endif
 
 		powerSaveOption = numOptions++;
@@ -3738,20 +3785,22 @@ static void __attribute__((noinline)) uiPrvScreenSettings(struct Canvas *cnv, st
 		}
 
 		if (selOption == brightnessOption) {
+			uint_fast8_t brightness = uiPrvDisplayBrightnessToMenu(settings->brightness);
 
 			if (button == KEY_BIT_LEFT) {
-				if (settings->brightness)
-					settings->brightness--;
+				if (brightness > DISPLAY_BRIGHTNESS_MENU_MIN)
+					brightness--;
 				else
 					continue;
 			}
 			else if (button == KEY_BIT_RIGHT || button == KEY_BIT_A) {
-				if (settings->brightness != 0x1f)
-					settings->brightness++;
+				if (brightness < DISPLAY_BRIGHTNESS_MENU_MAX)
+					brightness++;
 				else
 					continue;
 			}
 
+			settings->brightness = uiPrvDisplayBrightnessFromMenu(brightness);
 			dispSetBrightness(settings->brightness);
 			uiPowerSetActiveBrightness(settings->brightness);
 		}

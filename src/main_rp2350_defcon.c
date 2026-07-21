@@ -488,8 +488,8 @@ void uiPowerApplySettings(const struct Settings *settings)
 
 void uiPowerSetActiveBrightness(uint_fast8_t brightness)
 {
-	if (brightness > 0x1fu)
-		brightness = 0x1fu;
+	if (brightness > SETTINGS_DISPLAY_BRIGHTNESS_MAX)
+		brightness = SETTINGS_DISPLAY_BRIGHTNESS_MAX;
 	mUiActiveBrightness = brightness;
 	mUiLastActivity = getTime();
 	mUiDimInitialized = true;

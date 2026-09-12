@@ -87,18 +87,21 @@ jobs:
         with:
           name: DC32-cfw-uf2
           path: ${{ runner.temp }}/DC32-cfw/DC32-cfw.uf2
+          retention-days: 7
 
       - name: Upload DC32-cfw SD assets artifact
         uses: actions/upload-artifact@v4
         with:
           name: DC32-cfw-sd-assets
           path: ${{ runner.temp }}/DC32-cfw/SD-assets.zip
+          retention-days: 7
 
       - name: Upload DC32-cfw SD apps artifact
         uses: actions/upload-artifact@v4
         with:
           name: DC32-cfw-sd-apps
           path: ${{ runner.temp }}/DC32-cfw/SD-apps.zip
+          retention-days: 7
 
       - name: Attach DC32-cfw files to release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')

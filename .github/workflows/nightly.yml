@@ -1,21 +1,20 @@
-name: Nightly Release
+name: Manual Prerelease
 
+# This workflow intentionally has no schedule. Run it manually when a prerelease
+# build is useful; unchanged source should consume zero recurring Actions usage.
 on:
-  schedule:
-    # 00:15 Pacific Standard Time / 01:15 Pacific Daylight Time.
-    - cron: "15 8 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: nightly-release
+  group: manual-prerelease
   cancel-in-progress: false
 
 jobs:
   nightly:
-    name: Build and publish Nightly
+    name: Build and publish prerelease
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +26,7 @@ jobs:
           fetch-tags: true
           submodules: true
 
-      - name: Check for commits since last Nightly
+      - name: Check for commits since last prerelease
         id: changes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -46,29 +45,29 @@ jobs:
 
             if [[ "$nightly_sha" == "$main_sha" ]]; then
               if gh release view nightly >/dev/null 2>&1; then
-                echo "No commits since the last Nightly release."
+                echo "No commits since the last prerelease."
                 echo "has_changes=false" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
 
-              echo "Nightly tag already points at main, but the Nightly release is missing; this run will recreate it."
+              echo "Prerelease tag already points at main, but the release is missing; this run will recreate it."
               changelog=""
-              compare_note="No commits since the Nightly tag \`$nightly_sha\`; recreating the missing Nightly release."
+              compare_note="No commits since the prerelease tag \`$nightly_sha\`; recreating the missing release."
             else
               changelog="$(git log --pretty=format:'- %h %s' "$nightly_sha..$main_sha")"
-              compare_note="Changes since previous Nightly tag \`$nightly_sha\`."
+              compare_note="Changes since previous prerelease tag \`$nightly_sha\`."
             fi
           else
-            echo "No existing Nightly tag found; this run will create it."
+            echo "No existing prerelease tag found; this run will create it."
             echo "previous_sha=" >> "$GITHUB_OUTPUT"
             changelog="$(git log --pretty=format:'- %h %s' -n 20 "$main_sha")"
-            compare_note="No previous Nightly tag was found; showing the latest 20 commits."
+            compare_note="No previous prerelease tag was found; showing the latest 20 commits."
           fi
 
           pacific_build_time="$(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
 
           {
-            echo "# Nightly"
+            echo "# Prerelease"
             echo
             echo "- Commit: \`$main_sha\`"
             echo "- Built: $pacific_build_time"
@@ -142,7 +141,7 @@ jobs:
 
           if previous_body="$(gh release view nightly --json body --jq .body 2>/dev/null)" &&
              grep -Fq "SD assets sources: $sd_assets_sources_hash" <<< "$previous_body"; then
-            echo "SD-assets.zip sources are unchanged from the current Nightly release."
+            echo "SD-assets.zip sources are unchanged from the current prerelease."
             echo "should_upload=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -185,7 +184,9 @@ jobs:
             echo "- SD apps sources: $sd_apps_sources_hash"
           } >> "$RUNNER_TEMP/nightly-release-notes.md"
 
-      - name: Move nightly tag
+      # Preserve the existing `nightly` tag/release identifier for compatibility
+      # with old links, even though it is now updated only by manual runs.
+      - name: Move prerelease tag
         if: steps.changes.outputs.has_changes == 'true'
         shell: bash
         run: |
@@ -194,7 +195,7 @@ jobs:
           git tag -f nightly "${{ steps.changes.outputs.main_sha }}"
           git push origin refs/tags/nightly --force
 
-      - name: Create or update Nightly release
+      - name: Create or update prerelease
         if: steps.changes.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,13 +205,13 @@ jobs:
 
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly \
-              --title "Nightly" \
+              --title "Prerelease" \
               --notes-file "$RUNNER_TEMP/nightly-release-notes.md" \
               --prerelease \
               --target "${{ steps.changes.outputs.main_sha }}"
           else
             gh release create nightly \
-              --title "Nightly" \
+              --title "Prerelease" \
               --notes-file "$RUNNER_TEMP/nightly-release-notes.md" \
               --prerelease \
               --latest=false \
@@ -233,7 +234,7 @@ jobs:
           gh release delete-asset nightly SD-assets.sources.json --yes >/dev/null 2>&1 || true
           gh release delete-asset nightly SD-apps.sources.json --yes >/dev/null 2>&1 || true
 
-      - name: Upload Nightly SD-assets.zip
+      - name: Upload prerelease SD-assets.zip
         if: steps.changes.outputs.has_changes == 'true' && steps.sd-assets-sources.outputs.should_upload == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
